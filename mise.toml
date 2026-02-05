@@ -1,0 +1,55 @@
+[tools]
+go = "1.25"
+
+[tasks.build]
+description = "Build git-flux binary"
+run = """
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+go build -ldflags "-X github.com/madhermit/flux/cmd.Version=${VERSION}" -o git-flux .
+"""
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."
+
+[tasks.fmt]
+description = "Format code"
+run = "go fmt ./..."
+
+[tasks.lint]
+description = "Run linter"
+run = "go vet ./..."
+
+[tasks.check]
+description = "Run all checks (fmt, lint, test)"
+depends = ["fmt", "lint", "test"]
+
+[tasks.install]
+description = "Install git-flux to ~/.local/bin"
+run = """
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+go build -ldflags "-X github.com/madhermit/flux/cmd.Version=${VERSION}" -o ~/.local/bin/git-flux .
+"""
+
+[tasks.release]
+description = "Build release binaries for all platforms"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+VERSION=${1:-dev}
+LDFLAGS="-s -w -X github.com/madhermit/flux/cmd.Version=${VERSION}"
+mkdir -p dist
+
+echo "Building version: $VERSION"
+
+# Linux
+GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/git-flux-linux-amd64 .
+GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/git-flux-linux-arm64 .
+
+# macOS
+GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/git-flux-darwin-amd64 .
+GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/git-flux-darwin-arm64 .
+
+echo "Built binaries in dist/"
+ls -la dist/
+"""
