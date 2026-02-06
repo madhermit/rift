@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/madhermit/flux/internal/diff"
 	"github.com/madhermit/flux/internal/git"
 	"github.com/sahilm/fuzzy"
@@ -70,7 +71,7 @@ func (m Model) layout() layout {
 	if l.listWidth > 60 {
 		l.listWidth = 60
 	}
-	l.diffWidth = m.width - l.listWidth - 4 // borders
+	l.diffWidth = m.width - l.listWidth - 2 // diff pane border
 	if l.diffWidth < 10 {
 		l.diffWidth = 10
 	}
@@ -97,9 +98,6 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 }
 
 func (m Model) Init() tea.Cmd {
-	if len(m.filteredFiles) > 0 {
-		return m.loadDiff(m.filteredFiles[0].Path)
-	}
 	return nil
 }
 
@@ -110,10 +108,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		wasReady := m.ready
 		m.ready = true
 		l := m.layout()
 		m.viewport.Width = l.diffWidth
 		m.viewport.Height = l.contentHeight - 2
+		m.setDiffContent()
+		if !wasReady && len(m.filteredFiles) > 0 {
+			return m, m.loadDiff(m.filteredFiles[0].Path)
+		}
 		return m, nil
 	case diffLoadedMsg:
 		if msg.err != nil {
@@ -123,7 +126,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffErr = nil
 			m.diffContent = msg.content
 		}
-		m.viewport.SetContent(m.diffContent)
+		m.setDiffContent()
 		m.viewport.GotoTop()
 		return m, nil
 	}
@@ -267,6 +270,7 @@ func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) loadDiff(file string) tea.Cmd {
+	width := m.viewport.Width
 	return func() tea.Msg {
 		color := os.Getenv("NO_COLOR") == ""
 		content, err := m.engine.Diff(context.Background(), m.repo.Root(), file, diff.DiffOpts{
@@ -274,9 +278,19 @@ func (m Model) loadDiff(file string) tea.Cmd {
 			Base:   m.base,
 			Target: m.target,
 			Color:  color,
+			Width:  width,
 		})
 		return diffLoadedMsg{content: content, err: err}
 	}
+}
+
+func (m *Model) setDiffContent() {
+	w := m.viewport.Width
+	if w <= 0 || m.diffContent == "" {
+		m.viewport.SetContent(m.diffContent)
+		return
+	}
+	m.viewport.SetContent(ansi.Hardwrap(m.diffContent, w, true))
 }
 
 func (m Model) View() string {

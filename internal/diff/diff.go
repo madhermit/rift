@@ -11,11 +11,12 @@ type DiffOpts struct {
 	Base   string
 	Target string
 	Color  bool
+	Width  int
 }
 
 type Engine interface {
 	Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error)
-	DiffCommit(ctx context.Context, repoRoot, base, target string, color bool) (string, error)
+	DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int) (string, error)
 	Name() string
 }
 
