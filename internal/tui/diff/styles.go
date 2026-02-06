@@ -17,14 +17,12 @@ var (
 			PaddingLeft(1)
 
 	fileItemStyle = lipgloss.NewStyle().
+			Foreground(subtle).
 			PaddingLeft(2)
 
 	selectedFileStyle = lipgloss.NewStyle().
-				Bold(true).
 				Foreground(white).
-				Background(accent).
-				PaddingLeft(1).
-				PaddingRight(1)
+				PaddingLeft(2)
 
 	filterPromptStyle = lipgloss.NewStyle().
 				Foreground(accent).

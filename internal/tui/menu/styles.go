@@ -14,18 +14,16 @@ var (
 			PaddingBottom(1)
 
 	itemStyle = lipgloss.NewStyle().
+			Foreground(subtle).
 			PaddingLeft(4)
 
 	selectedItemStyle = lipgloss.NewStyle().
-				Bold(true).
 				Foreground(white).
-				Background(accent).
-				PaddingLeft(2).
-				PaddingRight(2)
+				PaddingLeft(4)
 
 	descriptionStyle = lipgloss.NewStyle().
 				Foreground(subtle).
-				PaddingLeft(4)
+				PaddingLeft(6)
 
 	filterPromptStyle = lipgloss.NewStyle().
 				Foreground(accent).

@@ -311,11 +311,11 @@ func (m Model) View() string {
 	}
 	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerHeight; i++ {
 		f := m.filteredFiles[i]
-		line := truncate(f.Path, l.listWidth-6)
+		line := statusIcon(f.Status) + " " + truncate(f.Path, l.listWidth-6)
 		if i == m.selectedIdx {
-			fileList.WriteString(selectedFileStyle.Width(l.listWidth - 4).Render(line))
+			fileList.WriteString(selectedFileStyle.Render(line))
 		} else {
-			fileList.WriteString(fileItemStyle.Render(statusIcon(f.Status) + " " + line))
+			fileList.WriteString(fileItemStyle.Render(line))
 		}
 		fileList.WriteString("\n")
 	}

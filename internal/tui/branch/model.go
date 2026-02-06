@@ -6,15 +6,17 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/madhermit/flux/internal/git"
 	"github.com/sahilm/fuzzy"
 )
+
+const scrollMargin = 3
 
 type Model struct {
 	branches    []git.BranchInfo
 	filtered    []git.BranchInfo
 	selectedIdx int
+	scrollOff   int
 	checkout    string
 
 	filter    textinput.Model
@@ -131,6 +133,7 @@ func (m *Model) applyFilter() {
 	if query == "" {
 		m.filtered = m.branches
 		m.selectedIdx = 0
+		m.scrollOff = 0
 		return
 	}
 
@@ -146,6 +149,7 @@ func (m *Model) applyFilter() {
 	}
 	m.filtered = filtered
 	m.selectedIdx = 0
+	m.scrollOff = 0
 }
 
 func (m *Model) moveSelection(delta int) {
@@ -159,6 +163,35 @@ func (m *Model) moveSelection(delta int) {
 	if m.selectedIdx >= len(m.filtered) {
 		m.selectedIdx = len(m.filtered) - 1
 	}
+	m.clampScroll()
+}
+
+func (m *Model) clampScroll() {
+	visible := m.listHeight()
+
+	// Keep selection within scroll margin of the viewport edges
+	if m.selectedIdx < m.scrollOff+scrollMargin {
+		m.scrollOff = m.selectedIdx - scrollMargin
+	}
+	if m.selectedIdx >= m.scrollOff+visible-scrollMargin {
+		m.scrollOff = m.selectedIdx - visible + scrollMargin + 1
+	}
+
+	// Hard clamps
+	if m.scrollOff < 0 {
+		m.scrollOff = 0
+	}
+	if max := len(m.filtered) - visible; max > 0 && m.scrollOff > max {
+		m.scrollOff = max
+	}
+}
+
+func (m Model) listHeight() int {
+	h := m.height - 4 // title (with padding) + status + blank line
+	if h < 1 {
+		h = 1
+	}
+	return h
 }
 
 func (m Model) View() string {
@@ -167,25 +200,43 @@ func (m Model) View() string {
 	}
 
 	title := titleStyle.Render("git-flux branch")
+	visible := m.listHeight()
 
 	var list strings.Builder
-	contentHeight := m.height - 3 // title + status + padding
-	scrollOffset := 0
-	if m.selectedIdx >= contentHeight {
-		scrollOffset = m.selectedIdx - contentHeight + 1
-	}
-	for i := scrollOffset; i < len(m.filtered) && i-scrollOffset < contentHeight; i++ {
+	for i := m.scrollOff; i < len(m.filtered) && i-m.scrollOff < visible; i++ {
 		b := m.filtered[i]
-		name, info := formatBranchParts(b)
+		selected := i == m.selectedIdx
 
-		if i == m.selectedIdx {
-			list.WriteString(branchItemStyle.Render(selectedBranchStyle.Render(name) + "  " + info))
-		} else if b.Current {
-			list.WriteString(branchItemStyle.Render(currentBranchStyle.Render(name) + "  " + info))
-		} else {
-			list.WriteString(branchItemStyle.Render(name + "  " + info))
+		cursor := "  "
+		if selected {
+			cursor = "> "
 		}
-		list.WriteString("\n")
+
+		prefix := "  "
+		if b.Current {
+			prefix = "* "
+		}
+
+		line := cursor + prefix + b.Name
+		if b.Remote != "" {
+			line += "  [" + b.Remote + "]"
+		}
+		line += "  " + b.Date + "  " + b.Message
+
+		style := normalLineStyle
+		switch {
+		case selected:
+			style = selectedLineStyle
+		case b.Current:
+			style = currentLineStyle
+		}
+		list.WriteString(style.Width(m.width).Render(line) + "\n")
+	}
+
+	// Scroll indicator
+	var scrollHint string
+	if len(m.filtered) > visible {
+		scrollHint = subtleStyle.Render(fmt.Sprintf(" (%d more)", len(m.filtered)-visible))
 	}
 
 	var status string
@@ -194,27 +245,12 @@ func (m Model) View() string {
 		status = m.filter.View()
 	case len(m.filtered) > 0:
 		status = statusBarStyle.Render(fmt.Sprintf(
-			"[%d/%d]  q:quit  /:filter  j/k:nav  enter:checkout",
-			m.selectedIdx+1, len(m.filtered),
+			"[%d/%d]%s  q:quit  /:filter  j/k:nav  enter:checkout",
+			m.selectedIdx+1, len(m.filtered), scrollHint,
 		))
 	default:
 		status = statusBarStyle.Render("No branches found")
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, list.String(), status)
-}
-
-func formatBranchParts(b git.BranchInfo) (name, info string) {
-	prefix := "  "
-	if b.Current {
-		prefix = "* "
-	}
-	name = prefix + b.Name
-
-	info = subtleStyle.Render(b.Date) + "  " + b.Message
-	if b.Remote != "" {
-		info = subtleStyle.Render("["+b.Remote+"]") + " " + info
-	}
-
-	return name, info
+	return title + "\n" + list.String() + status
 }

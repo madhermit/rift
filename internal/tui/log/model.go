@@ -311,12 +311,9 @@ func (m Model) View() string {
 		c := m.filteredCommits[i]
 		line := truncate(c.Hash+" "+c.Message, l.listWidth-6)
 		if i == m.selectedIdx {
-			commitList.WriteString(selectedCommitStyle.Width(l.listWidth - 4).Render(line))
+			commitList.WriteString(selectedCommitStyle.Render(line))
 		} else {
-			msg := truncate(c.Message, l.listWidth-6-len(c.Hash)-1)
-			commitList.WriteString(commitItemStyle.Render(
-				hashStyle.Render(c.Hash) + " " + msg,
-			))
+			commitList.WriteString(commitItemStyle.Render(line))
 		}
 		commitList.WriteString("\n")
 	}
