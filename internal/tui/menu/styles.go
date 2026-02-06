@@ -1,0 +1,37 @@
+package menu
+
+import "github.com/charmbracelet/lipgloss"
+
+var (
+	subtle = lipgloss.Color("241")
+	accent = lipgloss.Color("39")
+	white  = lipgloss.Color("15")
+
+	titleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(accent).
+			PaddingLeft(1).
+			PaddingBottom(1)
+
+	itemStyle = lipgloss.NewStyle().
+			PaddingLeft(4)
+
+	selectedItemStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(white).
+				Background(accent).
+				PaddingLeft(2).
+				PaddingRight(2)
+
+	descriptionStyle = lipgloss.NewStyle().
+				Foreground(subtle).
+				PaddingLeft(4)
+
+	filterPromptStyle = lipgloss.NewStyle().
+				Foreground(accent).
+				Bold(true)
+
+	statusBarStyle = lipgloss.NewStyle().
+			Foreground(subtle).
+			PaddingLeft(1)
+)
