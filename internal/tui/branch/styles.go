@@ -11,7 +11,8 @@ var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(accent).
-			PaddingLeft(1)
+			PaddingLeft(1).
+			PaddingBottom(1)
 
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(subtle).
@@ -21,17 +22,14 @@ var (
 				Foreground(accent).
 				Bold(true)
 
-	branchItemStyle = lipgloss.NewStyle().
-			PaddingLeft(2)
+	normalLineStyle = lipgloss.NewStyle().
+			Foreground(subtle)
 
-	selectedBranchStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(white).
-				Background(accent)
+	selectedLineStyle = lipgloss.NewStyle().
+				Foreground(white)
 
-	currentBranchStyle = lipgloss.NewStyle().
-				Foreground(green).
-				Bold(true)
+	currentLineStyle = lipgloss.NewStyle().
+				Foreground(green)
 
 	subtleStyle = lipgloss.NewStyle().
 			Foreground(subtle)
