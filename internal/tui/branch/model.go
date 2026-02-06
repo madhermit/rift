@@ -1,4 +1,4 @@
-package menu
+package branchui
 
 import (
 	"fmt"
@@ -7,24 +7,15 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/madhermit/flux/internal/git"
 	"github.com/sahilm/fuzzy"
 )
 
-type Command struct {
-	Name        string
-	Description string
-	Available   bool
-}
-
-type SelectedMsg struct {
-	Command string
-}
-
 type Model struct {
-	commands    []Command
-	filtered    []Command
+	branches    []git.BranchInfo
+	filtered    []git.BranchInfo
 	selectedIdx int
-	selected    string
+	checkout    string
 
 	filter    textinput.Model
 	filtering bool
@@ -34,28 +25,19 @@ type Model struct {
 	ready  bool
 }
 
-func (m Model) Selected() string {
-	return m.selected
+func (m Model) Checkout() string {
+	return m.checkout
 }
 
-func New() Model {
+func New(branches []git.BranchInfo) Model {
 	filter := textinput.New()
 	filter.Prompt = "/ "
 	filter.PromptStyle = filterPromptStyle
 	filter.CharLimit = 256
 
-	commands := []Command{
-		{Name: "diff", Description: "Browse changes with syntax-aware diffs", Available: true},
-		{Name: "log", Description: "Interactive commit log browser", Available: true},
-		{Name: "branch", Description: "Fuzzy branch switcher", Available: true},
-		{Name: "stash", Description: "Stash manager with preview", Available: false},
-		{Name: "stage", Description: "Interactive hunk staging", Available: false},
-		{Name: "worktree", Description: "Worktree manager", Available: false},
-	}
-
 	return Model{
-		commands: commands,
-		filtered: commands,
+		branches: branches,
+		filtered: branches,
 		filter:   filter,
 	}
 }
@@ -73,9 +55,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.ready = true
 		return m, nil
-	case SelectedMsg:
-		m.selected = msg.Command
-		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -102,12 +81,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
 		if len(m.filtered) > 0 {
-			cmd := m.filtered[m.selectedIdx]
-			if !cmd.Available {
-				return m, nil
-			}
-			return m, func() tea.Msg {
-				return SelectedMsg{Command: cmd.Name}
+			b := m.filtered[m.selectedIdx]
+			if !b.Current {
+				m.checkout = b.Name
+				return m, tea.Quit
 			}
 		}
 	case tea.KeyUp:
@@ -152,20 +129,20 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) applyFilter() {
 	query := m.filter.Value()
 	if query == "" {
-		m.filtered = m.commands
+		m.filtered = m.branches
 		m.selectedIdx = 0
 		return
 	}
 
-	names := make([]string, len(m.commands))
-	for i, c := range m.commands {
-		names[i] = c.Name
+	names := make([]string, len(m.branches))
+	for i, b := range m.branches {
+		names[i] = b.Name
 	}
 
 	matches := fuzzy.Find(query, names)
-	filtered := make([]Command, len(matches))
+	filtered := make([]git.BranchInfo, len(matches))
 	for i, match := range matches {
-		filtered[i] = m.commands[match.Index]
+		filtered[i] = m.branches[match.Index]
 	}
 	m.filtered = filtered
 	m.selectedIdx = 0
@@ -189,31 +166,55 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	title := titleStyle.Render("git-flux")
+	title := titleStyle.Render("git-flux branch")
 
-	var items strings.Builder
-	for i, cmd := range m.filtered {
-		name := cmd.Name
-		if !cmd.Available {
-			name += " (coming soon)"
-		}
+	var list strings.Builder
+	contentHeight := m.height - 3 // title + status + padding
+	scrollOffset := 0
+	if m.selectedIdx >= contentHeight {
+		scrollOffset = m.selectedIdx - contentHeight + 1
+	}
+	for i := scrollOffset; i < len(m.filtered) && i-scrollOffset < contentHeight; i++ {
+		b := m.filtered[i]
+		name, info := formatBranchParts(b)
 
 		if i == m.selectedIdx {
-			items.WriteString(selectedItemStyle.Render(name))
+			list.WriteString(branchItemStyle.Render(selectedBranchStyle.Render(name) + "  " + info))
+		} else if b.Current {
+			list.WriteString(branchItemStyle.Render(currentBranchStyle.Render(name) + "  " + info))
 		} else {
-			items.WriteString(itemStyle.Render(name))
+			list.WriteString(branchItemStyle.Render(name + "  " + info))
 		}
-		items.WriteString("\n")
-		items.WriteString(descriptionStyle.Render(cmd.Description))
-		items.WriteString("\n\n")
+		list.WriteString("\n")
 	}
 
 	var status string
-	if m.filtering {
+	switch {
+	case m.filtering:
 		status = m.filter.View()
-	} else {
-		status = statusBarStyle.Render(fmt.Sprintf("[%d/%d]  q:quit  /:filter  j/k:nav  enter:select", m.selectedIdx+1, len(m.filtered)))
+	case len(m.filtered) > 0:
+		status = statusBarStyle.Render(fmt.Sprintf(
+			"[%d/%d]  q:quit  /:filter  j/k:nav  enter:checkout",
+			m.selectedIdx+1, len(m.filtered),
+		))
+	default:
+		status = statusBarStyle.Render("No branches found")
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, items.String(), status)
+	return lipgloss.JoinVertical(lipgloss.Left, title, list.String(), status)
+}
+
+func formatBranchParts(b git.BranchInfo) (name, info string) {
+	prefix := "  "
+	if b.Current {
+		prefix = "* "
+	}
+	name = prefix + b.Name
+
+	info = subtleStyle.Render(b.Date) + "  " + b.Message
+	if b.Remote != "" {
+		info = subtleStyle.Render("["+b.Remote+"]") + " " + info
+	}
+
+	return name, info
 }
