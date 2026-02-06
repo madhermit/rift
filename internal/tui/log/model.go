@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/madhermit/flux/internal/diff"
 	"github.com/madhermit/flux/internal/git"
 	"github.com/sahilm/fuzzy"
@@ -66,7 +67,8 @@ func (m Model) layout() layout {
 	if l.listWidth > 80 {
 		l.listWidth = 80
 	}
-	l.diffWidth = m.width - l.listWidth - 4
+	// -2 for the diff pane border (list border handled in Width(listWidth-2))
+	l.diffWidth = m.width - l.listWidth - 2
 	if l.diffWidth < 10 {
 		l.diffWidth = 10
 	}
@@ -90,9 +92,6 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	if len(m.filteredCommits) > 0 {
-		return m.loadCommitDiff(m.filteredCommits[0])
-	}
 	return nil
 }
 
@@ -103,10 +102,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		wasReady := m.ready
 		m.ready = true
 		l := m.layout()
 		m.viewport.Width = l.diffWidth
 		m.viewport.Height = l.contentHeight - 2
+		m.setDiffContent()
+		if !wasReady && len(m.filteredCommits) > 0 {
+			return m, m.loadCommitDiff(m.filteredCommits[0])
+		}
 		return m, nil
 	case diffLoadedMsg:
 		if msg.err != nil {
@@ -116,7 +120,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffErr = nil
 			m.diffContent = msg.content
 		}
-		m.viewport.SetContent(m.diffContent)
+		m.setDiffContent()
 		m.viewport.GotoTop()
 		return m, nil
 	}
@@ -260,21 +264,31 @@ func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) loadCommitDiff(commit git.CommitInfo) tea.Cmd {
+	width := m.viewport.Width
 	return func() tea.Msg {
 		color := os.Getenv("NO_COLOR") == ""
 		content, err := m.engine.DiffCommit(
 			context.Background(), m.repo.Root(),
-			commit.Hash+"~1", commit.Hash, color,
+			commit.Hash+"~1", commit.Hash, color, width,
 		)
 		if err != nil {
 			// First commit has no parent — diff against empty tree
 			content, err = m.engine.DiffCommit(
 				context.Background(), m.repo.Root(),
-				"4b825dc642cb6eb9a060e54bf899d69f82cf7207", commit.Hash, color,
+				"4b825dc642cb6eb9a060e54bf899d69f82cf7207", commit.Hash, color, width,
 			)
 		}
 		return diffLoadedMsg{content: content, err: err}
 	}
+}
+
+func (m *Model) setDiffContent() {
+	w := m.viewport.Width
+	if w <= 0 || m.diffContent == "" {
+		m.viewport.SetContent(m.diffContent)
+		return
+	}
+	m.viewport.SetContent(ansi.Hardwrap(m.diffContent, w, true))
 }
 
 func (m Model) View() string {
