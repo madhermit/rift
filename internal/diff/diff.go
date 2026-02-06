@@ -15,6 +15,7 @@ type DiffOpts struct {
 
 type Engine interface {
 	Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error)
+	DiffCommit(ctx context.Context, repoRoot, base, target string, color bool) (string, error)
 	Name() string
 }
 
@@ -24,6 +25,17 @@ func NewEngine() Engine {
 		return &difftasticEngine{path: path}
 	}
 	return &fallbackEngine{}
+}
+
+func buildCommitDiffArgs(base, target string, color bool) []string {
+	args := []string{"diff"}
+	if color {
+		args = append(args, "--color=always")
+	} else {
+		args = append(args, "--color=never")
+	}
+	args = append(args, base+".."+target)
+	return args
 }
 
 func buildGitDiffArgs(opts DiffOpts, file string) []string {

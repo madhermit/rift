@@ -46,7 +46,7 @@ func New() Model {
 
 	commands := []Command{
 		{Name: "diff", Description: "Browse changes with syntax-aware diffs", Available: true},
-		{Name: "log", Description: "Interactive commit log browser", Available: false},
+		{Name: "log", Description: "Interactive commit log browser", Available: true},
 		{Name: "branch", Description: "Fuzzy branch switcher", Available: false},
 		{Name: "stash", Description: "Stash manager with preview", Available: false},
 		{Name: "stage", Description: "Interactive hunk staging", Available: false},
