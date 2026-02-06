@@ -15,3 +15,10 @@ func (f *fallbackEngine) Diff(ctx context.Context, repoRoot, file string, opts D
 	cmd.Dir = repoRoot
 	return runGitDiff(cmd, "git diff")
 }
+
+func (f *fallbackEngine) DiffCommit(ctx context.Context, repoRoot, base, target string, color bool) (string, error) {
+	args := buildCommitDiffArgs(base, target, color)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoRoot
+	return runGitDiff(cmd, "git diff commit")
+}
