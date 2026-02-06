@@ -24,6 +24,10 @@ func (d *difftasticEngine) Diff(ctx context.Context, repoRoot, file string, opts
 	args := buildGitDiffArgs(opts, file)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot
-	cmd.Env = append(cmd.Environ(), "GIT_EXTERNAL_DIFF="+d.path)
+	colorEnv := "DFT_COLOR=never"
+	if opts.Color {
+		colorEnv = "DFT_COLOR=always"
+	}
+	cmd.Env = append(cmd.Environ(), "GIT_EXTERNAL_DIFF="+d.path, colorEnv)
 	return runGitDiff(cmd, "difftastic diff")
 }
