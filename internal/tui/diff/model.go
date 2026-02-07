@@ -91,11 +91,15 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	filter.PromptStyle = filterPromptStyle
 	filter.CharLimit = 256
 
+	allFiles := make([]git.ChangedFile, 0, len(files)+1)
+	allFiles = append(allFiles, git.ChangedFile{Path: "", Status: "All"})
+	allFiles = append(allFiles, files...)
+
 	return Model{
 		repo:          repo,
 		engine:        engine,
-		files:         files,
-		filteredFiles: files,
+		files:         allFiles,
+		filteredFiles: allFiles,
 		viewport:      viewport.New(0, 0),
 		filter:        filter,
 		staged:        staged,
@@ -205,7 +209,7 @@ func (m Model) applyLayout() (tea.Model, tea.Cmd) {
 	m.viewport.Height = l.contentHeight - 2
 	m.setDiffContent()
 	if len(m.filteredFiles) > 0 {
-		return m, m.loadDiff(m.filteredFiles[m.selectedIdx].Path)
+		return m, m.loadSelectedDiff()
 	}
 	return m, nil
 }
@@ -235,7 +239,7 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if len(m.filteredFiles) > 0 {
 		m.selectedIdx = 0
-		return m, tea.Batch(cmd, m.loadDiff(m.filteredFiles[0].Path))
+		return m, tea.Batch(cmd, m.loadSelectedDiff())
 	}
 	m.selectedIdx = 0
 	m.diffContent = ""
@@ -276,7 +280,11 @@ func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 	if m.selectedIdx >= len(m.filteredFiles) {
 		m.selectedIdx = len(m.filteredFiles) - 1
 	}
-	return m, m.loadDiff(m.filteredFiles[m.selectedIdx].Path)
+	return m, m.loadSelectedDiff()
+}
+
+func (m Model) loadSelectedDiff() tea.Cmd {
+	return m.loadDiff(m.filteredFiles[m.selectedIdx].Path)
 }
 
 func (m Model) loadDiff(file string) tea.Cmd {
@@ -322,12 +330,17 @@ func (m Model) View() string {
 	collapsed := m.activePane == diffPane
 	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerHeight; i++ {
 		f := m.filteredFiles[i]
-		icon := tui.FileIcon(f.Path)
 		var line string
-		if collapsed {
-			line = statusIcon(f.Status) + " " + icon
+		if f.Path == "" {
+			if collapsed {
+				line = "*"
+			} else {
+				line = fmt.Sprintf("* All (%d files)", len(m.files)-1)
+			}
+		} else if collapsed {
+			line = statusIcon(f.Status) + " " + tui.FileIcon(f.Path)
 		} else {
-			line = statusIcon(f.Status) + " " + icon + " " + truncate(f.Path, l.listWidth-8)
+			line = statusIcon(f.Status) + " " + tui.FileIcon(f.Path) + " " + truncate(f.Path, l.listWidth-8)
 		}
 		if i == m.selectedIdx {
 			fileList.WriteString(selectedFileStyle.Render(line))
@@ -357,9 +370,13 @@ func (m Model) View() string {
 	case m.diffErr != nil:
 		status = statusBarStyle.Render(fmt.Sprintf("Error: %v", m.diffErr))
 	case len(m.filteredFiles) > 0:
-		file := m.filteredFiles[m.selectedIdx].Path
+		f := m.filteredFiles[m.selectedIdx]
+		label := f.Path
+		if label == "" {
+			label = "All"
+		}
 		pct := m.viewport.ScrollPercent() * 100
-		status = statusBarStyle.Render(fmt.Sprintf("%s  %.0f%%  [%d/%d files]  q:quit /filter tab:switch j/k:nav", file, pct, m.selectedIdx+1, len(m.filteredFiles)))
+		status = statusBarStyle.Render(fmt.Sprintf("%s  %.0f%%  [%d/%d]  q:quit /filter tab:switch j/k:nav", label, pct, m.selectedIdx+1, len(m.filteredFiles)))
 	default:
 		status = statusBarStyle.Render("No changes found")
 	}
