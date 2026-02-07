@@ -263,8 +263,18 @@ func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 	return m, m.loadCommitDiff(m.filteredCommits[m.selectedIdx])
 }
 
+func commitHeader(commit git.CommitInfo) string {
+	msg := "    " + commit.Message
+	if commit.Body != "" {
+		msg += "\n\n    " + strings.ReplaceAll(commit.Body, "\n", "\n    ")
+	}
+	return fmt.Sprintf("commit %s\nAuthor: %s\nDate:   %s\n\n%s\n\n─────────────────────\n\n",
+		commit.Hash, commit.Author, commit.Date, msg)
+}
+
 func (m Model) loadCommitDiff(commit git.CommitInfo) tea.Cmd {
 	width := m.viewport.Width
+	header := commitHeader(commit)
 	return func() tea.Msg {
 		color := os.Getenv("NO_COLOR") == ""
 		content, err := m.engine.DiffCommit(
@@ -278,7 +288,10 @@ func (m Model) loadCommitDiff(commit git.CommitInfo) tea.Cmd {
 				"4b825dc642cb6eb9a060e54bf899d69f82cf7207", commit.Hash, color, width,
 			)
 		}
-		return diffLoadedMsg{content: content, err: err}
+		if err != nil {
+			return diffLoadedMsg{content: content, err: err}
+		}
+		return diffLoadedMsg{content: header + content}
 	}
 }
 

@@ -15,6 +15,7 @@ type CommitInfo struct {
 	Author  string `json:"author"`
 	Date    string `json:"date"`
 	Message string `json:"message"`
+	Body    string `json:"body,omitempty"`
 }
 
 func (r *Repo) Log(ref string, maxCount int) ([]CommitInfo, error) {
@@ -89,11 +90,14 @@ func (r *Repo) LogAll(maxCount int) ([]CommitInfo, error) {
 }
 
 func commitToInfo(c *object.Commit) CommitInfo {
+	msg := strings.TrimRight(c.Message, "\n")
+	subject, body, _ := strings.Cut(msg, "\n")
 	return CommitInfo{
 		Hash:    c.Hash.String()[:7],
 		Author:  c.Author.Name,
 		Date:    c.Author.When.Format("2006-01-02 15:04"),
-		Message: firstLine(c.Message),
+		Message: subject,
+		Body:    strings.TrimSpace(body),
 	}
 }
 
