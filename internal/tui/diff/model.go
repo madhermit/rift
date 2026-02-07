@@ -289,21 +289,42 @@ func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) loadSelectedDiff() tea.Cmd {
-	return m.loadDiff(m.filteredFiles[m.selectedIdx].Path)
+	selected := m.filteredFiles[m.selectedIdx]
+	if selected.Path == "" {
+		var files []string
+		for _, f := range m.filteredFiles {
+			if f.Path != "" {
+				files = append(files, f.Path)
+			}
+		}
+		return m.loadDiff(files...)
+	}
+	return m.loadDiff(selected.Path)
 }
 
-func (m Model) loadDiff(file string) tea.Cmd {
+func (m Model) loadDiff(files ...string) tea.Cmd {
 	width := m.viewport.Width
 	return func() tea.Msg {
 		color := os.Getenv("NO_COLOR") == ""
-		content, err := m.engine.Diff(context.Background(), m.repo.Root(), file, diff.DiffOpts{
+		opts := diff.DiffOpts{
 			Staged: m.staged,
 			Base:   m.base,
 			Target: m.target,
 			Color:  color,
 			Width:  width,
-		})
-		return diffLoadedMsg{content: content, err: err}
+		}
+		var result strings.Builder
+		for _, file := range files {
+			content, err := m.engine.Diff(context.Background(), m.repo.Root(), file, opts)
+			if err != nil {
+				continue
+			}
+			if content != "" {
+				result.WriteString(content)
+				result.WriteString("\n")
+			}
+		}
+		return diffLoadedMsg{content: result.String()}
 	}
 }
 
@@ -339,7 +360,7 @@ func (m Model) View() string {
 			if collapsed {
 				line = "*"
 			} else {
-				line = fmt.Sprintf("* All (%d files)", len(m.files)-1)
+				line = fmt.Sprintf("* All (%d files)", len(m.filteredFiles)-1)
 			}
 		} else if collapsed {
 			line = statusIcon(f.Status) + " " + tui.FileIcon(f.Path)

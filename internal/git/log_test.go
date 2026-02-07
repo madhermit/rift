@@ -24,7 +24,7 @@ func TestLog(t *testing.T) {
 	}
 
 	t.Run("returns all commits in order", func(t *testing.T) {
-		commits, err := repo.Log("HEAD", 0)
+		commits, err := repo.Log("HEAD", 0, nil)
 		if err != nil {
 			t.Fatalf("Log() error = %v", err)
 		}
@@ -40,7 +40,7 @@ func TestLog(t *testing.T) {
 	})
 
 	t.Run("maxCount limits results", func(t *testing.T) {
-		commits, err := repo.Log("HEAD", 2)
+		commits, err := repo.Log("HEAD", 2, nil)
 		if err != nil {
 			t.Fatalf("Log() error = %v", err)
 		}
@@ -50,7 +50,7 @@ func TestLog(t *testing.T) {
 	})
 
 	t.Run("hash is 7 chars", func(t *testing.T) {
-		commits, err := repo.Log("HEAD", 1)
+		commits, err := repo.Log("HEAD", 1, nil)
 		if err != nil {
 			t.Fatalf("Log() error = %v", err)
 		}
@@ -74,7 +74,7 @@ func TestLog_Body(t *testing.T) {
 	}
 	testCommit(t, wt, "subject line\n\nBody paragraph one.\nBody paragraph two.")
 
-	commits, err := repo.Log("HEAD", 1)
+	commits, err := repo.Log("HEAD", 1, nil)
 	if err != nil {
 		t.Fatalf("Log() error = %v", err)
 	}
@@ -89,7 +89,7 @@ func TestLog_Body(t *testing.T) {
 func TestLog_NoBody(t *testing.T) {
 	repo := setupTestRepo(t)
 
-	commits, err := repo.Log("HEAD", 1)
+	commits, err := repo.Log("HEAD", 1, nil)
 	if err != nil {
 		t.Fatalf("Log() error = %v", err)
 	}
@@ -101,7 +101,7 @@ func TestLog_NoBody(t *testing.T) {
 func TestLog_BadRef(t *testing.T) {
 	repo := setupTestRepo(t)
 
-	_, err := repo.Log("nonexistent-ref", 0)
+	_, err := repo.Log("nonexistent-ref", 0, nil)
 	if err == nil {
 		t.Fatal("expected error for bad ref, got nil")
 	}
@@ -141,7 +141,7 @@ func TestLogAll(t *testing.T) {
 	}
 	testCommit(t, wt, "feature commit")
 
-	commits, err := repo.LogAll(0)
+	commits, err := repo.LogAll(0, nil)
 	if err != nil {
 		t.Fatalf("LogAll() error = %v", err)
 	}
@@ -161,7 +161,7 @@ func TestLogAll(t *testing.T) {
 func TestLogAll_MaxCount(t *testing.T) {
 	repo := setupTestRepo(t)
 
-	commits, err := repo.LogAll(1)
+	commits, err := repo.LogAll(1, nil)
 	if err != nil {
 		t.Fatalf("LogAll() error = %v", err)
 	}

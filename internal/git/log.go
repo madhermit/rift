@@ -18,16 +18,21 @@ type CommitInfo struct {
 	Body    string `json:"body,omitempty"`
 }
 
-func (r *Repo) Log(ref string, maxCount int) ([]CommitInfo, error) {
+func (r *Repo) Log(ref string, maxCount int, paths []string) ([]CommitInfo, error) {
 	h, err := r.repo.ResolveRevision(plumbing.Revision(ref))
 	if err != nil {
 		return nil, fmt.Errorf("resolve ref %q: %w", ref, err)
 	}
 
-	iter, err := r.repo.Log(&gogit.LogOptions{
+	opts := &gogit.LogOptions{
 		From:  *h,
 		Order: gogit.LogOrderCommitterTime,
-	})
+	}
+	if len(paths) > 0 {
+		opts.PathFilter = func(file string) bool { return matchPath(file, paths) }
+	}
+
+	iter, err := r.repo.Log(opts)
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
 	}
@@ -48,7 +53,7 @@ func (r *Repo) Log(ref string, maxCount int) ([]CommitInfo, error) {
 	return commits, nil
 }
 
-func (r *Repo) LogAll(maxCount int) ([]CommitInfo, error) {
+func (r *Repo) LogAll(maxCount int, paths []string) ([]CommitInfo, error) {
 	refs, err := r.repo.References()
 	if err != nil {
 		return nil, fmt.Errorf("list references: %w", err)
@@ -61,10 +66,14 @@ func (r *Repo) LogAll(maxCount int) ([]CommitInfo, error) {
 		if !ref.Name().IsBranch() && !ref.Name().IsRemote() {
 			return nil
 		}
-		iter, err := r.repo.Log(&gogit.LogOptions{
+		opts := &gogit.LogOptions{
 			From:  ref.Hash(),
 			Order: gogit.LogOrderCommitterTime,
-		})
+		}
+		if len(paths) > 0 {
+			opts.PathFilter = func(file string) bool { return matchPath(file, paths) }
+		}
+		iter, err := r.repo.Log(opts)
 		if err != nil {
 			return nil
 		}
@@ -89,6 +98,13 @@ func (r *Repo) LogAll(maxCount int) ([]CommitInfo, error) {
 	return commits, nil
 }
 
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 func commitToInfo(c *object.Commit) CommitInfo {
 	msg := strings.TrimRight(c.Message, "\n")
 	subject, body, _ := strings.Cut(msg, "\n")
@@ -101,9 +117,3 @@ func commitToInfo(c *object.Commit) CommitInfo {
 	}
 }
 
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
-}
