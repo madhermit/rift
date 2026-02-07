@@ -56,16 +56,22 @@ type layout struct {
 	diffWidth     int
 }
 
+const collapsedListWidth = 12 // 7-char hash + padding + border
+
 func (m Model) layout() layout {
 	l := layout{headerHeight: 3}
 	l.contentHeight = m.height - l.headerHeight
 
-	l.listWidth = m.width / 3
-	if l.listWidth < 30 {
-		l.listWidth = 30
-	}
-	if l.listWidth > 80 {
-		l.listWidth = 80
+	if m.activePane == diffPane {
+		l.listWidth = collapsedListWidth
+	} else {
+		l.listWidth = m.width / 3
+		if l.listWidth < 30 {
+			l.listWidth = 30
+		}
+		if l.listWidth > 80 {
+			l.listWidth = 80
+		}
 	}
 	// -2 for the diff pane border (list border handled in Width(listWidth-2))
 	l.diffWidth = m.width - l.listWidth - 2
@@ -102,16 +108,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		wasReady := m.ready
 		m.ready = true
-		l := m.layout()
-		m.viewport.Width = l.diffWidth
-		m.viewport.Height = l.contentHeight - 2
-		m.setDiffContent()
-		if !wasReady && len(m.filteredCommits) > 0 {
-			return m, m.loadCommitDiff(m.filteredCommits[0])
-		}
-		return m, nil
+		return m.applyLayout()
 	case diffLoadedMsg:
 		if msg.err != nil {
 			m.diffErr = msg.err
@@ -160,11 +158,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.activePane = commitPane
 		}
-		return m, nil
+		return m.applyLayout()
 	case tea.KeyEnter:
 		if m.activePane == commitPane {
 			m.activePane = diffPane
-			return m, nil
+			return m.applyLayout()
 		}
 	case tea.KeyUp:
 		return m.navigate(-1)
@@ -191,6 +189,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	return m, nil
+}
+
+func (m Model) applyLayout() (tea.Model, tea.Cmd) {
+	l := m.layout()
+	m.viewport.Width = l.diffWidth
+	m.viewport.Height = l.contentHeight - 2
+	m.setDiffContent()
+	if len(m.filteredCommits) > 0 {
+		return m, m.loadCommitDiff(m.filteredCommits[m.selectedIdx])
+	}
 	return m, nil
 }
 
@@ -315,6 +324,7 @@ func (m Model) View() string {
 
 	// Commit list with scroll
 	var commitList strings.Builder
+	collapsed := m.activePane == diffPane
 	listInnerHeight := l.contentHeight - 2
 	scrollOffset := 0
 	if m.selectedIdx >= listInnerHeight {
@@ -322,7 +332,12 @@ func (m Model) View() string {
 	}
 	for i := scrollOffset; i < len(m.filteredCommits) && i-scrollOffset < listInnerHeight; i++ {
 		c := m.filteredCommits[i]
-		line := truncate(c.Hash+" "+c.Message, l.listWidth-6)
+		var line string
+		if collapsed {
+			line = c.Hash
+		} else {
+			line = truncate(c.Hash+" "+c.Message, l.listWidth-6)
+		}
 		if i == m.selectedIdx {
 			commitList.WriteString(selectedCommitStyle.Render(line))
 		} else {
