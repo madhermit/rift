@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/madhermit/flux/internal/diff"
 	"github.com/madhermit/flux/internal/git"
+	"github.com/madhermit/flux/internal/tui"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -272,23 +273,40 @@ func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 	return m, m.loadCommitDiff(m.filteredCommits[m.selectedIdx])
 }
 
-func commitHeader(commit git.CommitInfo) string {
+func commitHeader(commit git.CommitInfo, files []git.ChangedFile) string {
 	msg := "    " + commit.Message
 	if commit.Body != "" {
 		msg += "\n\n    " + strings.ReplaceAll(commit.Body, "\n", "\n    ")
 	}
-	return fmt.Sprintf("commit %s\nAuthor: %s\nDate:   %s\n\n%s\n\n─────────────────────\n\n",
-		commit.Hash, commit.Author, commit.Date, msg)
+	var fileList string
+	if len(files) > 0 {
+		var b strings.Builder
+		b.WriteString("\n")
+		for _, f := range files {
+			fmt.Fprintf(&b, "  %s %s\n", tui.FileIcon(f.Path), f.Path)
+		}
+		fileList = b.String()
+	}
+	return fmt.Sprintf("commit %s\nAuthor: %s\nDate:   %s\n\n%s\n%s\n─────────────────────\n\n",
+		commit.Hash, commit.Author, commit.Date, msg, fileList)
 }
 
 func (m Model) loadCommitDiff(commit git.CommitInfo) tea.Cmd {
 	width := m.viewport.Width
-	header := commitHeader(commit)
 	return func() tea.Msg {
+		// Fetch changed file list for the header
+		base := commit.Hash + "~1"
+		files, err := m.repo.DiffBetweenCommits(base, commit.Hash)
+		if err != nil {
+			// First commit — diff against empty tree
+			files, _ = m.repo.DiffBetweenCommits("4b825dc642cb6eb9a060e54bf899d69f82cf7207", commit.Hash)
+		}
+		header := commitHeader(commit, files)
+
 		color := os.Getenv("NO_COLOR") == ""
 		content, err := m.engine.DiffCommit(
 			context.Background(), m.repo.Root(),
-			commit.Hash+"~1", commit.Hash, color, width,
+			base, commit.Hash, color, width,
 		)
 		if err != nil {
 			// First commit has no parent — diff against empty tree

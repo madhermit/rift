@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/madhermit/flux/internal/diff"
 	"github.com/madhermit/flux/internal/git"
+	"github.com/madhermit/flux/internal/tui"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -321,11 +322,12 @@ func (m Model) View() string {
 	collapsed := m.activePane == diffPane
 	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerHeight; i++ {
 		f := m.filteredFiles[i]
+		icon := tui.FileIcon(f.Path)
 		var line string
 		if collapsed {
-			line = statusIcon(f.Status)
+			line = statusIcon(f.Status) + " " + icon
 		} else {
-			line = statusIcon(f.Status) + " " + truncate(f.Path, l.listWidth-6)
+			line = statusIcon(f.Status) + " " + icon + " " + truncate(f.Path, l.listWidth-8)
 		}
 		if i == m.selectedIdx {
 			fileList.WriteString(selectedFileStyle.Render(line))
