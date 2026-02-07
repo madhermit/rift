@@ -53,7 +53,9 @@ func buildGitDiffArgs(opts DiffOpts, file string) []string {
 	} else if opts.Base != "" {
 		args = append(args, opts.Base)
 	}
-	args = append(args, "--", file)
+	if file != "" {
+		args = append(args, "--", file)
+	}
 	return args
 }
 

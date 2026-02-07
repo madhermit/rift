@@ -26,10 +26,62 @@ type difftasticEngine struct {
 func (d *difftasticEngine) Name() string { return "difftastic" }
 
 func (d *difftasticEngine) Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
+	if file == "" && opts.Width > 0 {
+		return d.diffAllDirect(ctx, repoRoot, opts)
+	}
 	if opts.Width <= 0 {
 		return d.diffViaGit(ctx, repoRoot, file, opts)
 	}
 	return d.diffDirect(ctx, repoRoot, file, opts)
+}
+
+func (d *difftasticEngine) diffAllDirect(ctx context.Context, repoRoot string, opts DiffOpts) (string, error) {
+	files, err := changedFileNames(ctx, repoRoot, opts)
+	if err != nil || len(files) == 0 {
+		return "", err
+	}
+
+	var result strings.Builder
+	for _, file := range files {
+		content, err := d.diffDirect(ctx, repoRoot, file, opts)
+		if err != nil {
+			continue
+		}
+		if content != "" {
+			result.WriteString(content)
+			result.WriteString("\n")
+		}
+	}
+	return result.String(), nil
+}
+
+func changedFileNames(ctx context.Context, repoRoot string, opts DiffOpts) ([]string, error) {
+	args := []string{"diff", "--name-only"}
+	if opts.Staged {
+		args = append(args, "--staged")
+	} else if opts.Base != "" && opts.Target != "" {
+		args = append(args, opts.Base, opts.Target)
+	} else if opts.Base != "" {
+		args = append(args, opts.Base)
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return splitLines(string(out)), nil
+		}
+		return nil, fmt.Errorf("git diff --name-only: %w", err)
+	}
+	return splitLines(string(out)), nil
+}
+
+func splitLines(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
 
 func (d *difftasticEngine) diffViaGit(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
