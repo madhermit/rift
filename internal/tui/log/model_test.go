@@ -4,16 +4,18 @@ import (
 	"testing"
 
 	"github.com/madhermit/flux/internal/git"
+	"github.com/madhermit/flux/internal/tui"
 )
 
 func TestCommitHeader(t *testing.T) {
 	tests := []struct {
 		name   string
 		commit git.CommitInfo
+		files  []git.ChangedFile
 		want   string
 	}{
 		{
-			name: "subject only",
+			name: "subject only no files",
 			commit: git.CommitInfo{
 				Hash: "abc1234", Author: "Alice", Date: "2026-01-15 14:30",
 				Message: "Fix the thing",
@@ -28,11 +30,26 @@ func TestCommitHeader(t *testing.T) {
 			},
 			want: "commit def5678\nAuthor: Bob\nDate:   2026-02-01 09:00\n\n    Add feature\n\n    This adds a new feature\n    that does stuff\n\n─────────────────────\n\n",
 		},
+		{
+			name: "with changed files",
+			commit: git.CommitInfo{
+				Hash: "abc1234", Author: "Alice", Date: "2026-01-15 14:30",
+				Message: "Update code",
+			},
+			files: []git.ChangedFile{
+				{Path: "main.go", Status: "Modified"},
+				{Path: "README.md", Status: "Added"},
+			},
+			want: "commit abc1234\nAuthor: Alice\nDate:   2026-01-15 14:30\n\n    Update code\n\n" +
+				"  " + tui.FileIcon("main.go") + " main.go\n" +
+				"  " + tui.FileIcon("README.md") + " README.md\n" +
+				"\n─────────────────────\n\n",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := commitHeader(tt.commit)
+			got := commitHeader(tt.commit, tt.files)
 			if got != tt.want {
 				t.Errorf("commitHeader() =\n%q\nwant\n%q", got, tt.want)
 			}
