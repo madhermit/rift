@@ -60,6 +60,44 @@ func TestLog(t *testing.T) {
 	})
 }
 
+func TestLog_Body(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	wt, err := repo.repo.Worktree()
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+
+	writeFile(t, repo.root, "file.txt", "content")
+	if _, err := wt.Add("file.txt"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	testCommit(t, wt, "subject line\n\nBody paragraph one.\nBody paragraph two.")
+
+	commits, err := repo.Log("HEAD", 1)
+	if err != nil {
+		t.Fatalf("Log() error = %v", err)
+	}
+	if commits[0].Message != "subject line" {
+		t.Errorf("Message = %q, want %q", commits[0].Message, "subject line")
+	}
+	if commits[0].Body != "Body paragraph one.\nBody paragraph two." {
+		t.Errorf("Body = %q, want %q", commits[0].Body, "Body paragraph one.\nBody paragraph two.")
+	}
+}
+
+func TestLog_NoBody(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	commits, err := repo.Log("HEAD", 1)
+	if err != nil {
+		t.Fatalf("Log() error = %v", err)
+	}
+	if commits[0].Body != "" {
+		t.Errorf("Body = %q, want empty", commits[0].Body)
+	}
+}
+
 func TestLog_BadRef(t *testing.T) {
 	repo := setupTestRepo(t)
 
