@@ -39,6 +39,7 @@ type Model struct {
 
 	diffContent string
 	diffErr     error
+	vim         tui.VimNav
 
 	staged bool
 	base   string
@@ -144,6 +145,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.activePane == diffPane && !m.filtering && m.vim.HandleKey(&m.viewport, msg) {
+		return m, nil
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
@@ -303,12 +308,11 @@ func (m Model) loadDiff(file string) tea.Cmd {
 }
 
 func (m *Model) setDiffContent() {
-	w := m.viewport.Width
-	if w <= 0 || m.diffContent == "" {
-		m.viewport.SetContent(m.diffContent)
-		return
+	content := m.diffContent
+	if w := m.viewport.Width; w > 0 && content != "" {
+		content = ansi.Hardwrap(content, w, true)
 	}
-	m.viewport.SetContent(ansi.Hardwrap(m.diffContent, w, true))
+	m.vim.SetContent(&m.viewport, content)
 }
 
 func (m Model) View() string {
@@ -376,7 +380,7 @@ func (m Model) View() string {
 			label = "All"
 		}
 		pct := m.viewport.ScrollPercent() * 100
-		status = statusBarStyle.Render(fmt.Sprintf("%s  %.0f%%  [%d/%d]  q:quit /filter tab:switch j/k:nav", label, pct, m.selectedIdx+1, len(m.filteredFiles)))
+		status = statusBarStyle.Render(fmt.Sprintf("%s  %.0f%%  [%d/%d]  q:quit /filter tab:switch j/k:nav gg/G:top/bot {/}:section", label, pct, m.selectedIdx+1, len(m.filteredFiles)))
 	default:
 		status = statusBarStyle.Render("No changes found")
 	}
