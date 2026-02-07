@@ -60,16 +60,22 @@ type layout struct {
 	diffWidth     int
 }
 
+const collapsedListWidth = 12
+
 func (m Model) layout() layout {
 	l := layout{headerHeight: 3}
 	l.contentHeight = m.height - l.headerHeight
 
-	l.listWidth = m.width / 3
-	if l.listWidth < 20 {
-		l.listWidth = 20
-	}
-	if l.listWidth > 60 {
-		l.listWidth = 60
+	if m.activePane == diffPane {
+		l.listWidth = collapsedListWidth
+	} else {
+		l.listWidth = m.width / 3
+		if l.listWidth < 20 {
+			l.listWidth = 20
+		}
+		if l.listWidth > 60 {
+			l.listWidth = 60
+		}
 	}
 	l.diffWidth = m.width - l.listWidth - 2 // diff pane border
 	if l.diffWidth < 10 {
@@ -108,16 +114,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		wasReady := m.ready
 		m.ready = true
-		l := m.layout()
-		m.viewport.Width = l.diffWidth
-		m.viewport.Height = l.contentHeight - 2
-		m.setDiffContent()
-		if !wasReady && len(m.filteredFiles) > 0 {
-			return m, m.loadDiff(m.filteredFiles[0].Path)
-		}
-		return m, nil
+		return m.applyLayout()
 	case diffLoadedMsg:
 		if msg.err != nil {
 			m.diffErr = msg.err
@@ -166,11 +164,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.activePane = filePane
 		}
-		return m, nil
+		return m.applyLayout()
 	case tea.KeyEnter:
 		if m.activePane == filePane {
 			m.activePane = diffPane
-			return m, nil
+			return m.applyLayout()
 		}
 	case tea.KeyUp:
 		return m.navigate(-1)
@@ -197,6 +195,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	return m, nil
+}
+
+func (m Model) applyLayout() (tea.Model, tea.Cmd) {
+	l := m.layout()
+	m.viewport.Width = l.diffWidth
+	m.viewport.Height = l.contentHeight - 2
+	m.setDiffContent()
+	if len(m.filteredFiles) > 0 {
+		return m, m.loadDiff(m.filteredFiles[m.selectedIdx].Path)
+	}
 	return m, nil
 }
 
@@ -309,9 +318,15 @@ func (m Model) View() string {
 	if m.selectedIdx >= listInnerHeight {
 		scrollOffset = m.selectedIdx - listInnerHeight + 1
 	}
+	collapsed := m.activePane == diffPane
 	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerHeight; i++ {
 		f := m.filteredFiles[i]
-		line := statusIcon(f.Status) + " " + truncate(f.Path, l.listWidth-6)
+		var line string
+		if collapsed {
+			line = statusIcon(f.Status)
+		} else {
+			line = statusIcon(f.Status) + " " + truncate(f.Path, l.listWidth-6)
+		}
 		if i == m.selectedIdx {
 			fileList.WriteString(selectedFileStyle.Render(line))
 		} else {
