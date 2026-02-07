@@ -15,7 +15,7 @@ import (
 )
 
 var diffCmd = &cobra.Command{
-	Use:   "diff [flags] [commit [commit]]",
+	Use:   "diff [flags] [commit [commit]] [-- path...]",
 	Short: "Browse changes with syntax-aware diffs",
 	Long:  "Show file changes with syntax-aware diffing powered by difftastic. Supports fuzzy file filtering and split-pane browsing.",
 	RunE:  runDiff,
@@ -27,10 +27,18 @@ func init() {
 	rootCmd.AddCommand(diffCmd)
 }
 
+func splitAtDash(cmd *cobra.Command, args []string) (refArgs, pathArgs []string) {
+	if i := cmd.ArgsLenAtDash(); i >= 0 {
+		return args[:i], args[i:]
+	}
+	return args, nil
+}
+
 func runDiff(cmd *cobra.Command, args []string) error {
 	mode := output.Detect(cmd)
 	staged, _ := cmd.Flags().GetBool("staged")
 	nameOnly, _ := cmd.Flags().GetBool("name-only")
+	refArgs, pathArgs := splitAtDash(cmd, args)
 
 	repo, err := git.OpenRepo()
 	if err != nil {
@@ -38,7 +46,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	engine := diff.NewEngine()
-	base, target, err := git.DiffTargets(args)
+	base, target, err := git.DiffTargets(refArgs)
 	if err != nil {
 		return err
 	}
@@ -47,6 +55,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	files = git.FilterByPaths(files, pathArgs)
 
 	if nameOnly {
 		return printFileNames(files)

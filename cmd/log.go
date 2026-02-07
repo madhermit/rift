@@ -13,7 +13,7 @@ import (
 )
 
 var logCmd = &cobra.Command{
-	Use:   "log [flags] [ref]",
+	Use:   "log [flags] [ref] [-- path...]",
 	Short: "Interactive commit log browser",
 	Long:  "Browse commit history with syntax-aware diff preview. Supports fuzzy filtering and split-pane browsing.",
 	RunE:  runLog,
@@ -29,6 +29,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	mode := output.Detect(cmd)
 	maxCount, _ := cmd.Flags().GetInt("max-count")
 	all, _ := cmd.Flags().GetBool("all")
+	refArgs, pathArgs := splitAtDash(cmd, args)
 
 	repo, err := git.OpenRepo()
 	if err != nil {
@@ -37,13 +38,13 @@ func runLog(cmd *cobra.Command, args []string) error {
 
 	var commits []git.CommitInfo
 	if all {
-		commits, err = repo.LogAll(maxCount)
+		commits, err = repo.LogAll(maxCount, pathArgs)
 	} else {
 		ref := "HEAD"
-		if len(args) > 0 {
-			ref = args[0]
+		if len(refArgs) > 0 {
+			ref = refArgs[0]
 		}
-		commits, err = repo.Log(ref, maxCount)
+		commits, err = repo.Log(ref, maxCount, pathArgs)
 	}
 	if err != nil {
 		return err

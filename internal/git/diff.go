@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -118,6 +119,28 @@ func diffActionString(c *object.Change) string {
 	default:
 		return "Modified"
 	}
+}
+
+func matchPath(file string, paths []string) bool {
+	for _, p := range paths {
+		if file == p || strings.HasPrefix(file, strings.TrimSuffix(p, "/")+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func FilterByPaths(files []ChangedFile, paths []string) []ChangedFile {
+	if len(paths) == 0 {
+		return files
+	}
+	filtered := []ChangedFile{}
+	for _, f := range files {
+		if matchPath(f.Path, paths) {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
 }
 
 func statusCodeToString(c gogit.StatusCode) string {
