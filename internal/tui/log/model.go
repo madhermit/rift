@@ -278,22 +278,105 @@ func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 	return m, m.loadCommitDiff(m.filteredCommits[m.selectedIdx])
 }
 
-func commitHeader(commit git.CommitInfo, files []git.ChangedFile) string {
-	msg := "    " + commit.Message
-	if commit.Body != "" {
-		msg += "\n\n    " + strings.ReplaceAll(commit.Body, "\n", "\n    ")
+func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, width int) string {
+	hash := commit.Hash
+	authorLabel := "Author:"
+	dateLabel := "Date:"
+
+	const indent = "    "
+	wrapWidth := width - len(indent)
+
+	subject := commit.Message
+	if wrapWidth > 0 {
+		subject = ansi.Wordwrap(subject, wrapWidth, "")
 	}
-	var fileList string
+	subject = indent + strings.ReplaceAll(subject, "\n", "\n"+indent)
+
+	body := ""
+	if commit.Body != "" {
+		b := commit.Body
+		if wrapWidth > 0 && longestLine(b) > wrapWidth {
+			b = reflowParagraphs(b)
+			b = ansi.Wordwrap(b, wrapWidth, "")
+		}
+		body = "\n\n" + indent + strings.ReplaceAll(b, "\n", "\n"+indent)
+	}
+	sep := "─────────────────────"
+
+	if color {
+		hash = hashStyle.Render(hash)
+		authorLabel = headerLabelStyle.Render(authorLabel)
+		dateLabel = headerLabelStyle.Render(dateLabel)
+		subject = "\x1b[1m" + subject + "\x1b[22m"
+		sep = headerLabelStyle.Render(sep)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "commit %s\n%s %s\n%s   %s\n\n%s%s\n", hash, authorLabel, commit.Author, dateLabel, commit.Date, subject, body)
+
 	if len(files) > 0 {
-		var b strings.Builder
 		b.WriteString("\n")
 		for _, f := range files {
-			fmt.Fprintf(&b, "  %s %s\n", tui.FileIcon(f.Path), f.Path)
+			icon := statusIcon(f.Status)
+			if color {
+				icon = statusStyle(f.Status).Render(icon)
+			}
+			fmt.Fprintf(&b, "  %s %s %s\n", icon, tui.FileIcon(f.Path), f.Path)
 		}
-		fileList = b.String()
 	}
-	return fmt.Sprintf("commit %s\nAuthor: %s\nDate:   %s\n\n%s\n%s\n─────────────────────\n\n",
-		commit.Hash, commit.Author, commit.Date, msg, fileList)
+
+	fmt.Fprintf(&b, "\n%s\n\n", sep)
+	return b.String()
+}
+
+func statusIcon(status string) string {
+	switch status {
+	case "Modified":
+		return "M"
+	case "Added":
+		return "A"
+	case "Deleted":
+		return "D"
+	case "Renamed":
+		return "R"
+	default:
+		return " "
+	}
+}
+
+func statusStyle(status string) lipgloss.Style {
+	switch status {
+	case "Added":
+		return statusAddedStyle
+	case "Deleted":
+		return statusDeletedStyle
+	case "Modified":
+		return statusModifiedStyle
+	case "Renamed":
+		return statusRenamedStyle
+	default:
+		return lipgloss.NewStyle()
+	}
+}
+
+func longestLine(s string) int {
+	max := 0
+	for _, line := range strings.Split(s, "\n") {
+		if len(line) > max {
+			max = len(line)
+		}
+	}
+	return max
+}
+
+// reflowParagraphs removes git's hard line wraps (single \n) while
+// preserving intentional paragraph breaks (double \n\n).
+func reflowParagraphs(s string) string {
+	paragraphs := strings.Split(s, "\n\n")
+	for i, p := range paragraphs {
+		paragraphs[i] = strings.ReplaceAll(strings.TrimSpace(p), "\n", " ")
+	}
+	return strings.Join(paragraphs, "\n\n")
 }
 
 func (m Model) loadCommitDiff(commit git.CommitInfo) tea.Cmd {
@@ -306,9 +389,8 @@ func (m Model) loadCommitDiff(commit git.CommitInfo) tea.Cmd {
 			// First commit — diff against empty tree
 			files, _ = m.repo.DiffBetweenCommits("4b825dc642cb6eb9a060e54bf899d69f82cf7207", commit.Hash)
 		}
-		header := commitHeader(commit, files)
-
 		color := os.Getenv("NO_COLOR") == ""
+		header := commitHeader(commit, files, color, width)
 		content, err := m.engine.DiffCommit(
 			context.Background(), m.repo.Root(),
 			base, commit.Hash, color, width,

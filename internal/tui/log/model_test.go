@@ -41,15 +41,15 @@ func TestCommitHeader(t *testing.T) {
 				{Path: "README.md", Status: "Added"},
 			},
 			want: "commit abc1234\nAuthor: Alice\nDate:   2026-01-15 14:30\n\n    Update code\n\n" +
-				"  " + tui.FileIcon("main.go") + " main.go\n" +
-				"  " + tui.FileIcon("README.md") + " README.md\n" +
+				"  M " + tui.FileIcon("main.go") + " main.go\n" +
+				"  A " + tui.FileIcon("README.md") + " README.md\n" +
 				"\n─────────────────────\n\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := commitHeader(tt.commit, tt.files)
+			got := commitHeader(tt.commit, tt.files, false, 0)
 			if got != tt.want {
 				t.Errorf("commitHeader() =\n%q\nwant\n%q", got, tt.want)
 			}
