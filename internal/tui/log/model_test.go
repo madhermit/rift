@@ -3,8 +3,8 @@ package logui
 import (
 	"testing"
 
-	"github.com/madhermit/flux/internal/git"
-	"github.com/madhermit/flux/internal/tui"
+	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/tui"
 )
 
 func TestCommitHeader(t *testing.T) {

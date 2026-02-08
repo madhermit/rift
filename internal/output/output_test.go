@@ -13,8 +13,8 @@ func TestWriteJSON(t *testing.T) {
 	}{
 		{
 			name: "struct",
-			val:  struct{ Name string }{Name: "flux"},
-			want: "{\n  \"Name\": \"flux\"\n}\n",
+			val:  struct{ Name string }{Name: "rift"},
+			want: "{\n  \"Name\": \"rift\"\n}\n",
 		},
 		{
 			name: "slice with items",

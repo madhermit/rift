@@ -4,15 +4,15 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/madhermit/flux/internal/output"
-	"github.com/madhermit/flux/internal/tui/menu"
+	"github.com/madhermit/rift/internal/output"
+	"github.com/madhermit/rift/internal/tui/menu"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "git-flux",
+	Use:           "rift",
 	Short:         "Syntax-aware, worktree-native, composable fuzzy git tool",
-	Long:          "git-flux is a syntax-aware, worktree-native, composable fuzzy git tool.",
+	Long:          "rift is a syntax-aware, worktree-native, composable fuzzy git tool.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/madhermit/flux/cmd"
+	"github.com/madhermit/rift/cmd"
 )
 
 func main() {

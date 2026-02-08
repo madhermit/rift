@@ -1,4 +1,4 @@
-module github.com/madhermit/flux
+module github.com/madhermit/rift
 
 go 1.25.6
 

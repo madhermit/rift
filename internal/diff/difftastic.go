@@ -45,7 +45,7 @@ func (d *difftasticEngine) diffViaGit(ctx context.Context, repoRoot, file string
 }
 
 func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "flux-diff-*")
+	tmpDir, err := os.MkdirTemp("", "rift-diff-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
@@ -87,7 +87,7 @@ func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, targe
 		return "", nil
 	}
 
-	tmpDir, err := os.MkdirTemp("", "flux-diff-*")
+	tmpDir, err := os.MkdirTemp("", "rift-diff-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}

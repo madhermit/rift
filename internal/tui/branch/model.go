@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/madhermit/flux/internal/git"
+	"github.com/madhermit/rift/internal/git"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -199,7 +199,7 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	title := titleStyle.Render("git-flux branch")
+	title := titleStyle.Render("rift branch")
 	visible := m.listHeight()
 
 	var list strings.Builder
