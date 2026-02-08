@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -41,9 +42,10 @@ type Model struct {
 	diffErr     error
 	vim         tui.VimNav
 
-	staged bool
-	base   string
-	target string
+	staged     bool
+	base       string
+	target     string
+	commitDiff bool
 
 	width  int
 	height int
@@ -53,6 +55,11 @@ type Model struct {
 type diffLoadedMsg struct {
 	content string
 	err     error
+}
+
+type filesLoadedMsg struct {
+	files []git.ChangedFile
+	err   error
 }
 
 type layout struct {
@@ -86,15 +93,19 @@ func (m Model) layout() layout {
 	return l
 }
 
+func prependAllEntry(files []git.ChangedFile) []git.ChangedFile {
+	all := make([]git.ChangedFile, 0, len(files)+1)
+	all = append(all, git.ChangedFile{Path: "", Status: "All"})
+	return append(all, files...)
+}
+
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
 	filter := textinput.New()
 	filter.Prompt = "/ "
 	filter.PromptStyle = filterPromptStyle
 	filter.CharLimit = 256
 
-	allFiles := make([]git.ChangedFile, 0, len(files)+1)
-	allFiles = append(allFiles, git.ChangedFile{Path: "", Status: "All"})
-	allFiles = append(allFiles, files...)
+	allFiles := prependAllEntry(files)
 
 	return Model{
 		repo:          repo,
@@ -106,6 +117,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		staged:        staged,
 		base:          base,
 		target:        target,
+		commitDiff:    target != "",
 	}
 }
 
@@ -132,6 +144,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setDiffContent()
 		m.viewport.GotoTop()
+		return m, nil
+	case filesLoadedMsg:
+		if msg.err != nil {
+			m.diffErr = msg.err
+			return m, nil
+		}
+		m.files = prependAllEntry(msg.files)
+		m.applyFilter()
+		m.diffContent = ""
+		m.diffErr = nil
+		m.setDiffContent()
+		if len(m.filteredFiles) > 0 {
+			return m, m.loadSelectedDiff()
+		}
 		return m, nil
 	}
 
@@ -196,6 +222,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.navigate(1)
 		case "k":
 			return m.navigate(-1)
+		case "s":
+			if !m.commitDiff {
+				return m.toggleStaged()
+			}
 		}
 	}
 
@@ -229,6 +259,22 @@ func (m Model) navigate(delta int) (tea.Model, tea.Cmd) {
 		m.viewport.ScrollUp(1)
 	}
 	return m, nil
+}
+
+func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
+	m.staged = !m.staged
+	repo := m.repo
+	staged := m.staged
+	return m, func() tea.Msg {
+		files, err := repo.ChangedFiles(staged)
+		if err != nil {
+			return filesLoadedMsg{err: err}
+		}
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].Path < files[j].Path
+		})
+		return filesLoadedMsg{files: files}
+	}
 }
 
 func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -343,7 +389,15 @@ func (m Model) View() string {
 
 	l := m.layout()
 
-	title := titleStyle.Render(fmt.Sprintf("rift diff  [%s]", m.engine.Name()))
+	titleText := fmt.Sprintf("rift diff  [%s]", m.engine.Name())
+	if !m.commitDiff {
+		label := "unstaged"
+		if m.staged {
+			label = "staged"
+		}
+		titleText += "  " + label
+	}
+	title := titleStyle.Render(titleText)
 
 	// File list with scroll
 	var fileList strings.Builder
@@ -401,7 +455,11 @@ func (m Model) View() string {
 			label = "All"
 		}
 		pct := m.viewport.ScrollPercent() * 100
-		status = statusBarStyle.Render(fmt.Sprintf("%s  %.0f%%  [%d/%d]  q:quit /filter tab:switch j/k:nav gg/G:top/bot {/}:section", label, pct, m.selectedIdx+1, len(m.filteredFiles)))
+		keys := "q:quit /filter tab:switch j/k:nav gg/G:top/bot {/}:section"
+		if !m.commitDiff {
+			keys += " s:staged/unstaged"
+		}
+		status = statusBarStyle.Render(fmt.Sprintf("%s  %.0f%%  [%d/%d]  %s", label, pct, m.selectedIdx+1, len(m.filteredFiles), keys))
 	default:
 		status = statusBarStyle.Render("No changes found")
 	}
