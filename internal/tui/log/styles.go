@@ -38,4 +38,13 @@ var (
 	activePaneStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(accent)
+
+	// Commit header styles
+	headerLabelStyle = lipgloss.NewStyle().Foreground(subtle)
+
+	// File status colors for header
+	statusAddedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	statusDeletedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	statusModifiedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	statusRenamedStyle  = lipgloss.NewStyle().Foreground(accent)
 )
