@@ -1,18 +1,18 @@
-# CLAUDE.md — git-flux
+# CLAUDE.md — rift
 
 ## Project Overview
 
-git-flux is a syntax-aware, worktree-native, composable fuzzy git tool. Single Go binary, invoked as `git flux` (binary name: `git-flux`). See `git-flux-design.md` for full design doc.
+rift is a syntax-aware, worktree-native, composable fuzzy git tool. Single Go binary. See `git-flux-design.md` for full design doc.
 
 ## Build & Dev Commands
 
 ```bash
-mise run build       # build binary → ./git-flux
+mise run build       # build binary → ./rift
 mise run test        # go test ./...
 mise run fmt         # go fmt ./...
 mise run lint        # go vet ./...
 mise run check       # fmt + lint + test
-mise run install     # install to ~/.local/bin/git-flux
+mise run install     # install to ~/.local/bin/rift
 ```
 
 ## Tech Stack
@@ -23,7 +23,7 @@ mise run install     # install to ~/.local/bin/git-flux
 - **Git writes:** shelled git commands
 - **Structural diff:** difftastic (external binary, shelled out)
 - **Syntax-aware merge:** mergiraf (external binary, shelled out)
-- **Config:** TOML (`~/.config/git-flux/config.toml`, per-repo `.git-flux.toml`)
+- **Config:** TOML (`~/.config/rift/config.toml`, per-repo `.rift.toml`)
 - **Task runner:** mise
 
 ## Project Structure
@@ -66,14 +66,10 @@ main.go        # entrypoint
 
 ## External Tool Management
 
-- difftastic (`difft`) and mergiraf are auto-downloaded to `~/.local/share/git-flux/bin/` on first run
+- difftastic (`difft`) and mergiraf are auto-downloaded to `~/.local/share/rift/bin/` on first run
 - System `$PATH` versions are preferred if present and version-compatible
 - Fallback to built-in line diff if difftastic is unavailable
 - Never block on a failed download
-
-## Binary Name
-
-The binary MUST be named `git-flux` (with hyphen). This is how git discovers it as `git flux` subcommand. The Go module and repo can use `flux` or `git-flux` but the compiled binary name is always `git-flux`.
 
 ## Common Pitfalls
 

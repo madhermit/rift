@@ -189,7 +189,7 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	title := titleStyle.Render("git-flux")
+	title := titleStyle.Render("rift")
 
 	var items strings.Builder
 	for i, cmd := range m.filtered {

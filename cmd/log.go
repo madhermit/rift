@@ -5,10 +5,10 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/madhermit/flux/internal/diff"
-	"github.com/madhermit/flux/internal/git"
-	"github.com/madhermit/flux/internal/output"
-	logui "github.com/madhermit/flux/internal/tui/log"
+	"github.com/madhermit/rift/internal/diff"
+	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/output"
+	logui "github.com/madhermit/rift/internal/tui/log"
 	"github.com/spf13/cobra"
 )
 

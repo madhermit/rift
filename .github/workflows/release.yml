@@ -25,15 +25,15 @@ jobs:
         run: |
           mkdir -p dist
           VERSION=${GITHUB_REF#refs/tags/}
-          LDFLAGS="-s -w -X github.com/madhermit/flux/cmd.Version=${VERSION}"
+          LDFLAGS="-s -w -X github.com/madhermit/rift/cmd.Version=${VERSION}"
 
           # Linux
-          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/git-flux-linux-amd64 .
-          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/git-flux-linux-arm64 .
+          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/rift-linux-amd64 .
+          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/rift-linux-arm64 .
 
           # macOS
-          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/git-flux-darwin-amd64 .
-          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/git-flux-darwin-arm64 .
+          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-arm64 .
 
       - name: Create release
         uses: softprops/action-gh-release@v2

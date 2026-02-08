@@ -5,9 +5,9 @@ import (
 	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/madhermit/flux/internal/git"
-	"github.com/madhermit/flux/internal/output"
-	branchui "github.com/madhermit/flux/internal/tui/branch"
+	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/output"
+	branchui "github.com/madhermit/rift/internal/tui/branch"
 	"github.com/spf13/cobra"
 )
 

@@ -11,9 +11,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/madhermit/flux/internal/diff"
-	"github.com/madhermit/flux/internal/git"
-	"github.com/madhermit/flux/internal/tui"
+	"github.com/madhermit/rift/internal/diff"
+	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/tui"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -424,7 +424,7 @@ func (m Model) View() string {
 
 	l := m.layout()
 
-	title := titleStyle.Render(fmt.Sprintf("git-flux log  [%s]", m.engine.Name()))
+	title := titleStyle.Render(fmt.Sprintf("rift log  [%s]", m.engine.Name()))
 
 	// Commit list with scroll
 	var commitList strings.Builder

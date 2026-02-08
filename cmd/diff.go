@@ -7,10 +7,10 @@ import (
 	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/madhermit/flux/internal/diff"
-	"github.com/madhermit/flux/internal/git"
-	"github.com/madhermit/flux/internal/output"
-	diffui "github.com/madhermit/flux/internal/tui/diff"
+	"github.com/madhermit/rift/internal/diff"
+	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/output"
+	diffui "github.com/madhermit/rift/internal/tui/diff"
 	"github.com/spf13/cobra"
 )
 
