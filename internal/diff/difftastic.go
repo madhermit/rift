@@ -144,6 +144,42 @@ func (d *difftasticEngine) diffFiles(ctx context.Context, oldPath, newPath strin
 	return stdout.String(), nil
 }
 
+// DiffHunks renders each hunk individually through difftastic by applying each
+// hunk to the full base file. This gives tree-sitter the full file context for
+// accurate syntax-aware diffs. Falls back to raw lines if difft fails.
+func (d *difftasticEngine) DiffHunks(ctx context.Context, hunks []Hunk, filename, baseContent string, color bool, width int) []string {
+	ext := filepath.Ext(filename)
+	results := make([]string, len(hunks))
+	for i, h := range hunks {
+		newContent := ApplyHunk(baseContent, h)
+		rendered, err := d.diffContent(ctx, baseContent, newContent, ext, color, width)
+		if err != nil || strings.TrimSpace(rendered) == "" {
+			results[i] = h.Header + "\n" + strings.Join(h.Lines, "\n")
+		} else {
+			results[i] = rendered
+		}
+	}
+	return results
+}
+
+func (d *difftasticEngine) diffContent(ctx context.Context, old, new, ext string, color bool, width int) (string, error) {
+	tmpDir, err := os.MkdirTemp("", "rift-hunk-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldPath := filepath.Join(tmpDir, "old"+ext)
+	newPath := filepath.Join(tmpDir, "new"+ext)
+	if err := os.WriteFile(oldPath, []byte(old), 0600); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(newPath, []byte(new), 0600); err != nil {
+		return "", err
+	}
+	return d.diffFiles(ctx, oldPath, newPath, color, width)
+}
+
 func showOrNull(ctx context.Context, repoRoot, ref, file, destPath string) string {
 	if err := gitShow(ctx, repoRoot, ref, file, destPath); err != nil {
 		return "/dev/null"

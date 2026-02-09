@@ -3,6 +3,7 @@ package diff
 import (
 	"context"
 	"os/exec"
+	"strings"
 )
 
 type fallbackEngine struct{}
@@ -21,4 +22,12 @@ func (f *fallbackEngine) DiffCommit(ctx context.Context, repoRoot, base, target 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot
 	return runGitDiff(cmd, "git diff commit")
+}
+
+func (f *fallbackEngine) DiffHunks(_ context.Context, hunks []Hunk, _, _ string, _ bool, _ int) []string {
+	results := make([]string, len(hunks))
+	for i, h := range hunks {
+		results[i] = h.Header + "\n" + strings.Join(h.Lines, "\n")
+	}
+	return results
 }
