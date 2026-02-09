@@ -17,6 +17,7 @@ type DiffOpts struct {
 type Engine interface {
 	Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error)
 	DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int) (string, error)
+	DiffHunks(ctx context.Context, hunks []Hunk, filename, baseContent string, color bool, width int) []string
 	Name() string
 }
 

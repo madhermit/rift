@@ -49,7 +49,7 @@ func New() Model {
 		{Name: "log", Description: "Interactive commit log browser", Available: true},
 		{Name: "branch", Description: "Fuzzy branch switcher", Available: true},
 		{Name: "stash", Description: "Stash manager with preview", Available: true},
-		{Name: "stage", Description: "Interactive hunk staging", Available: false},
+		{Name: "stage", Description: "Interactive hunk staging", Available: true},
 		{Name: "worktree", Description: "Worktree manager", Available: false},
 	}
 
