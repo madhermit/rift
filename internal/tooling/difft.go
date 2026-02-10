@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 var difftAssets = map[string]string{
@@ -53,19 +54,22 @@ func downloadDifft(dest string) (string, error) {
 
 	url := "https://github.com/Wilfred/difftastic/releases/latest/download/" + asset
 
-	fmt.Fprintln(os.Stderr, "Installing difftastic...")
-
-	resp, err := http.Get(url)
+	stop := spinner(os.Stderr, "Installing difftastic")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
+		stop()
 		return "", fmt.Errorf("download difftastic: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		stop()
 		return "", fmt.Errorf("download difftastic: HTTP %d", resp.StatusCode)
 	}
 
 	bin, err := extractDifft(resp.Body)
+	stop()
 	if err != nil {
 		return "", fmt.Errorf("extract difftastic: %w", err)
 	}
@@ -79,6 +83,27 @@ func downloadDifft(dest string) (string, error) {
 	}
 
 	return dest, nil
+}
+
+func spinner(w io.Writer, msg string) func() {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		i := 0
+		for {
+			select {
+			case <-done:
+				fmt.Fprintf(w, "\r\033[K")
+				return
+			case <-ticker.C:
+				fmt.Fprintf(w, "\r%s %s", frames[i%len(frames)], msg)
+				i++
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 func extractDifft(r io.Reader) ([]byte, error) {
