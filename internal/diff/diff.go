@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+
+	"github.com/madhermit/rift/internal/tooling"
 )
 
 type DiffOpts struct {
@@ -22,7 +24,7 @@ type Engine interface {
 }
 
 func NewEngine() Engine {
-	path, err := FindDifft()
+	path, err := tooling.FindOrInstallDifft()
 	if err == nil && path != "" {
 		return &difftasticEngine{path: path}
 	}

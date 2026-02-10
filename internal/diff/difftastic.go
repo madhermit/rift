@@ -11,14 +11,6 @@ import (
 	"strings"
 )
 
-func FindDifft() (string, error) {
-	path, err := exec.LookPath("difft")
-	if err != nil {
-		return "", fmt.Errorf("difft not found: %w", err)
-	}
-	return path, nil
-}
-
 type difftasticEngine struct {
 	path string
 }
