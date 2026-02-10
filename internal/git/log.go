@@ -116,4 +116,3 @@ func commitToInfo(c *object.Commit) CommitInfo {
 		Body:    strings.TrimSpace(body),
 	}
 }
-

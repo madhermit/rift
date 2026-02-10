@@ -106,7 +106,6 @@ func TestBuildCommitDiffArgs(t *testing.T) {
 	}
 }
 
-
 func TestNewEngine(t *testing.T) {
 	engine := NewEngine()
 	name := engine.Name()

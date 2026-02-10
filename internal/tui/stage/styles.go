@@ -50,11 +50,11 @@ var (
 			Bold(true)
 
 	hunkSepDimStyle = lipgloss.NewStyle().
-				Foreground(subtle)
+			Foreground(subtle)
 
 	sidebarUnstaged = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("5")).
-				Render("▎") + " "
+			Foreground(lipgloss.Color("5")).
+			Render("▎") + " "
 
 	sidebarStaged = lipgloss.NewStyle().
 			Foreground(green).
