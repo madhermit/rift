@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
 	gogit "github.com/go-git/go-git/v6"
@@ -15,21 +16,31 @@ type ChangedFile struct {
 }
 
 func (r *Repo) ChangedFiles(staged bool) ([]ChangedFile, error) {
+	if r.linkedWorktree {
+		return r.changedFilesShell(staged)
+	}
+	files, err := r.changedFilesGoGit(staged)
+	if err != nil {
+		return r.changedFilesShell(staged)
+	}
+	return files, nil
+}
+
+func (r *Repo) changedFilesGoGit(staged bool) ([]ChangedFile, error) {
 	wt, err := r.repo.Worktree()
 	if err != nil {
-		return nil, fmt.Errorf("get worktree: %w", err)
+		return nil, err
 	}
 
 	status, err := wt.Status()
 	if err != nil {
-		return nil, fmt.Errorf("get status: %w", err)
+		return nil, err
 	}
 
 	var files []ChangedFile
 	for path, s := range status {
 		var code string
 		if staged {
-			// Only include files with real staging changes (not untracked)
 			if s.Staging == '?' || s.Staging == ' ' || s.Staging == 0 {
 				continue
 			}
@@ -44,6 +55,58 @@ func (r *Repo) ChangedFiles(staged bool) ([]ChangedFile, error) {
 	}
 
 	return files, nil
+}
+
+// changedFilesShell falls back to git diff when go-git can't compute
+// status correctly (e.g. in linked worktree layouts).
+func (r *Repo) changedFilesShell(staged bool) ([]ChangedFile, error) {
+	args := []string{"diff"}
+	if staged {
+		args = append(args, "--staged")
+	}
+	args = append(args, "--name-status")
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff: %w", err)
+	}
+	return parseNameStatus(string(out)), nil
+}
+
+func parseNameStatus(out string) []ChangedFile {
+	var files []ChangedFile
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		files = append(files, ChangedFile{
+			Path:   parts[1],
+			Status: nameStatusCode(parts[0]),
+		})
+	}
+	return files
+}
+
+func nameStatusCode(code string) string {
+	switch {
+	case strings.HasPrefix(code, "M"):
+		return "Modified"
+	case strings.HasPrefix(code, "A"):
+		return "Added"
+	case strings.HasPrefix(code, "D"):
+		return "Deleted"
+	case strings.HasPrefix(code, "R"):
+		return "Renamed"
+	case strings.HasPrefix(code, "C"):
+		return "Copied"
+	default:
+		return code
+	}
 }
 
 func DiffTargets(args []string) (base, target string, err error) {
