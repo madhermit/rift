@@ -3,7 +3,7 @@ package git
 import (
 	"fmt"
 
-	gogit "github.com/go-git/go-git/v5"
+	gogit "github.com/go-git/go-git/v6"
 )
 
 type Repo struct {
