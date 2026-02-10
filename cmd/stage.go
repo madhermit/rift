@@ -57,4 +57,3 @@ func runStage(cmd *cobra.Command, args []string) error {
 		return err
 	}
 }
-
