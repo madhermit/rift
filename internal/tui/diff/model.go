@@ -102,20 +102,13 @@ func prependAllEntry(files []git.ChangedFile) []git.ChangedFile {
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
 	allFiles := prependAllEntry(files)
 
-	filter := textinput.New()
-	filter.Prompt = "/ "
-	filter.CharLimit = 256
-	styles := filter.Styles()
-	styles.Focused.Prompt = filterPromptStyle
-	filter.SetStyles(styles)
-
 	return Model{
 		repo:          repo,
 		engine:        engine,
 		files:         allFiles,
 		filteredFiles: allFiles,
 		viewport:      viewport.New(),
-		filter:        filter,
+		filter:        tui.NewFilterInput(),
 		staged:        staged,
 		base:          base,
 		target:        target,

@@ -106,20 +106,13 @@ func (m Model) layout() layout {
 }
 
 func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
-	filter := textinput.New()
-	filter.Prompt = "/ "
-	filter.CharLimit = 256
-	styles := filter.Styles()
-	styles.Focused.Prompt = filterPromptStyle
-	filter.SetStyles(styles)
-
 	return Model{
 		repo:          repo,
 		engine:        engine,
 		files:         files,
 		filteredFiles: files,
 		viewport:      viewport.New(),
-		filter:        filter,
+		filter:        tui.NewFilterInput(),
 	}
 }
 
@@ -199,7 +192,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.activePane == diffPane && !m.filtering {
 		switch msg.String() {
-		case "{", "}", "n", "p":
+		case "{", "}":
 			// handled below as hunk nav
 		default:
 			if m.vim.HandleKey(&m.viewport, msg) {

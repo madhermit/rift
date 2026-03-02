@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/tui"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -32,17 +33,10 @@ func (m Model) Checkout() string {
 }
 
 func New(branches []git.BranchInfo) Model {
-	filter := textinput.New()
-	filter.Prompt = "/ "
-	filter.CharLimit = 256
-	styles := filter.Styles()
-	styles.Focused.Prompt = filterPromptStyle
-	filter.SetStyles(styles)
-
 	return Model{
 		branches: branches,
 		filtered: branches,
-		filter:   filter,
+		filter:   tui.NewFilterInput(),
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/madhermit/rift/internal/tui"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -48,17 +49,10 @@ func New() Model {
 		{Name: "worktree", Description: "Worktree manager", Available: false},
 	}
 
-	filter := textinput.New()
-	filter.Prompt = "/ "
-	filter.CharLimit = 256
-	styles := filter.Styles()
-	styles.Focused.Prompt = filterPromptStyle
-	filter.SetStyles(styles)
-
 	return Model{
 		commands: commands,
 		filtered: commands,
-		filter:   filter,
+		filter:   tui.NewFilterInput(),
 	}
 }
 

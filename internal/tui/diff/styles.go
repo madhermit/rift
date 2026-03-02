@@ -31,8 +31,4 @@ var (
 	activePaneStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(accent)
-
-	filterPromptStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
 )

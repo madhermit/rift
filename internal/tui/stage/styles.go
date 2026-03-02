@@ -57,8 +57,4 @@ var (
 			Render("▎") + " "
 
 	sidebarInactive = "  "
-
-	filterPromptStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
 )

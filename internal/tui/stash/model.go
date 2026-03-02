@@ -94,20 +94,13 @@ func (m Model) layout() layout {
 }
 
 func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
-	filter := textinput.New()
-	filter.Prompt = "/ "
-	filter.CharLimit = 256
-	styles := filter.Styles()
-	styles.Focused.Prompt = filterPromptStyle
-	filter.SetStyles(styles)
-
 	return Model{
 		repo:            repo,
 		engine:          engine,
 		stashes:         stashes,
 		filteredStashes: stashes,
 		viewport:        viewport.New(),
-		filter:          filter,
+		filter:          tui.NewFilterInput(),
 	}
 }
 

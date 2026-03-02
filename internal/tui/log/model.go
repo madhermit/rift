@@ -84,20 +84,13 @@ func (m Model) layout() layout {
 }
 
 func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
-	filter := textinput.New()
-	filter.Prompt = "/ "
-	filter.CharLimit = 256
-	styles := filter.Styles()
-	styles.Focused.Prompt = filterPromptStyle
-	filter.SetStyles(styles)
-
 	return Model{
 		repo:            repo,
 		engine:          engine,
 		commits:         commits,
 		filteredCommits: commits,
 		viewport:        viewport.New(),
-		filter:          filter,
+		filter:          tui.NewFilterInput(),
 	}
 }
 

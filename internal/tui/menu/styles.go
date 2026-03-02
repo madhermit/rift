@@ -28,8 +28,4 @@ var (
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(subtle).
 			PaddingLeft(1)
-
-	filterPromptStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
 )

@@ -29,8 +29,4 @@ var (
 
 	subtleStyle = lipgloss.NewStyle().
 			Foreground(subtle)
-
-	filterPromptStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
 )
