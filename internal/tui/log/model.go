@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
@@ -86,15 +86,17 @@ func (m Model) layout() layout {
 func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 	filter := textinput.New()
 	filter.Prompt = "/ "
-	filter.PromptStyle = filterPromptStyle
 	filter.CharLimit = 256
+	styles := filter.Styles()
+	styles.Focused.Prompt = filterPromptStyle
+	filter.SetStyles(styles)
 
 	return Model{
 		repo:            repo,
 		engine:          engine,
 		commits:         commits,
 		filteredCommits: commits,
-		viewport:        viewport.New(0, 0),
+		viewport:        viewport.New(),
 		filter:          filter,
 	}
 }
@@ -105,7 +107,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -134,15 +136,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.activePane == diffPane && !m.filtering && m.vim.HandleKey(&m.viewport, msg) {
 		return m, nil
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	switch msg.String() {
+	case "ctrl+c":
 		return m, tea.Quit
-	case tea.KeyEsc:
+	case "esc":
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -157,36 +159,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	}
 
-	switch msg.Type {
-	case tea.KeyTab:
+	switch msg.String() {
+	case "tab":
 		if m.activePane == commitPane {
 			m.activePane = diffPane
 		} else {
 			m.activePane = commitPane
 		}
 		return m.applyLayout()
-	case tea.KeyEnter:
+	case "enter":
 		if m.activePane == commitPane {
 			m.activePane = diffPane
 			return m.applyLayout()
 		}
-	case tea.KeyUp:
+	case "up", "k":
 		return m.navigate(-1)
-	case tea.KeyDown:
+	case "down", "j":
 		return m.navigate(1)
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "q":
-			return m, tea.Quit
-		case "/":
-			m.filtering = true
-			m.filter.Focus()
-			return m, nil
-		case "j":
-			return m.navigate(1)
-		case "k":
-			return m.navigate(-1)
-		}
+	case "q":
+		return m, tea.Quit
+	case "/":
+		m.filtering = true
+		m.filter.Focus()
+		return m, nil
 	}
 
 	if m.activePane == diffPane {
@@ -200,8 +195,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
 	l := m.layout()
-	m.viewport.Width = l.diffWidth
-	m.viewport.Height = l.contentHeight - 2
+	m.viewport.SetWidth(l.diffWidth)
+	m.viewport.SetHeight(l.contentHeight - 2)
 	m.setDiffContent()
 	if len(m.filteredCommits) > 0 {
 		return m, m.loadCommitDiff(m.filteredCommits[m.selectedIdx])
@@ -221,8 +216,8 @@ func (m Model) navigate(delta int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyEnter {
+func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
 		m.filtering = false
 		m.filter.Blur()
 		return m, nil
@@ -380,7 +375,7 @@ func reflowParagraphs(s string) string {
 }
 
 func (m Model) loadCommitDiff(commit git.CommitInfo) tea.Cmd {
-	width := m.viewport.Width
+	width := m.viewport.Width()
 	return func() tea.Msg {
 		// Fetch changed file list for the header
 		base := commit.Hash + "~1"
@@ -411,15 +406,15 @@ func (m Model) loadCommitDiff(commit git.CommitInfo) tea.Cmd {
 
 func (m *Model) setDiffContent() {
 	content := m.diffContent
-	if w := m.viewport.Width; w > 0 && content != "" {
+	if w := m.viewport.Width(); w > 0 && content != "" {
 		content = ansi.Hardwrap(content, w, true)
 	}
 	m.vim.SetContent(&m.viewport, content)
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if !m.ready {
-		return "Loading..."
+		return tea.NewView("Loading...")
 	}
 
 	l := m.layout()
@@ -480,7 +475,9 @@ func (m Model) View() string {
 		status = statusBarStyle.Render("No commits found")
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, content, status)
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
+	v.AltScreen = true
+	return v
 }
 
 func truncate(s string, max int) string {

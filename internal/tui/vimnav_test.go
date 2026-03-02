@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestScanSectionOffsets(t *testing.T) {
@@ -52,22 +52,22 @@ func TestVimNav_HandleKey(t *testing.T) {
 	content := strings.Join(lines, "\n")
 
 	newViewport := func() viewport.Model {
-		vp := viewport.New(80, 20)
+		vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 		vp.SetContent(content)
 		return vp
 	}
 
-	runeMsg := func(r string) tea.KeyMsg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(r)}
+	keyMsg := func(s string) tea.KeyPressMsg {
+		return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
 	}
 
 	t.Run("G goes to bottom", func(t *testing.T) {
 		vp := newViewport()
 		var v VimNav
-		if !v.HandleKey(&vp, runeMsg("G")) {
+		if !v.HandleKey(&vp, keyMsg("G")) {
 			t.Fatal("expected handled")
 		}
-		if vp.YOffset == 0 {
+		if vp.YOffset() == 0 {
 			t.Error("expected YOffset > 0 after G")
 		}
 	})
@@ -76,22 +76,22 @@ func TestVimNav_HandleKey(t *testing.T) {
 		vp := newViewport()
 		vp.SetYOffset(50)
 		var v VimNav
-		v.HandleKey(&vp, runeMsg("g"))
-		if !v.HandleKey(&vp, runeMsg("g")) {
+		v.HandleKey(&vp, keyMsg("g"))
+		if !v.HandleKey(&vp, keyMsg("g")) {
 			t.Fatal("expected handled on second g")
 		}
-		if vp.YOffset != 0 {
-			t.Errorf("expected YOffset=0 after gg, got %d", vp.YOffset)
+		if vp.YOffset() != 0 {
+			t.Errorf("expected YOffset=0 after gg, got %d", vp.YOffset())
 		}
 	})
 
 	t.Run("Ctrl+D half page down", func(t *testing.T) {
 		vp := newViewport()
 		var v VimNav
-		if !v.HandleKey(&vp, tea.KeyMsg{Type: tea.KeyCtrlD}) {
+		if !v.HandleKey(&vp, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}) {
 			t.Fatal("expected handled")
 		}
-		if vp.YOffset == 0 {
+		if vp.YOffset() == 0 {
 			t.Error("expected YOffset > 0 after Ctrl+D")
 		}
 	})
@@ -99,14 +99,14 @@ func TestVimNav_HandleKey(t *testing.T) {
 	t.Run("unhandled key returns false", func(t *testing.T) {
 		vp := newViewport()
 		var v VimNav
-		if v.HandleKey(&vp, runeMsg("x")) {
+		if v.HandleKey(&vp, keyMsg("x")) {
 			t.Error("expected not handled for 'x'")
 		}
 	})
 }
 
 func TestVimNav_SetContent(t *testing.T) {
-	vp := viewport.New(80, 20)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	var v VimNav
 	content := "line1\ndiff --git a/f.go b/f.go\nline3\n─────────────────────\nline5\n"
 	v.SetContent(&vp, content)

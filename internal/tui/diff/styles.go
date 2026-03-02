@@ -1,6 +1,6 @@
 package diffui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 var (
 	subtle = lipgloss.Color("241")
@@ -24,10 +24,6 @@ var (
 				Foreground(white).
 				PaddingLeft(2)
 
-	filterPromptStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
-
 	paneStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(subtle)
@@ -35,4 +31,8 @@ var (
 	activePaneStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(accent)
+
+	filterPromptStyle = lipgloss.NewStyle().
+				Foreground(accent).
+				Bold(true)
 )

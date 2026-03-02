@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/output"
@@ -53,7 +53,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 		engine := diff.NewEngine()
 		m := stageui.New(repo, engine, files)
-		_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+		_, err := tea.NewProgram(m).Run()
 		return err
 	}
 }

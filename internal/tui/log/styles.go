@@ -1,6 +1,6 @@
 package logui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 var (
 	subtle = lipgloss.Color("241")
@@ -27,10 +27,6 @@ var (
 				Foreground(white).
 				PaddingLeft(2)
 
-	filterPromptStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
-
 	paneStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(subtle)
@@ -47,4 +43,8 @@ var (
 	statusDeletedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	statusModifiedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	statusRenamedStyle  = lipgloss.NewStyle().Foreground(accent)
+
+	filterPromptStyle = lipgloss.NewStyle().
+				Foreground(accent).
+				Bold(true)
 )

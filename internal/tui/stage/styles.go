@@ -1,6 +1,6 @@
 package stageui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 var (
 	subtle = lipgloss.Color("241")
@@ -26,10 +26,6 @@ var (
 				Foreground(white).
 				Background(lipgloss.Color("236")).
 				PaddingLeft(1)
-
-	filterPromptStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
 
 	paneStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
@@ -61,4 +57,8 @@ var (
 			Render("▎") + " "
 
 	sidebarInactive = "  "
+
+	filterPromptStyle = lipgloss.NewStyle().
+				Foreground(accent).
+				Bold(true)
 )

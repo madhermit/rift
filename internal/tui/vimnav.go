@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 )
 
 // VimNav provides vim-style viewport navigation (gg, G, Ctrl+d/u/f/b, {/}).
@@ -16,43 +16,40 @@ type VimNav struct {
 
 // HandleKey processes vim navigation keys on the viewport.
 // Returns true if the key was consumed.
-func (v *VimNav) HandleKey(vp *viewport.Model, msg tea.KeyMsg) bool {
+func (v *VimNav) HandleKey(vp *viewport.Model, msg tea.KeyPressMsg) bool {
 	if v.pendingG {
 		v.pendingG = false
-		if msg.Type == tea.KeyRunes && string(msg.Runes) == "g" {
+		if msg.String() == "g" {
 			vp.GotoTop()
 			return true
 		}
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlD:
+	switch msg.String() {
+	case "ctrl+d":
 		vp.HalfPageDown()
 		return true
-	case tea.KeyCtrlU:
+	case "ctrl+u":
 		vp.HalfPageUp()
 		return true
-	case tea.KeyCtrlF:
+	case "ctrl+f":
 		vp.PageDown()
 		return true
-	case tea.KeyCtrlB:
+	case "ctrl+b":
 		vp.PageUp()
 		return true
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "g":
-			v.pendingG = true
-			return true
-		case "G":
-			vp.GotoBottom()
-			return true
-		case "{":
-			jumpToSection(vp, v.sectionOffsets, -1)
-			return true
-		case "}":
-			jumpToSection(vp, v.sectionOffsets, 1)
-			return true
-		}
+	case "g":
+		v.pendingG = true
+		return true
+	case "G":
+		vp.GotoBottom()
+		return true
+	case "{":
+		jumpToSection(vp, v.sectionOffsets, -1)
+		return true
+	case "}":
+		jumpToSection(vp, v.sectionOffsets, 1)
+		return true
 	}
 	return false
 }
@@ -77,7 +74,7 @@ func jumpToSection(vp *viewport.Model, offsets []int, dir int) {
 	if len(offsets) == 0 {
 		return
 	}
-	current := vp.YOffset
+	current := vp.YOffset()
 	if dir > 0 {
 		for _, off := range offsets {
 			if off > current {

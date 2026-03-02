@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/output"
 	"github.com/madhermit/rift/internal/tui/menu"
 	"github.com/spf13/cobra"
@@ -35,7 +35,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	m := menu.New()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	result, err := p.Run()
 	if err != nil {
 		return err

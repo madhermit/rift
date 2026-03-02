@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
@@ -100,19 +100,21 @@ func prependAllEntry(files []git.ChangedFile) []git.ChangedFile {
 }
 
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
+	allFiles := prependAllEntry(files)
+
 	filter := textinput.New()
 	filter.Prompt = "/ "
-	filter.PromptStyle = filterPromptStyle
 	filter.CharLimit = 256
-
-	allFiles := prependAllEntry(files)
+	styles := filter.Styles()
+	styles.Focused.Prompt = filterPromptStyle
+	filter.SetStyles(styles)
 
 	return Model{
 		repo:          repo,
 		engine:        engine,
 		files:         allFiles,
 		filteredFiles: allFiles,
-		viewport:      viewport.New(0, 0),
+		viewport:      viewport.New(),
 		filter:        filter,
 		staged:        staged,
 		base:          base,
@@ -127,7 +129,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -170,15 +172,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.activePane == diffPane && !m.filtering && m.vim.HandleKey(&m.viewport, msg) {
 		return m, nil
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	switch msg.String() {
+	case "ctrl+c":
 		return m, tea.Quit
-	case tea.KeyEsc:
+	case "esc":
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -193,39 +195,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	}
 
-	switch msg.Type {
-	case tea.KeyTab:
+	switch msg.String() {
+	case "tab":
 		if m.activePane == filePane {
 			m.activePane = diffPane
 		} else {
 			m.activePane = filePane
 		}
 		return m.applyLayout()
-	case tea.KeyEnter:
+	case "enter":
 		if m.activePane == filePane {
 			m.activePane = diffPane
 			return m.applyLayout()
 		}
-	case tea.KeyUp:
+	case "up", "k":
 		return m.navigate(-1)
-	case tea.KeyDown:
+	case "down", "j":
 		return m.navigate(1)
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "q":
-			return m, tea.Quit
-		case "/":
-			m.filtering = true
-			m.filter.Focus()
-			return m, nil
-		case "j":
-			return m.navigate(1)
-		case "k":
-			return m.navigate(-1)
-		case "s":
-			if !m.commitDiff {
-				return m.toggleStaged()
-			}
+	case "q":
+		return m, tea.Quit
+	case "/":
+		m.filtering = true
+		m.filter.Focus()
+		return m, nil
+	case "s":
+		if !m.commitDiff {
+			return m.toggleStaged()
 		}
 	}
 
@@ -240,8 +235,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
 	l := m.layout()
-	m.viewport.Width = l.diffWidth
-	m.viewport.Height = l.contentHeight - 2
+	m.viewport.SetWidth(l.diffWidth)
+	m.viewport.SetHeight(l.contentHeight - 2)
 	m.setDiffContent()
 	if len(m.filteredFiles) > 0 {
 		return m, m.loadSelectedDiff()
@@ -277,8 +272,8 @@ func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyEnter {
+func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
 		m.filtering = false
 		m.filter.Blur()
 		return m, nil
@@ -349,7 +344,7 @@ func (m Model) loadSelectedDiff() tea.Cmd {
 }
 
 func (m Model) loadDiff(files ...string) tea.Cmd {
-	width := m.viewport.Width
+	width := m.viewport.Width()
 	return func() tea.Msg {
 		color := os.Getenv("NO_COLOR") == ""
 		opts := diff.DiffOpts{
@@ -376,15 +371,15 @@ func (m Model) loadDiff(files ...string) tea.Cmd {
 
 func (m *Model) setDiffContent() {
 	content := m.diffContent
-	if w := m.viewport.Width; w > 0 && content != "" {
+	if w := m.viewport.Width(); w > 0 && content != "" {
 		content = ansi.Hardwrap(content, w, true)
 	}
 	m.vim.SetContent(&m.viewport, content)
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if !m.ready {
-		return "Loading..."
+		return tea.NewView("Loading...")
 	}
 
 	l := m.layout()
@@ -464,7 +459,9 @@ func (m Model) View() string {
 		status = statusBarStyle.Render("No changes found")
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, content, status)
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
+	v.AltScreen = true
+	return v
 }
 
 func truncate(s string, max int) string {

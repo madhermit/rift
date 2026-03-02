@@ -4,7 +4,7 @@ import (
 	"os"
 	"os/exec"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/output"
 	branchui "github.com/madhermit/rift/internal/tui/branch"
@@ -50,7 +50,7 @@ func runBranch(cmd *cobra.Command, args []string) error {
 		return output.WritePlain(os.Stdout, lines)
 	default:
 		m := branchui.New(branches)
-		result, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+		result, err := tea.NewProgram(m).Run()
 		if err != nil {
 			return err
 		}

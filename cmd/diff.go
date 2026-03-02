@@ -6,7 +6,7 @@ import (
 	"os"
 	"sort"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/output"
@@ -68,7 +68,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return printDiffs(engine, repo, files, staged, base, target)
 	default:
 		m := diffui.New(repo, engine, files, staged, base, target)
-		_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+		_, err := tea.NewProgram(m).Run()
 		return err
 	}
 }

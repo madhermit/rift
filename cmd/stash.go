@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/output"
@@ -54,7 +54,7 @@ func runStash(cmd *cobra.Command, args []string) error {
 
 		engine := diff.NewEngine()
 		m := stashui.New(repo, engine, stashes)
-		result, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+		result, err := tea.NewProgram(m).Run()
 		if err != nil {
 			return err
 		}

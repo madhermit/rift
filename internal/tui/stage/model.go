@@ -7,10 +7,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
@@ -108,15 +108,17 @@ func (m Model) layout() layout {
 func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
 	filter := textinput.New()
 	filter.Prompt = "/ "
-	filter.PromptStyle = filterPromptStyle
 	filter.CharLimit = 256
+	styles := filter.Styles()
+	styles.Focused.Prompt = filterPromptStyle
+	filter.SetStyles(styles)
 
 	return Model{
 		repo:          repo,
 		engine:        engine,
 		files:         files,
 		filteredFiles: files,
-		viewport:      viewport.New(0, 0),
+		viewport:      viewport.New(),
 		filter:        filter,
 	}
 }
@@ -127,7 +129,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -194,26 +196,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.activePane == diffPane && !m.filtering {
-		if msg.Type == tea.KeyRunes {
-			switch string(msg.Runes) {
-			case "{", "}":
-				// handled below as hunk nav
-			default:
-				if m.vim.HandleKey(&m.viewport, msg) {
-					return m, nil
-				}
+		switch msg.String() {
+		case "{", "}", "n", "p":
+			// handled below as hunk nav
+		default:
+			if m.vim.HandleKey(&m.viewport, msg) {
+				return m, nil
 			}
-		} else if m.vim.HandleKey(&m.viewport, msg) {
-			return m, nil
 		}
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	switch msg.String() {
+	case "ctrl+c":
 		return m, tea.Quit
-	case tea.KeyEsc:
+	case "esc":
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -228,51 +226,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	}
 
-	switch msg.Type {
-	case tea.KeyTab:
+	switch msg.String() {
+	case "tab":
 		if m.activePane == filePane {
 			m.activePane = diffPane
 		} else {
 			m.activePane = filePane
 		}
 		return m.applyLayout()
-	case tea.KeyEnter:
+	case "enter":
 		if m.activePane == filePane {
 			m.activePane = diffPane
 			return m.applyLayout()
 		}
-	case tea.KeyUp:
+	case "up", "k":
 		return m.navigate(-1)
-	case tea.KeyDown:
+	case "down", "j":
 		return m.navigate(1)
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "q":
-			return m, tea.Quit
-		case "/":
-			m.filtering = true
-			m.filter.Focus()
-			return m, nil
-		case "j":
-			return m.navigate(1)
-		case "k":
-			return m.navigate(-1)
-		case "s":
-			return m.stageOrUnstage(true)
-		case "u":
-			return m.stageOrUnstage(false)
-		case "a":
-			if m.activePane == filePane {
-				return m.stageAll()
-			}
-		case "}", "n":
-			if m.activePane == diffPane {
-				return m.navigateHunk(1)
-			}
-		case "{", "p":
-			if m.activePane == diffPane {
-				return m.navigateHunk(-1)
-			}
+	case "q":
+		return m, tea.Quit
+	case "/":
+		m.filtering = true
+		m.filter.Focus()
+		return m, nil
+	case "s":
+		return m.stageOrUnstage(true)
+	case "u":
+		return m.stageOrUnstage(false)
+	case "a":
+		if m.activePane == filePane {
+			return m.stageAll()
+		}
+	case "}", "n":
+		if m.activePane == diffPane {
+			return m.navigateHunk(1)
+		}
+	case "{", "p":
+		if m.activePane == diffPane {
+			return m.navigateHunk(-1)
 		}
 	}
 
@@ -383,8 +374,8 @@ func (m Model) reloadFiles() tea.Cmd {
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
 	l := m.layout()
-	m.viewport.Width = l.diffWidth
-	m.viewport.Height = l.contentHeight - 2
+	m.viewport.SetWidth(l.diffWidth)
+	m.viewport.SetHeight(l.contentHeight - 2)
 	m.renderHunks()
 	if len(m.filteredFiles) > 0 {
 		return m, m.loadSelectedDiff()
@@ -399,8 +390,8 @@ func (m Model) navigate(delta int) (tea.Model, tea.Cmd) {
 	return m.navigateHunk(delta)
 }
 
-func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyEnter {
+func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
 		m.filtering = false
 		m.filter.Blur()
 		return m, nil
@@ -462,7 +453,7 @@ func (m Model) loadSelectedDiff() tea.Cmd {
 	f := m.filteredFiles[m.selectedIdx]
 	engine := m.engine
 	repoRoot := m.repo.Root()
-	width := m.viewport.Width
+	width := m.viewport.Width()
 	return func() tea.Msg {
 		untracked := f.StagingStatus == "Untracked" || f.WorktreeStatus == "Untracked"
 		color := os.Getenv("NO_COLOR") == ""
@@ -532,7 +523,7 @@ func (m *Model) renderHunks() {
 
 	n := len(m.displayHunks)
 	m.hunkOffsets = make([]int, n)
-	w := m.viewport.Width
+	w := m.viewport.Width()
 	innerW := w - 2 // sidebar (▎ + space)
 	if innerW < 1 {
 		innerW = 1
@@ -593,9 +584,9 @@ func (m *Model) renderHunks() {
 	m.vim.SetContent(&m.viewport, b.String())
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if !m.ready {
-		return "Loading..."
+		return tea.NewView("Loading...")
 	}
 
 	l := m.layout()
@@ -665,7 +656,9 @@ func (m Model) View() string {
 		status = statusBarStyle.Render("No changes found")
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, content, status)
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
+	v.AltScreen = true
+	return v
 }
 
 func findFileIndex(files []git.StatusFile, path string) int {

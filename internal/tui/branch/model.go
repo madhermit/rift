@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/sahilm/fuzzy"
 )
@@ -34,8 +34,10 @@ func (m Model) Checkout() string {
 func New(branches []git.BranchInfo) Model {
 	filter := textinput.New()
 	filter.Prompt = "/ "
-	filter.PromptStyle = filterPromptStyle
 	filter.CharLimit = 256
+	styles := filter.Styles()
+	styles.Focused.Prompt = filterPromptStyle
+	filter.SetStyles(styles)
 
 	return Model{
 		branches: branches,
@@ -50,7 +52,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -61,11 +63,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyCtrlC:
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
 		return m, tea.Quit
-	case tea.KeyEsc:
+	case "esc":
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -80,8 +82,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	}
 
-	switch msg.Type {
-	case tea.KeyEnter:
+	switch msg.String() {
+	case "enter":
 		if len(m.filtered) > 0 {
 			b := m.filtered[m.selectedIdx]
 			if !b.Current {
@@ -89,34 +91,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
-	case tea.KeyUp:
+	case "up", "k":
 		m.moveSelection(-1)
 		return m, nil
-	case tea.KeyDown:
+	case "down", "j":
 		m.moveSelection(1)
 		return m, nil
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "q":
-			return m, tea.Quit
-		case "/":
-			m.filtering = true
-			m.filter.Focus()
-			return m, nil
-		case "j":
-			m.moveSelection(1)
-			return m, nil
-		case "k":
-			m.moveSelection(-1)
-			return m, nil
-		}
+	case "q":
+		return m, tea.Quit
+	case "/":
+		m.filtering = true
+		m.filter.Focus()
+		return m, nil
 	}
 
 	return m, nil
 }
 
-func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyEnter {
+func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
 		m.filtering = false
 		m.filter.Blur()
 		return m, nil
@@ -194,9 +187,9 @@ func (m Model) listHeight() int {
 	return h
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if !m.ready {
-		return "Loading..."
+		return tea.NewView("Loading...")
 	}
 
 	title := titleStyle.Render("rift branch")
@@ -252,5 +245,7 @@ func (m Model) View() string {
 		status = statusBarStyle.Render("No branches found")
 	}
 
-	return title + "\n" + list.String() + status
+	v := tea.NewView(title + "\n" + list.String() + status)
+	v.AltScreen = true
+	return v
 }

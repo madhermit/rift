@@ -1,6 +1,6 @@
 package menu
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 var (
 	subtle = lipgloss.Color("241")
@@ -25,11 +25,11 @@ var (
 				Foreground(subtle).
 				PaddingLeft(6)
 
-	filterPromptStyle = lipgloss.NewStyle().
-				Foreground(accent).
-				Bold(true)
-
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(subtle).
 			PaddingLeft(1)
+
+	filterPromptStyle = lipgloss.NewStyle().
+				Foreground(accent).
+				Bold(true)
 )
