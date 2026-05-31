@@ -14,7 +14,6 @@ import (
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/tui"
-	"github.com/sahilm/fuzzy"
 )
 
 type StashAction int
@@ -265,24 +264,9 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyFilter() {
-	query := m.filter.Value()
-	if query == "" {
-		m.filteredStashes = m.stashes
-		m.selectedIdx = 0
-		return
-	}
-
-	targets := make([]string, len(m.stashes))
-	for i, s := range m.stashes {
-		targets[i] = fmt.Sprintf("stash@{%d} %s %s", s.Index, s.Branch, s.Message)
-	}
-
-	matches := fuzzy.Find(query, targets)
-	filtered := make([]git.StashEntry, len(matches))
-	for i, match := range matches {
-		filtered[i] = m.stashes[match.Index]
-	}
-	m.filteredStashes = filtered
+	m.filteredStashes = tui.FuzzyFilter(m.stashes, m.filter.Value(), func(s git.StashEntry) string {
+		return fmt.Sprintf("stash@{%d} %s %s", s.Index, s.Branch, s.Message)
+	})
 	m.selectedIdx = 0
 }
 
@@ -348,7 +332,7 @@ func (m Model) View() tea.View {
 		if collapsed {
 			line = fmt.Sprintf("{%d}", s.Index)
 		} else {
-			line = truncate(fmt.Sprintf("stash@{%d} %s", s.Index, s.Message), l.listWidth-6)
+			line = tui.Truncate(fmt.Sprintf("stash@{%d} %s", s.Index, s.Message), l.listWidth-6)
 		}
 		if i == m.selectedIdx {
 			stashList.WriteString(selectedItemStyle.Render(line))
@@ -391,14 +375,4 @@ func (m Model) View() tea.View {
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
 	v.AltScreen = true
 	return v
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return s[:max]
-	}
-	return s[:max-3] + "..."
 }

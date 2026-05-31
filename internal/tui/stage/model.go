@@ -15,7 +15,6 @@ import (
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/tui"
-	"github.com/sahilm/fuzzy"
 )
 
 type pane int
@@ -403,24 +402,7 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyFilter() {
-	query := m.filter.Value()
-	if query == "" {
-		m.filteredFiles = m.files
-		m.selectedIdx = 0
-		return
-	}
-
-	paths := make([]string, len(m.files))
-	for i, f := range m.files {
-		paths[i] = f.Path
-	}
-
-	matches := fuzzy.Find(query, paths)
-	filtered := make([]git.StatusFile, len(matches))
-	for i, match := range matches {
-		filtered[i] = m.files[match.Index]
-	}
-	m.filteredFiles = filtered
+	m.filteredFiles = tui.FuzzyFilter(m.files, m.filter.Value(), func(f git.StatusFile) string { return f.Path })
 	m.selectedIdx = 0
 }
 
@@ -609,7 +591,7 @@ func (m Model) View() tea.View {
 		if collapsed {
 			line = cursor + status + " " + tui.FileIcon(f.Path)
 		} else {
-			line = cursor + status + " " + tui.FileIcon(f.Path) + " " + truncate(f.Path, l.listWidth-12)
+			line = cursor + status + " " + tui.FileIcon(f.Path) + " " + tui.TruncatePath(f.Path, l.listWidth-12)
 		}
 		if selected {
 			fileList.WriteString(selectedFileStyle.Render(line))
@@ -668,14 +650,4 @@ func findFileIndex(files []git.StatusFile, path string) int {
 
 func formatStatusShort(f git.StatusFile) string {
 	return stagedStyle.Render(git.StatusChar(f.StagingStatus)) + unstagedStyle.Render(git.StatusChar(f.WorktreeStatus))
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return s[:max]
-	}
-	return "..." + s[len(s)-max+3:]
 }

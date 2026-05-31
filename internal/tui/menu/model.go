@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/madhermit/rift/internal/tui"
-	"github.com/sahilm/fuzzy"
 )
 
 type Command struct {
@@ -137,24 +136,7 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyFilter() {
-	query := m.filter.Value()
-	if query == "" {
-		m.filtered = m.commands
-		m.selectedIdx = 0
-		return
-	}
-
-	names := make([]string, len(m.commands))
-	for i, c := range m.commands {
-		names[i] = c.Name
-	}
-
-	matches := fuzzy.Find(query, names)
-	filtered := make([]Command, len(matches))
-	for i, match := range matches {
-		filtered[i] = m.commands[match.Index]
-	}
-	m.filtered = filtered
+	m.filtered = tui.FuzzyFilter(m.commands, m.filter.Value(), func(c Command) string { return c.Name })
 	m.selectedIdx = 0
 }
 

@@ -14,7 +14,6 @@ import (
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/tui"
-	"github.com/sahilm/fuzzy"
 )
 
 type pane int
@@ -231,24 +230,7 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyFilter() {
-	query := m.filter.Value()
-	if query == "" {
-		m.filteredCommits = m.commits
-		m.selectedIdx = 0
-		return
-	}
-
-	targets := make([]string, len(m.commits))
-	for i, c := range m.commits {
-		targets[i] = c.Hash + " " + c.Message
-	}
-
-	matches := fuzzy.Find(query, targets)
-	filtered := make([]git.CommitInfo, len(matches))
-	for i, match := range matches {
-		filtered[i] = m.commits[match.Index]
-	}
-	m.filteredCommits = filtered
+	m.filteredCommits = tui.FuzzyFilter(m.commits, m.filter.Value(), func(c git.CommitInfo) string { return c.Hash + " " + c.Message })
 	m.selectedIdx = 0
 }
 
@@ -305,7 +287,7 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 	if len(files) > 0 {
 		b.WriteString("\n")
 		for _, f := range files {
-			icon := statusIcon(f.Status)
+			icon := git.StatusChar(f.Status)
 			if color {
 				icon = statusStyle(f.Status).Render(icon)
 			}
@@ -315,21 +297,6 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 
 	fmt.Fprintf(&b, "\n%s\n\n", sep)
 	return b.String()
-}
-
-func statusIcon(status string) string {
-	switch status {
-	case "Modified":
-		return "M"
-	case "Added":
-		return "A"
-	case "Deleted":
-		return "D"
-	case "Renamed":
-		return "R"
-	default:
-		return " "
-	}
 }
 
 func statusStyle(status string) lipgloss.Style {
@@ -428,7 +395,7 @@ func (m Model) View() tea.View {
 		if collapsed {
 			line = c.Hash
 		} else {
-			line = truncate(c.Hash+" "+c.Message, l.listWidth-6)
+			line = tui.Truncate(c.Hash+" "+c.Message, l.listWidth-6)
 		}
 		if i == m.selectedIdx {
 			commitList.WriteString(selectedCommitStyle.Render(line))
@@ -471,14 +438,4 @@ func (m Model) View() tea.View {
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
 	v.AltScreen = true
 	return v
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return s[:max]
-	}
-	return s[:max-3] + "..."
 }

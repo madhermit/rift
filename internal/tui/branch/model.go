@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/tui"
-	"github.com/sahilm/fuzzy"
 )
 
 const scrollMargin = 3
@@ -116,25 +115,7 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyFilter() {
-	query := m.filter.Value()
-	if query == "" {
-		m.filtered = m.branches
-		m.selectedIdx = 0
-		m.scrollOff = 0
-		return
-	}
-
-	names := make([]string, len(m.branches))
-	for i, b := range m.branches {
-		names[i] = b.Name
-	}
-
-	matches := fuzzy.Find(query, names)
-	filtered := make([]git.BranchInfo, len(matches))
-	for i, match := range matches {
-		filtered[i] = m.branches[match.Index]
-	}
-	m.filtered = filtered
+	m.filtered = tui.FuzzyFilter(m.branches, m.filter.Value(), func(b git.BranchInfo) string { return b.Name })
 	m.selectedIdx = 0
 	m.scrollOff = 0
 }
