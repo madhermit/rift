@@ -20,14 +20,28 @@ const (
 )
 
 type Model struct {
-	repo    *git.Repo
-	engine  diff.Engine
-	list    tui.SplitList[git.StashEntry]
-	action  StashAction
-	display diff.Display
+	repo            *git.Repo
+	engine          diff.Engine
+	altEngine       diff.Engine // the other engine, swapped in by the `e` toggle
+	canToggleEngine bool        // true when the two engines actually differ
+	list            tui.SplitList[git.StashEntry]
+	action          StashAction
+	display         diff.Display
 }
 
 func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
+	altEngine := diff.NewPlainEngine()
+	canToggleEngine := engine.Name() != altEngine.Name()
+
+	hints := [][2]string{
+		{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
+		{"a", "apply"}, {"p", "pop"}, {"x", "drop"}, {"\\", "layout"},
+	}
+	if canToggleEngine {
+		hints = append(hints, [2]string{"e", "engine"})
+	}
+	hints = append(hints, [2]string{"q", "quit"})
+
 	cfg := tui.SplitConfig[git.StashEntry]{
 		Screen:      "stash",
 		ListTitle:   "stashes",
@@ -35,10 +49,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 		MinList:     30,
 		MaxList:     80,
 		EmptyStatus: "No stashes found",
-		Hints: [][2]string{
-			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-			{"a", "apply"}, {"p", "pop"}, {"x", "drop"}, {"\\", "layout"}, {"q", "quit"},
-		},
+		Hints:       hints,
 		Match: func(s git.StashEntry) string {
 			return fmt.Sprintf("stash@{%d} %s %s", s.Index, s.Branch, s.Message)
 		},
@@ -54,7 +65,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 			return style.Render(tui.Truncate(fmt.Sprintf("stash@{%d}  %s", s.Index, s.Message), w))
 		},
 	}
-	return Model{repo: repo, engine: engine, list: tui.NewSplitList(cfg, stashes)}
+	return Model{repo: repo, engine: engine, altEngine: altEngine, canToggleEngine: canToggleEngine, list: tui.NewSplitList(cfg, stashes)}
 }
 
 func (m Model) Action() StashAction { return m.action }
@@ -73,13 +84,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SelectionChangedMsg:
 		return m, m.previewCmd(msg.ReqID)
 	case tea.KeyPressMsg:
-		if msg.String() == "\\" && !m.list.Filtering() {
-			m.display = m.display.Next()
-			var cmd tea.Cmd
-			m.list, cmd = m.list.ClearCacheAndReload()
-			return m, cmd
+		if m.list.Filtering() {
+			break
 		}
-		if action, ok := stashAction(msg.String()); ok && !m.list.Filtering() {
+		switch msg.String() {
+		case "\\":
+			m.display = m.display.Next()
+			return m.reloadFresh()
+		case "e":
+			if !m.canToggleEngine {
+				break // only one engine available; nothing to toggle
+			}
+			m.engine, m.altEngine = m.altEngine, m.engine
+			m.list = m.list.SetContext(m.engine.Name())
+			return m.reloadFresh()
+		}
+		if action, ok := stashAction(msg.String()); ok {
 			if _, sel := m.list.Selected(); sel {
 				m.action = action
 				return m, tea.Quit
@@ -92,6 +112,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View { return m.list.TeaView() }
+
+// reloadFresh drops the preview cache and reloads the current selection, after a
+// setting (layout/engine) that affects rendering has changed.
+func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.list, cmd = m.list.ClearCacheAndReload()
+	return m, cmd
+}
 
 func stashAction(key string) (StashAction, bool) {
 	switch key {

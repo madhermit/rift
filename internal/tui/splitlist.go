@@ -191,6 +191,12 @@ func (m SplitList[T]) SetListTitle(title string) SplitList[T] {
 	return m
 }
 
+// SetContext updates the header right-context (e.g. the active diff engine).
+func (m SplitList[T]) SetContext(ctx string) SplitList[T] {
+	m.cfg.Context = ctx
+	return m
+}
+
 // SetItems replaces the item set, re-applies the active filter, and requests a
 // fresh preview. The cache is cleared because the item set (and the state it
 // reflects, e.g. staged vs unstaged) has changed.

@@ -13,9 +13,11 @@ import (
 )
 
 type Model struct {
-	repo   *git.Repo
-	engine diff.Engine
-	list   tui.SplitList[git.ChangedFile]
+	repo            *git.Repo
+	engine          diff.Engine
+	altEngine       diff.Engine // the other engine, swapped in by the `e` toggle
+	canToggleEngine bool        // true when the two engines actually differ
+	list            tui.SplitList[git.ChangedFile]
 
 	staged     bool
 	base       string
@@ -70,6 +72,8 @@ func pathRow(prefix string, style lipgloss.Style, path, stat string, w int) stri
 
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
 	commitDiff := target != ""
+	altEngine := diff.NewPlainEngine()
+	canToggleEngine := engine.Name() != altEngine.Name()
 
 	listTitle := "changes"
 	if !commitDiff {
@@ -85,7 +89,11 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if !commitDiff {
 		hints = append(hints, [2]string{"s", "staged"})
 	}
-	hints = append(hints, [2]string{"\\", "layout"}, [2]string{"q", "quit"})
+	hints = append(hints, [2]string{"\\", "layout"})
+	if canToggleEngine {
+		hints = append(hints, [2]string{"e", "engine"})
+	}
+	hints = append(hints, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.ChangedFile]{
 		Screen:      "diff",
@@ -122,13 +130,15 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	}
 
 	return Model{
-		repo:       repo,
-		engine:     engine,
-		staged:     staged,
-		base:       base,
-		target:     target,
-		commitDiff: commitDiff,
-		list:       tui.NewSplitList(cfg, prependAllEntry(files)),
+		repo:            repo,
+		engine:          engine,
+		staged:          staged,
+		base:            base,
+		target:          target,
+		commitDiff:      commitDiff,
+		list:            tui.NewSplitList(cfg, prependAllEntry(files)),
+		altEngine:       altEngine,
+		canToggleEngine: canToggleEngine,
 	}
 }
 
@@ -147,18 +157,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list, cmd = m.list.SetItems(prependAllEntry(msg.files))
 		return m, cmd
 	case tea.KeyPressMsg:
-		if msg.String() == "\\" && !m.list.Filtering() {
-			m.display = m.display.Next()
-			var cmd tea.Cmd
-			m.list, cmd = m.list.ClearCacheAndReload()
-			return m, cmd
+		if m.list.Filtering() {
+			break
 		}
-		if msg.String() == "s" && !m.commitDiff && !m.list.Filtering() {
-			return m.toggleStaged()
+		switch msg.String() {
+		case "\\":
+			m.display = m.display.Next()
+			return m.reloadFresh()
+		case "e":
+			if !m.canToggleEngine {
+				break // only one engine available; nothing to toggle
+			}
+			m.engine, m.altEngine = m.altEngine, m.engine
+			m.list = m.list.SetContext(m.engine.Name())
+			return m.reloadFresh()
+		case "s":
+			if !m.commitDiff {
+				return m.toggleStaged()
+			}
 		}
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+// reloadFresh drops the preview cache and reloads the current selection, after a
+// setting (layout/engine) that affects rendering has changed.
+func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.list, cmd = m.list.ClearCacheAndReload()
 	return m, cmd
 }
 

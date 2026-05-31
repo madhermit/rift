@@ -17,24 +17,34 @@ import (
 const emptyTree = "4b825dc642cb6eb9a060e54bf899d69f82cf7207"
 
 type Model struct {
-	repo    *git.Repo
-	engine  diff.Engine
-	list    tui.SplitList[git.CommitInfo]
-	display diff.Display
+	repo            *git.Repo
+	engine          diff.Engine
+	altEngine       diff.Engine // the other engine, swapped in by the `e` toggle
+	canToggleEngine bool        // true when the two engines actually differ
+	list            tui.SplitList[git.CommitInfo]
+	display         diff.Display
 }
 
 func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
+	altEngine := diff.NewPlainEngine()
+	canToggleEngine := engine.Name() != altEngine.Name()
+
+	hints := [][2]string{
+		{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"}, {"gg/G", "top/bot"}, {"\\", "layout"},
+	}
+	if canToggleEngine {
+		hints = append(hints, [2]string{"e", "engine"})
+	}
+	hints = append(hints, [2]string{"q", "quit"})
+
 	cfg := tui.SplitConfig[git.CommitInfo]{
-		Screen:      "log",
-		ListTitle:   "commits",
-		Context:     engine.Name(),
-		MinList:     30,
-		MaxList:     80,
-		EmptyStatus: "No commits found",
-		Hints: [][2]string{
-			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-			{"gg/G", "top/bot"}, {"\\", "layout"}, {"q", "quit"},
-		},
+		Screen:       "log",
+		ListTitle:    "commits",
+		Context:      engine.Name(),
+		MinList:      30,
+		MaxList:      80,
+		EmptyStatus:  "No commits found",
+		Hints:        hints,
 		Match:        func(c git.CommitInfo) string { return c.Hash + " " + c.Message },
 		PreviewTitle: func(c git.CommitInfo) string { return c.Hash },
 		CacheKey:     func(c git.CommitInfo) string { return c.Hash },
@@ -46,7 +56,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 			return style.Render(tui.Truncate(c.Hash+"  "+c.Message, w))
 		},
 	}
-	return Model{repo: repo, engine: engine, list: tui.NewSplitList(cfg, commits)}
+	return Model{repo: repo, engine: engine, altEngine: altEngine, canToggleEngine: canToggleEngine, list: tui.NewSplitList(cfg, commits)}
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -56,15 +66,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SelectionChangedMsg:
 		return m, m.previewCmd(msg.ReqID)
 	case tea.KeyPressMsg:
-		if msg.String() == "\\" && !m.list.Filtering() {
+		if m.list.Filtering() {
+			break
+		}
+		switch msg.String() {
+		case "\\":
 			m.display = m.display.Next()
-			var cmd tea.Cmd
-			m.list, cmd = m.list.ClearCacheAndReload()
-			return m, cmd
+			return m.reloadFresh()
+		case "e":
+			if !m.canToggleEngine {
+				break // only one engine available; nothing to toggle
+			}
+			m.engine, m.altEngine = m.altEngine, m.engine
+			m.list = m.list.SetContext(m.engine.Name())
+			return m.reloadFresh()
 		}
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+// reloadFresh drops the preview cache and reloads the current selection, after a
+// setting (layout/engine) that affects rendering has changed.
+func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.list, cmd = m.list.ClearCacheAndReload()
 	return m, cmd
 }
 

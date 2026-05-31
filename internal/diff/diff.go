@@ -64,6 +64,12 @@ func NewEngine() Engine {
 	return &fallbackEngine{}
 }
 
+// NewPlainEngine returns the plain git-diff engine — the non-structural
+// alternative offered by the engine toggle.
+func NewPlainEngine() Engine {
+	return &fallbackEngine{}
+}
+
 func buildCommitDiffArgs(base, target string, color bool) []string {
 	args := []string{"diff"}
 	if color {
