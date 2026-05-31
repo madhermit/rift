@@ -23,12 +23,20 @@ func TestCommitHeader(t *testing.T) {
 			want: "commit abc1234\nAuthor: Alice\nDate:   2026-01-15 14:30\n\n    Fix the thing\n\n─────────────────────\n\n",
 		},
 		{
-			name: "subject and body",
+			name: "subject and body wraps as one paragraph",
 			commit: git.CommitInfo{
 				Hash: "def5678", Author: "Bob", Date: "2026-02-01 09:00",
 				Message: "Add feature", Body: "This adds a new feature\nthat does stuff",
 			},
-			want: "commit def5678\nAuthor: Bob\nDate:   2026-02-01 09:00\n\n    Add feature\n\n    This adds a new feature\n    that does stuff\n\n─────────────────────\n\n",
+			want: "commit def5678\nAuthor: Bob\nDate:   2026-02-01 09:00\n\n    Add feature\n  This adds a new feature that does stuff\n\n─────────────────────\n\n",
+		},
+		{
+			name: "bullet list body",
+			commit: git.CommitInfo{
+				Hash: "def5678", Author: "Bob", Date: "2026-02-01 09:00",
+				Message: "Add feature", Body: "Changes:\n\n- first item\n- second item",
+			},
+			want: "commit def5678\nAuthor: Bob\nDate:   2026-02-01 09:00\n\n    Add feature\n  Changes:\n\n  • first item\n  • second item\n\n─────────────────────\n\n",
 		},
 		{
 			name: "with changed files",

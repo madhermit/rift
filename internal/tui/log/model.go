@@ -106,12 +106,7 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 
 	body := ""
 	if commit.Body != "" {
-		b := commit.Body
-		if wrapWidth > 0 && longestLine(b) > wrapWidth {
-			b = reflowParagraphs(b)
-			b = ansi.Wordwrap(b, wrapWidth, "")
-		}
-		body = "\n\n" + indent + strings.ReplaceAll(b, "\n", "\n"+indent)
+		body = "\n" + tui.Markdown(commit.Body, width, color)
 	}
 	sep := "─────────────────────"
 
@@ -139,24 +134,4 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 
 	fmt.Fprintf(&b, "\n%s\n\n", sep)
 	return b.String()
-}
-
-func longestLine(s string) int {
-	max := 0
-	for _, line := range strings.Split(s, "\n") {
-		if len(line) > max {
-			max = len(line)
-		}
-	}
-	return max
-}
-
-// reflowParagraphs removes git's hard line wraps (single \n) while
-// preserving intentional paragraph breaks (double \n\n).
-func reflowParagraphs(s string) string {
-	paragraphs := strings.Split(s, "\n\n")
-	for i, p := range paragraphs {
-		paragraphs[i] = strings.ReplaceAll(strings.TrimSpace(p), "\n", " ")
-	}
-	return strings.Join(paragraphs, "\n\n")
 }
