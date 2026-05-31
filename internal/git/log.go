@@ -21,14 +21,21 @@ type CommitInfo struct {
 }
 
 func (r *Repo) Log(ref string, maxCount int, paths []string) ([]CommitInfo, error) {
+	// Commit ranges (a..b, a...b) can't be resolved to a single revision by
+	// go-git, so route them straight to git log rather than relying on
+	// ResolveRevision to reject them.
+	if strings.Contains(ref, "..") {
+		return logShell(r.root, ref, maxCount, false, paths)
+	}
+
 	h, err := r.repo.ResolveRevision(plumbing.Revision(ref))
 	if err != nil {
-		return logShell(ref, maxCount, false, paths)
+		return logShell(r.root, ref, maxCount, false, paths)
 	}
 
 	commits, err := r.logGoGit(*h, maxCount, paths)
 	if err != nil {
-		return logShell(ref, maxCount, false, paths)
+		return logShell(r.root, ref, maxCount, false, paths)
 	}
 	return commits, nil
 }
@@ -36,7 +43,7 @@ func (r *Repo) Log(ref string, maxCount int, paths []string) ([]CommitInfo, erro
 func (r *Repo) LogAll(maxCount int, paths []string) ([]CommitInfo, error) {
 	commits, err := r.logAllGoGit(maxCount, paths)
 	if err != nil {
-		return logShell("", maxCount, true, paths)
+		return logShell(r.root, "", maxCount, true, paths)
 	}
 	return commits, nil
 }
@@ -118,9 +125,10 @@ func (r *Repo) logAllGoGit(maxCount int, paths []string) ([]CommitInfo, error) {
 	return commits, nil
 }
 
-// logShell falls back to shelling out to git log when go-git can't handle
-// the repo layout (e.g. bare-repo worktree setups).
-func logShell(ref string, maxCount int, all bool, paths []string) ([]CommitInfo, error) {
+// logShell falls back to shelling out to git log when go-git can't handle the
+// request: bare-repo worktree layouts, or commit ranges (a..b) that go-git
+// can't resolve. dir is the repo root the command runs in.
+func logShell(dir, ref string, maxCount int, all bool, paths []string) ([]CommitInfo, error) {
 	const fieldSep = "\x1e"
 	const recordSep = "\x00"
 	// Use git's %xNN escapes so no special bytes appear in the argument itself.
@@ -137,7 +145,9 @@ func logShell(ref string, maxCount int, all bool, paths []string) ([]CommitInfo,
 		args = append(args, "--")
 		args = append(args, paths...)
 	}
-	out, err := exec.Command("git", args...).Output()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
 	}

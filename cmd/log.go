@@ -13,10 +13,13 @@ import (
 )
 
 var logCmd = &cobra.Command{
-	Use:   "log [flags] [ref] [-- path...]",
+	Use:   "log [flags] [<ref> | <range>] [-- path...]",
 	Short: "Interactive commit log browser",
-	Long:  "Browse commit history with syntax-aware diff preview. Supports fuzzy filtering and split-pane browsing.",
-	RunE:  runLog,
+	Long: "Browse commit history with syntax-aware diff preview. Supports fuzzy " +
+		"filtering and split-pane browsing.\n\n" +
+		"Accepts a ref (branch, tag, @{upstream}) or a commit range such as " +
+		"main..HEAD or @{upstream}.. to scope the log.",
+	RunE: runLog,
 }
 
 func init() {

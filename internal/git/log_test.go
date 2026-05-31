@@ -98,6 +98,48 @@ func TestLog_NoBody(t *testing.T) {
 	}
 }
 
+func TestLog_Range(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	wt, err := repo.repo.Worktree()
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+	for _, msg := range []string{"second commit", "third commit"} {
+		writeFile(t, repo.root, "file.txt", msg)
+		if _, err := wt.Add("file.txt"); err != nil {
+			t.Fatalf("git add: %v", err)
+		}
+		testCommit(t, wt, msg)
+	}
+
+	t.Run("range excludes the base", func(t *testing.T) {
+		commits, err := repo.Log("HEAD~2..HEAD", 0, nil)
+		if err != nil {
+			t.Fatalf("Log() error = %v", err)
+		}
+		if len(commits) != 2 {
+			t.Fatalf("expected 2 commits in HEAD~2..HEAD, got %d", len(commits))
+		}
+		if commits[0].Message != "third commit" {
+			t.Errorf("commits[0].Message = %q, want %q", commits[0].Message, "third commit")
+		}
+		if commits[1].Message != "second commit" {
+			t.Errorf("commits[1].Message = %q, want %q", commits[1].Message, "second commit")
+		}
+	})
+
+	t.Run("empty range returns no commits", func(t *testing.T) {
+		commits, err := repo.Log("HEAD..HEAD", 0, nil)
+		if err != nil {
+			t.Fatalf("Log() error = %v", err)
+		}
+		if len(commits) != 0 {
+			t.Fatalf("expected 0 commits in empty range, got %d", len(commits))
+		}
+	})
+}
+
 func TestLog_BadRef(t *testing.T) {
 	repo := setupTestRepo(t)
 
