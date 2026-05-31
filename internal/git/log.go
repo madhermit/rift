@@ -75,11 +75,15 @@ func (r *Repo) logAllGoGit(maxCount int, paths []string) ([]CommitInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer refs.Close()
 
 	seen := map[plumbing.Hash]bool{}
 	commits := []CommitInfo{}
 
 	err = refs.ForEach(func(ref *plumbing.Reference) error {
+		if maxCount > 0 && len(commits) >= maxCount {
+			return storer.ErrStop
+		}
 		if !ref.Name().IsBranch() && !ref.Name().IsRemote() {
 			return nil
 		}
