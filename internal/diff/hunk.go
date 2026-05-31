@@ -226,3 +226,18 @@ func RawNewFileDiff(repoRoot, file string) (string, error) {
 	cmd.Dir = repoRoot
 	return runGitDiff(cmd, "git diff --no-index")
 }
+
+// FirstHunkLine returns the new-file line of the first hunk in file's diff, so an
+// editor can open at the change rather than the top of the file. Returns 0 (no
+// specific line) when the diff can't be produced or parsed.
+func FirstHunkLine(repoRoot string, staged bool, file string) int {
+	raw, err := RawUnifiedDiff(repoRoot, staged, file)
+	if err != nil {
+		return 0
+	}
+	files := ParseUnifiedDiff(raw)
+	if len(files) > 0 && len(files[0].Hunks) > 0 {
+		return files[0].Hunks[0].NewStart
+	}
+	return 0
+}

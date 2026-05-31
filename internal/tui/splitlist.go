@@ -300,7 +300,9 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 			m.filter.SetValue("")
 			return m.applyFilter()
 		}
-		return m, tea.Quit
+		// esc means "go back" (e.g. exit a drilldown); at the root there's nowhere
+		// to go, so do nothing. Quitting is q / ctrl+c.
+		return m, nil
 	}
 
 	if m.filtering {

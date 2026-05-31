@@ -208,8 +208,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = true
 		return m, nil
 	case "o":
+		// In the hunk view, open at the selected hunk; in the file list, open the
+		// selected file at its top.
+		if m.activePane == diffPane && m.hunkIdx < len(m.displayHunks) {
+			h := m.displayHunks[m.hunkIdx]
+			return m, tui.OpenInEditor(m.repo.Root(), h.fd.Path, h.hunk.NewStart)
+		}
 		if m.selectedIdx < len(m.filteredFiles) {
-			return m, tui.OpenInEditor(m.repo.Root(), m.filteredFiles[m.selectedIdx].Path)
+			return m, tui.OpenInEditor(m.repo.Root(), m.filteredFiles[m.selectedIdx].Path, 0)
 		}
 	case "tab":
 		if m.activePane == filePane {

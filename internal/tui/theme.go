@@ -192,9 +192,9 @@ func FooterContent(width int, content string) string {
 // bottom of the help overlay. Screens with a scrollable preview use the former.
 var (
 	PreviewHelpKeys = [][2]string{
-		{"ctrl+d/u", "scroll half-page"}, {"ctrl+f/b", "scroll page"}, {"esc", "back / quit"},
+		{"ctrl+d/u", "scroll half-page"}, {"ctrl+f/b", "scroll page"}, {"esc", "back"},
 	}
-	BasicHelpKeys = [][2]string{{"esc", "back / quit"}}
+	BasicHelpKeys = [][2]string{{"esc", "back"}}
 )
 
 // HelpView renders a keybinding overlay: header + a panel listing the screen's

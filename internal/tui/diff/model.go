@@ -70,6 +70,16 @@ func pathRow(prefix string, style lipgloss.Style, path, stat string, w int) stri
 	return rowWithStat(prefix+style.Render(tui.TruncatePath(path, avail)), stat, w)
 }
 
+// contextLabel is the header right-context: the engine name, prefixed with the
+// commit being viewed when this is a commit diff (so the drilldown shows which
+// commit, even after an engine toggle).
+func contextLabel(commitDiff bool, target, engineName string) string {
+	if commitDiff {
+		return target + " · " + engineName
+	}
+	return engineName
+}
+
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
 	commitDiff := target != ""
 	altEngine := diff.NewPlainEngine()
@@ -93,12 +103,17 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
-	hints = append(hints, [2]string{"o", "open"}, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
+	if !commitDiff {
+		// In a commit diff the files are historical; editing the working tree copy
+		// would be misleading, so don't offer `o`.
+		hints = append(hints, [2]string{"o", "open"})
+	}
+	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.ChangedFile]{
 		Screen:      "diff",
 		ListTitle:   listTitle,
-		Context:     engine.Name(),
+		Context:     contextLabel(commitDiff, target, engine.Name()),
 		MinList:     20,
 		MaxList:     60,
 		EmptyStatus: "No changes found",
@@ -172,15 +187,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break // only one engine available; nothing to toggle
 			}
 			m.engine, m.altEngine = m.altEngine, m.engine
-			m.list = m.list.SetContext(m.engine.Name())
+			m.list = m.list.SetContext(contextLabel(m.commitDiff, m.target, m.engine.Name()))
 			return m.reloadFresh()
 		case "s":
 			if !m.commitDiff {
 				return m.toggleStaged()
 			}
 		case "o":
-			if sel, ok := m.list.Selected(); ok && sel.Path != "" {
-				return m, tui.OpenInEditor(m.repo.Root(), sel.Path)
+			// Disabled for a commit diff: the files are historical, so editing the
+			// working tree copy would be misleading.
+			if sel, ok := m.list.Selected(); ok && !m.commitDiff && sel.Path != "" {
+				line := diff.FirstHunkLine(m.repo.Root(), m.staged, sel.Path)
+				return m, tui.OpenInEditor(m.repo.Root(), sel.Path, line)
 			}
 		}
 	}
@@ -198,6 +216,11 @@ func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View { return m.list.TeaView() }
+
+// Filtering and ShowingHelp expose the embedded list's modal state, so a parent
+// embedding this model (e.g. the log drilldown) knows when not to intercept esc.
+func (m Model) Filtering() bool   { return m.list.Filtering() }
+func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
 
 func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	m.staged = !m.staged
