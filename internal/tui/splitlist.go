@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -51,6 +52,10 @@ type SplitConfig[T any] struct {
 	// The cache is keyed by item identity only; the parent clears it (ClearCache
 	// / SetItems) when a setting that affects rendering changes.
 	CacheKey func(item T) string
+	// Yank returns the text to copy to the clipboard for an item when `y` is
+	// pressed (e.g. a commit hash or file path). Return "" or leave nil to
+	// disable yanking.
+	Yank func(item T) string
 }
 
 type splitPane int
@@ -79,8 +84,9 @@ type SplitList[T any] struct {
 	prevErr  error
 
 	spinner  spinner.Model
-	loading  bool // a preview is being loaded for the current selection
-	showHelp bool // the keybinding overlay is open
+	loading  bool   // a preview is being loaded for the current selection
+	showHelp bool   // the keybinding overlay is open
+	flash    string // transient footer message (e.g. "copied …"), cleared on nav
 
 	cache map[string]string // rendered previews, keyed by cfg.CacheKey
 	reqID int               // increments per preview request; stale results are dropped
@@ -124,6 +130,7 @@ func (m SplitList[T]) cacheKey(it T) string {
 func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	m.reqID++
 	m.prevErr = nil // a new selection clears any previous load error
+	m.flash = ""    // and any transient message (e.g. "copied …")
 	it, ok := m.Selected()
 	if !ok {
 		m.clearPreview()
@@ -148,6 +155,25 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	}
 	m.loading = true
 	return m, tea.Batch(emit, m.spinner.Tick)
+}
+
+// yank copies the selected item's Yank value to the clipboard and flashes a
+// confirmation in the footer.
+func (m SplitList[T]) yank() (SplitList[T], tea.Cmd) {
+	it, ok := m.Selected()
+	if !ok || m.cfg.Yank == nil {
+		return m, nil
+	}
+	val := m.cfg.Yank(it)
+	if val == "" {
+		return m, nil
+	}
+	if err := clipboard.WriteAll(val); err != nil {
+		m.flash = "clipboard unavailable"
+	} else {
+		m.flash = "copied " + val
+	}
+	return m, nil
 }
 
 // ClearCacheAndReload drops all cached previews and reloads the current
@@ -298,6 +324,8 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 		m.filtering = true
 		m.filter.Focus()
 		return m, nil
+	case "y":
+		return m.yank()
 	case "?":
 		m.showHelp = true
 		return m, nil
@@ -435,6 +463,8 @@ func (m SplitList[T]) View() string {
 		footer = FooterContent(m.width, m.filter.View())
 	case m.prevErr != nil:
 		footer = Footer(m.width, fmt.Sprintf("Error: %v", m.prevErr), nil)
+	case m.flash != "":
+		footer = Footer(m.width, m.flash, m.cfg.Hints)
 	default:
 		status := m.cfg.EmptyStatus
 		if len(m.filtered) > 0 {

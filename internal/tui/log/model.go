@@ -35,7 +35,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
-	hints = append(hints, [2]string{"?", "help"}, [2]string{"q", "quit"})
+	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.CommitInfo]{
 		Screen:       "log",
@@ -48,6 +48,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 		Match:        func(c git.CommitInfo) string { return c.Hash + " " + c.Message },
 		PreviewTitle: func(c git.CommitInfo) string { return c.Hash },
 		CacheKey:     func(c git.CommitInfo) string { return c.Hash },
+		Yank:         func(c git.CommitInfo) string { return c.Hash },
 		Row: func(c git.CommitInfo, w int, selected, collapsed bool) string {
 			style := tui.TextStyle(selected)
 			if collapsed {

@@ -93,7 +93,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
-	hints = append(hints, [2]string{"?", "help"}, [2]string{"q", "quit"})
+	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.ChangedFile]{
 		Screen:      "diff",
@@ -113,6 +113,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		// Cache per file; the All entry depends on the filtered set, so skip it.
 		// Staged/display changes clear the cache (SetItems / ClearCacheAndReload).
 		CacheKey: func(f git.ChangedFile) string { return f.Path },
+		Yank:     func(f git.ChangedFile) string { return f.Path },
 		Row: func(f git.ChangedFile, w int, selected, collapsed bool) string {
 			style := tui.TextStyle(selected)
 			switch {

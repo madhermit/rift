@@ -40,7 +40,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
-	hints = append(hints, [2]string{"?", "help"}, [2]string{"q", "quit"})
+	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.StashEntry]{
 		Screen:      "stash",
@@ -57,6 +57,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 			return fmt.Sprintf("stash@{%d} · %s", s.Index, s.Branch)
 		},
 		CacheKey: func(s git.StashEntry) string { return fmt.Sprintf("%d", s.Index) },
+		Yank:     func(s git.StashEntry) string { return fmt.Sprintf("stash@{%d}", s.Index) },
 		Row: func(s git.StashEntry, w int, selected, collapsed bool) string {
 			style := tui.TextStyle(selected)
 			if collapsed {
