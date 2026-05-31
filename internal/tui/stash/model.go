@@ -61,35 +61,8 @@ type diffLoadedMsg struct {
 	err     error
 }
 
-type layout struct {
-	headerHeight  int
-	contentHeight int
-	listWidth     int
-	diffWidth     int
-}
-
-const collapsedListWidth = 12
-
-func (m Model) layout() layout {
-	l := layout{headerHeight: 3}
-	l.contentHeight = m.height - l.headerHeight
-
-	if m.activePane == diffPane {
-		l.listWidth = collapsedListWidth
-	} else {
-		l.listWidth = m.width / 3
-		if l.listWidth < 30 {
-			l.listWidth = 30
-		}
-		if l.listWidth > 80 {
-			l.listWidth = 80
-		}
-	}
-	l.diffWidth = m.width - l.listWidth - 2
-	if l.diffWidth < 10 {
-		l.diffWidth = 10
-	}
-	return l
+func (m Model) layout() tui.SplitLayout {
+	return tui.ComputeSplitLayout(m.width, m.height, m.activePane == diffPane, 30, 80)
 }
 
 func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
@@ -221,8 +194,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
 	l := m.layout()
-	m.viewport.SetWidth(l.diffWidth)
-	m.viewport.SetHeight(l.contentHeight - 2)
+	m.viewport.SetWidth(l.DiffWidth)
+	m.viewport.SetHeight(l.ContentHeight - 2)
 	m.setDiffContent()
 	if len(m.filteredStashes) > 0 {
 		return m, m.loadStashDiff(m.filteredStashes[m.selectedIdx])
@@ -321,7 +294,7 @@ func (m Model) View() tea.View {
 	// Stash list with scroll
 	var stashList strings.Builder
 	collapsed := m.activePane == diffPane
-	listInnerHeight := l.contentHeight - 2
+	listInnerHeight := l.ContentHeight - 2
 	scrollOffset := 0
 	if m.selectedIdx >= listInnerHeight {
 		scrollOffset = m.selectedIdx - listInnerHeight + 1
@@ -332,7 +305,7 @@ func (m Model) View() tea.View {
 		if collapsed {
 			line = fmt.Sprintf("{%d}", s.Index)
 		} else {
-			line = tui.Truncate(fmt.Sprintf("stash@{%d} %s", s.Index, s.Message), l.listWidth-6)
+			line = tui.Truncate(fmt.Sprintf("stash@{%d} %s", s.Index, s.Message), l.ListWidth-6)
 		}
 		if i == m.selectedIdx {
 			stashList.WriteString(selectedItemStyle.Render(line))
@@ -349,8 +322,8 @@ func (m Model) View() tea.View {
 	} else {
 		vpStyle = activePaneStyle
 	}
-	listPaneView := listStyle.Width(l.listWidth - 2).Height(l.contentHeight - 2).Render(stashList.String())
-	diffPaneView := vpStyle.Width(l.diffWidth).Height(l.contentHeight - 2).Render(m.viewport.View())
+	listPaneView := listStyle.Width(l.ListWidth - 2).Height(l.ContentHeight - 2).Render(stashList.String())
+	diffPaneView := vpStyle.Width(l.DiffWidth).Height(l.ContentHeight - 2).Render(m.viewport.View())
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listPaneView, diffPaneView)
 

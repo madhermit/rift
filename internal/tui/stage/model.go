@@ -73,35 +73,8 @@ type stageResultMsg struct {
 	staged  bool // true if staged, false if unstaged
 }
 
-type layout struct {
-	headerHeight  int
-	contentHeight int
-	listWidth     int
-	diffWidth     int
-}
-
-const collapsedListWidth = 12
-
-func (m Model) layout() layout {
-	l := layout{headerHeight: 3}
-	l.contentHeight = m.height - l.headerHeight
-
-	if m.activePane == diffPane {
-		l.listWidth = collapsedListWidth
-	} else {
-		l.listWidth = m.width / 3
-		if l.listWidth < 20 {
-			l.listWidth = 20
-		}
-		if l.listWidth > 60 {
-			l.listWidth = 60
-		}
-	}
-	l.diffWidth = m.width - l.listWidth - 2
-	if l.diffWidth < 10 {
-		l.diffWidth = 10
-	}
-	return l
+func (m Model) layout() tui.SplitLayout {
+	return tui.ComputeSplitLayout(m.width, m.height, m.activePane == diffPane, 20, 60)
 }
 
 func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
@@ -366,8 +339,8 @@ func (m Model) reloadFiles() tea.Cmd {
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
 	l := m.layout()
-	m.viewport.SetWidth(l.diffWidth)
-	m.viewport.SetHeight(l.contentHeight - 2)
+	m.viewport.SetWidth(l.DiffWidth)
+	m.viewport.SetHeight(l.ContentHeight - 2)
 	m.renderHunks()
 	if len(m.filteredFiles) > 0 {
 		return m, m.loadSelectedDiff()
@@ -570,7 +543,7 @@ func (m Model) View() tea.View {
 
 	// File list with scroll
 	var fileList strings.Builder
-	listInnerHeight := l.contentHeight - 2
+	listInnerHeight := l.ContentHeight - 2
 	if listInnerHeight < 1 {
 		listInnerHeight = 1
 	}
@@ -591,7 +564,7 @@ func (m Model) View() tea.View {
 		if collapsed {
 			line = cursor + status + " " + tui.FileIcon(f.Path)
 		} else {
-			line = cursor + status + " " + tui.FileIcon(f.Path) + " " + tui.TruncatePath(f.Path, l.listWidth-12)
+			line = cursor + status + " " + tui.FileIcon(f.Path) + " " + tui.TruncatePath(f.Path, l.ListWidth-12)
 		}
 		if selected {
 			fileList.WriteString(selectedFileStyle.Render(line))
@@ -608,8 +581,8 @@ func (m Model) View() tea.View {
 	} else {
 		vpStyle = activePaneStyle
 	}
-	listPane := listStyle.Width(l.listWidth - 2).Height(l.contentHeight - 2).Render(fileList.String())
-	diffPaneView := vpStyle.Width(l.diffWidth).Height(l.contentHeight - 2).Render(m.viewport.View())
+	listPane := listStyle.Width(l.ListWidth - 2).Height(l.ContentHeight - 2).Render(fileList.String())
+	diffPaneView := vpStyle.Width(l.DiffWidth).Height(l.ContentHeight - 2).Render(m.viewport.View())
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listPane, diffPaneView)
 
