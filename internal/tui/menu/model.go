@@ -28,10 +28,15 @@ type Model struct {
 
 	filter    textinput.Model
 	filtering bool
+	showHelp  bool
 
 	width  int
 	height int
 	ready  bool
+}
+
+var menuHints = [][2]string{
+	{"↑↓", "nav"}, {"/", "filter"}, {"⏎", "select"}, {"?", "help"}, {"q", "quit"},
 }
 
 func (m Model) Selected() string {
@@ -76,10 +81,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
-	case "esc":
+	}
+	if m.showHelp {
+		m.showHelp = false // any key closes the help overlay
+		return m, nil
+	}
+	if msg.String() == "esc" {
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -110,6 +119,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "down", "j":
 		m.moveSelection(1)
+		return m, nil
+	case "?":
+		m.showHelp = true
 		return m, nil
 	case "q":
 		return m, tea.Quit
@@ -158,6 +170,13 @@ func (m Model) View() tea.View {
 		return tea.NewView("Loading...")
 	}
 
+	if m.showHelp {
+		contentH := m.height - tui.HeaderRows - tui.FooterRows
+		v := tea.NewView(tui.HelpView("", "a composable fuzzy git tool", menuHints, tui.BasicHelpKeys, m.width, contentH))
+		v.AltScreen = true
+		return v
+	}
+
 	var items strings.Builder
 	for i, cmd := range m.filtered {
 		selected := i == m.selectedIdx
@@ -186,9 +205,7 @@ func (m Model) View() tea.View {
 	if m.filtering {
 		footer = tui.FooterContent(m.width, m.filter.View())
 	} else {
-		footer = tui.Footer(m.width, fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filtered)), [][2]string{
-			{"↑↓", "nav"}, {"/", "filter"}, {"⏎", "select"}, {"q", "quit"},
-		})
+		footer = tui.Footer(m.width, fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filtered)), menuHints)
 	}
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, panel, footer))

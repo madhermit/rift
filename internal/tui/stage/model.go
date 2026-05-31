@@ -51,10 +51,16 @@ type Model struct {
 	diffErr        error
 	vim            tui.VimNav
 	skipDiffReload bool // after hunk stage/unstage, only reload file list
+	showHelp       bool
 
 	width  int
 	height int
 	ready  bool
+}
+
+var stageHints = [][2]string{
+	{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
+	{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"?", "help"}, {"q", "quit"},
 }
 
 type hunkDiffsMsg struct {
@@ -161,6 +167,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	if m.showHelp {
+		m.showHelp = false // any key closes the help overlay
+		return m, nil
+	}
+
 	if m.activePane == diffPane && !m.filtering {
 		switch msg.String() {
 		case "{", "}":
@@ -172,10 +186,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
+	if msg.String() == "esc" {
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -191,6 +202,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "?":
+		m.showHelp = true
+		return m, nil
 	case "tab":
 		if m.activePane == filePane {
 			m.activePane = diffPane
@@ -537,6 +551,13 @@ func (m Model) View() tea.View {
 	}
 
 	l := m.layout()
+
+	if m.showHelp {
+		v := tea.NewView(tui.HelpView("stage", m.engine.Name(), stageHints, tui.PreviewHelpKeys, m.width, l.ContentHeight))
+		v.AltScreen = true
+		return v
+	}
+
 	collapsed := m.activePane == diffPane
 
 	// File list body.
@@ -590,10 +611,7 @@ func (m Model) View() tea.View {
 		if len(m.filteredFiles) > 0 {
 			status = fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filteredFiles))
 		}
-		footer = tui.Footer(m.width, status, [][2]string{
-			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-			{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"q", "quit"},
-		})
+		footer = tui.Footer(m.width, status, stageHints)
 	}
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))

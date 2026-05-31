@@ -385,36 +385,6 @@ func (m *SplitList[T]) clearPreview() {
 
 // View renders the full screen (header + split panes + footer) as a string. The
 // parent wraps it in a tea.View.
-// helpBody renders the keybinding overlay: the screen's footer hints (shown in
-// full, unlike the footer which truncates) plus the always-available navigation
-// keys.
-func (m SplitList[T]) helpBody() string {
-	rows := append([][2]string{}, m.cfg.Hints...)
-	rows = append(rows,
-		[2]string{"", ""}, // spacer
-		[2]string{"ctrl+d/u", "scroll half-page (preview)"},
-		[2]string{"ctrl+f/b", "scroll page (preview)"},
-		[2]string{"esc", "clear filter / quit"},
-	)
-
-	keyW := 0
-	for _, h := range rows {
-		if w := lipgloss.Width(h[0]); w > keyW {
-			keyW = w
-		}
-	}
-
-	var b strings.Builder
-	for _, h := range rows {
-		if h[0] == "" {
-			b.WriteString("\n")
-			continue
-		}
-		b.WriteString("  " + keyStyle.Render(h[0]) + strings.Repeat(" ", keyW-lipgloss.Width(h[0])) + "   " + keyDescDim.Render(h[1]) + "\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
 func (m SplitList[T]) View() string {
 	if !m.ready {
 		return "Loading..."
@@ -422,10 +392,7 @@ func (m SplitList[T]) View() string {
 
 	l := m.layout()
 	if m.showHelp {
-		header := Header(m.cfg.Screen, m.cfg.Context, m.width)
-		help := Panel("keybindings", m.helpBody(), m.width, l.ContentHeight, true)
-		footer := FooterContent(m.width, keyDescDim.Render("press any key to close"))
-		return lipgloss.JoinVertical(lipgloss.Left, header, help, footer)
+		return HelpView(m.cfg.Screen, m.cfg.Context, m.cfg.Hints, PreviewHelpKeys, m.width, l.ContentHeight)
 	}
 	collapsed := m.active == splitPreviewPane
 

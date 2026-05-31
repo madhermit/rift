@@ -122,25 +122,63 @@ func Header(screen, context string, width int) string {
 }
 
 // Footer renders the two-row bottom bar: a faint rule then a status segment
-// followed by styled "key desc" hints separated by dim dots.
+// followed by styled "key desc" hints separated by dim dots. When the hints
+// don't fit, the trailing hints (e.g. "? help", "q quit") are kept and the
+// middle is dropped with an ellipsis, so help and quit stay discoverable.
 func Footer(width int, status string, hints [][2]string) string {
 	rule := ruleStyle.Render("╶" + strings.Repeat("─", maxInt(0, width-2)) + "╴")
+	sep := ruleStyle.Render(" · ")
+	render := func(h [2]string) string { return keyStyle.Render(h[0]) + " " + keyDescDim.Render(h[1]) }
 
-	var parts []string
+	left := " "
 	if status != "" {
-		parts = append(parts, statusStyle.Render(status))
-	}
-	var hintStrs []string
-	for _, h := range hints {
-		hintStrs = append(hintStrs, keyStyle.Render(h[0])+" "+keyDescDim.Render(h[1]))
-	}
-	if len(hintStrs) > 0 {
-		parts = append(parts, strings.Join(hintStrs, ruleStyle.Render(" · ")))
+		left += statusStyle.Render(status) + "   "
 	}
 
-	line := " " + strings.Join(parts, "   ")
-	line = ansi.Truncate(line, width, "")
-	return rule + "\n" + line
+	full := left + joinHints(hints, sep, render)
+	if len(hints) == 0 || lipgloss.Width(full) <= width {
+		return rule + "\n" + ansi.Truncate(full, width, "")
+	}
+
+	// Overflow: pin the trailing hints (help/quit), fill leading ones, drop the
+	// middle with an ellipsis.
+	tailN := minInt(2, len(hints))
+	tail := joinHints(hints[len(hints)-tailN:], sep, render)
+	ellipsis := ruleStyle.Render(" … ")
+	budget := width - lipgloss.Width(left) - lipgloss.Width(ellipsis) - lipgloss.Width(tail)
+
+	var kept []string
+	used := 0
+	for _, h := range hints[:len(hints)-tailN] {
+		seg := render(h)
+		cost := lipgloss.Width(seg)
+		if len(kept) > 0 {
+			cost += lipgloss.Width(sep)
+		}
+		if used+cost > budget {
+			break
+		}
+		used += cost
+		kept = append(kept, seg)
+	}
+
+	line := left + strings.Join(kept, sep) + ellipsis + tail
+	return rule + "\n" + ansi.Truncate(line, width, "")
+}
+
+func joinHints(hints [][2]string, sep string, render func([2]string) string) string {
+	parts := make([]string, len(hints))
+	for i, h := range hints {
+		parts[i] = render(h)
+	}
+	return strings.Join(parts, sep)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // FooterContent renders the bottom rule above an arbitrary content line, used
@@ -148,6 +186,47 @@ func Footer(width int, status string, hints [][2]string) string {
 func FooterContent(width int, content string) string {
 	rule := ruleStyle.Render("╶" + strings.Repeat("─", maxInt(0, width-2)) + "╴")
 	return rule + "\n " + ansi.Truncate(content, maxInt(0, width-1), "")
+}
+
+// PreviewHelpKeys and BasicHelpKeys are the always-available keys listed at the
+// bottom of the help overlay. Screens with a scrollable preview use the former.
+var (
+	PreviewHelpKeys = [][2]string{
+		{"ctrl+d/u", "scroll half-page"}, {"ctrl+f/b", "scroll page"}, {"esc", "back / quit"},
+	}
+	BasicHelpKeys = [][2]string{{"esc", "back / quit"}}
+)
+
+// HelpView renders a keybinding overlay: header + a panel listing the screen's
+// hints (shown in full, unlike the footer) plus the extra global keys, with a
+// "press any key to close" footer.
+func HelpView(screen, context string, hints, extra [][2]string, width, contentHeight int) string {
+	header := Header(screen, context, width)
+	panel := Panel("keybindings", helpBody(hints, extra), width, contentHeight, true)
+	footer := FooterContent(width, keyDescDim.Render("press any key to close"))
+	return lipgloss.JoinVertical(lipgloss.Left, header, panel, footer)
+}
+
+func helpBody(hints, extra [][2]string) string {
+	rows := append([][2]string{}, hints...)
+	rows = append(rows, [2]string{"", ""})
+	rows = append(rows, extra...)
+
+	keyW := 0
+	for _, h := range rows {
+		if w := lipgloss.Width(h[0]); w > keyW {
+			keyW = w
+		}
+	}
+	var b strings.Builder
+	for _, h := range rows {
+		if h[0] == "" {
+			b.WriteString("\n")
+			continue
+		}
+		b.WriteString("  " + keyStyle.Render(h[0]) + strings.Repeat(" ", keyW-lipgloss.Width(h[0])) + "   " + keyDescDim.Render(h[1]) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // Panel renders body inside a rounded box of the given OUTER width and height,

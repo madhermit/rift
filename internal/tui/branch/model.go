@@ -22,10 +22,15 @@ type Model struct {
 
 	filter    textinput.Model
 	filtering bool
+	showHelp  bool
 
 	width  int
 	height int
 	ready  bool
+}
+
+var branchHints = [][2]string{
+	{"↑↓", "nav"}, {"/", "filter"}, {"⏎", "checkout"}, {"?", "help"}, {"q", "quit"},
 }
 
 func (m Model) Checkout() string {
@@ -58,10 +63,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
-	case "esc":
+	}
+	if m.showHelp {
+		m.showHelp = false // any key closes the help overlay
+		return m, nil
+	}
+	if msg.String() == "esc" {
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -90,6 +99,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "down", "j":
 		m.moveSelection(1)
+		return m, nil
+	case "?":
+		m.showHelp = true
 		return m, nil
 	case "q":
 		return m, tea.Quit
@@ -169,6 +181,13 @@ func (m Model) View() tea.View {
 		return tea.NewView("Loading...")
 	}
 
+	if m.showHelp {
+		contentH := m.height - tui.HeaderRows - tui.FooterRows
+		v := tea.NewView(tui.HelpView("branch", "", branchHints, tui.BasicHelpKeys, m.width, contentH))
+		v.AltScreen = true
+		return v
+	}
+
 	visible := m.listHeight()
 
 	var list strings.Builder
@@ -208,9 +227,7 @@ func (m Model) View() tea.View {
 		footer = tui.FooterContent(m.width, m.filter.View())
 	case len(m.filtered) > 0:
 		status := fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filtered))
-		footer = tui.Footer(m.width, status, [][2]string{
-			{"↑↓", "nav"}, {"/", "filter"}, {"⏎", "checkout"}, {"q", "quit"},
-		})
+		footer = tui.Footer(m.width, status, branchHints)
 	default:
 		footer = tui.Footer(m.width, "No branches found", nil)
 	}
