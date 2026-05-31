@@ -102,6 +102,9 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 			}
 			return f.Path
 		},
+		// Cache per file; the All entry depends on the filtered set, so skip it.
+		// Staged/display changes clear the cache (SetItems / ClearCacheAndReload).
+		CacheKey: func(f git.ChangedFile) string { return f.Path },
 		Row: func(f git.ChangedFile, w int, selected, collapsed bool) string {
 			style := tui.TextStyle(selected)
 			switch {
@@ -134,12 +137,11 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tui.SelectionChangedMsg:
-		return m, m.previewCmd()
+		return m, m.previewCmd(msg.ReqID)
 	case filesLoadedMsg:
 		if msg.err != nil {
-			var cmd tea.Cmd
-			m.list, cmd = m.list.Update(tui.PreviewMsg{Err: msg.err})
-			return m, cmd
+			m.list = m.list.SetError(msg.err)
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.list, cmd = m.list.SetItems(prependAllEntry(msg.files))
@@ -147,7 +149,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.String() == "\\" && !m.list.Filtering() {
 			m.display = m.display.Next()
-			return m, m.previewCmd()
+			var cmd tea.Cmd
+			m.list, cmd = m.list.ClearCacheAndReload()
+			return m, cmd
 		}
 		if msg.String() == "s" && !m.commitDiff && !m.list.Filtering() {
 			return m.toggleStaged()
@@ -179,7 +183,7 @@ func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) previewCmd() tea.Cmd {
+func (m Model) previewCmd(reqID int) tea.Cmd {
 	sel, ok := m.list.Selected()
 	if !ok {
 		return nil
@@ -216,6 +220,6 @@ func (m Model) previewCmd() tea.Cmd {
 				result.WriteString("\n")
 			}
 		}
-		return tui.PreviewMsg{Content: result.String()}
+		return tui.PreviewMsg{Content: result.String(), ReqID: reqID}
 	}
 }

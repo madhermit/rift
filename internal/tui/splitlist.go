@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -11,17 +12,20 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// SelectionChangedMsg is emitted by a SplitList whenever the selected item
-// changes (navigation, filtering, resize, or SetItems). The parent model
-// responds by loading a preview for the now-selected item and feeding the
-// result back as a PreviewMsg. Routing preview loading through the parent lets
-// previews depend on parent state (e.g. staged vs unstaged).
-type SelectionChangedMsg struct{}
+// SelectionChangedMsg is emitted by a SplitList when the selected item changes
+// and its preview is not already cached. The parent loads a preview and feeds
+// the result back as a PreviewMsg carrying the same ReqID. Routing preview
+// loading through the parent lets previews depend on parent state (e.g. staged
+// vs unstaged). ReqID lets the component discard results from superseded
+// requests during fast navigation.
+type SelectionChangedMsg struct{ ReqID int }
 
-// PreviewMsg carries loaded preview content into a SplitList's preview pane.
+// PreviewMsg carries loaded preview content into a SplitList's preview pane. The
+// parent echoes the ReqID from the SelectionChangedMsg it is answering.
 type PreviewMsg struct {
 	Content string
 	Err     error
+	ReqID   int
 }
 
 // SplitConfig configures a SplitList for a concrete item type.
@@ -42,6 +46,11 @@ type SplitConfig[T any] struct {
 	Match func(item T) string
 	// PreviewTitle returns the preview pane's title for an item (may be nil).
 	PreviewTitle func(item T) string
+	// CacheKey returns a stable identity for an item's preview, used to cache
+	// rendered previews. Return "" to skip caching for an item. May be nil.
+	// The cache is keyed by item identity only; the parent clears it (ClearCache
+	// / SetItems) when a setting that affects rendering changes.
+	CacheKey func(item T) string
 }
 
 type splitPane int
@@ -69,6 +78,12 @@ type SplitList[T any] struct {
 	preview  string
 	prevErr  error
 
+	spinner spinner.Model
+	loading bool // a preview is being loaded for the current selection
+
+	cache map[string]string // rendered previews, keyed by cfg.CacheKey
+	reqID int               // increments per preview request; stale results are dropped
+
 	width, height int
 	ready         bool
 }
@@ -81,7 +96,74 @@ func NewSplitList[T any](cfg SplitConfig[T], items []T) SplitList[T] {
 		filtered: items,
 		viewport: viewport.New(),
 		filter:   NewFilterInput(),
+		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		cache:    map[string]string{},
 	}
+}
+
+func (m SplitList[T]) cacheKey(it T) string {
+	if m.cfg.CacheKey == nil {
+		return ""
+	}
+	k := m.cfg.CacheKey(it)
+	if k == "" {
+		return ""
+	}
+	// Width is part of the preview's identity: difftastic bakes the
+	// side-by-side/inline layout into its output, so a preview rendered at one
+	// pane width must not be served at another (e.g. after a resize or after
+	// tab/enter collapses the list pane).
+	return fmt.Sprintf("%s\x00%d", k, m.viewport.Width())
+}
+
+// requestPreview is called whenever the selection changes. On a cache hit it
+// shows the cached preview instantly; on a miss it clears the now-stale preview
+// (so the previous item's diff is never shown under the new selection), shows
+// the spinner, and asks the parent to load via SelectionChangedMsg.
+func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
+	m.reqID++
+	m.prevErr = nil // a new selection clears any previous load error
+	it, ok := m.Selected()
+	if !ok {
+		m.clearPreview()
+		return m, nil
+	}
+	if key := m.cacheKey(it); key != "" {
+		if cached, hit := m.cache[key]; hit {
+			m.loading = false
+			m.preview = cached
+			m.setPreviewContent()
+			m.viewport.GotoTop()
+			return m, nil
+		}
+	}
+	m.preview = ""
+	m.setPreviewContent()
+
+	reqID := m.reqID
+	emit := func() tea.Msg { return SelectionChangedMsg{ReqID: reqID} }
+	if m.loading {
+		return m, emit
+	}
+	m.loading = true
+	return m, tea.Batch(emit, m.spinner.Tick)
+}
+
+// ClearCacheAndReload drops all cached previews and reloads the current
+// selection. Parents call this when a setting that affects rendering (e.g. the
+// diff layout) changes.
+func (m SplitList[T]) ClearCacheAndReload() (SplitList[T], tea.Cmd) {
+	m.cache = map[string]string{}
+	return m.requestPreview()
+}
+
+// SetError shows err in the footer and clears the preview. Used for failures
+// not tied to a specific preview request (e.g. reloading the item list); unlike
+// a PreviewMsg it is not gated by the request token.
+func (m SplitList[T]) SetError(err error) SplitList[T] {
+	m.prevErr = err
+	m.clearPreview()
+	return m
 }
 
 // Selected returns the currently selected item, or ok=false when the (filtered)
@@ -110,9 +192,11 @@ func (m SplitList[T]) SetListTitle(title string) SplitList[T] {
 }
 
 // SetItems replaces the item set, re-applies the active filter, and requests a
-// fresh preview.
+// fresh preview. The cache is cleared because the item set (and the state it
+// reflects, e.g. staged vs unstaged) has changed.
 func (m SplitList[T]) SetItems(items []T) (SplitList[T], tea.Cmd) {
 	m.items = items
+	m.cache = map[string]string{}
 	return m.applyFilter()
 }
 
@@ -123,15 +207,31 @@ func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
 		m.ready = true
 		return m.relayout()
 	case PreviewMsg:
+		if msg.ReqID != m.reqID {
+			return m, nil // superseded by a newer selection
+		}
 		m.prevErr = msg.Err
 		if msg.Err != nil {
-			m.preview = ""
-		} else {
-			m.preview = msg.Content
+			m.clearPreview()
+			return m, nil
+		}
+		m.loading = false
+		m.preview = msg.Content
+		if it, ok := m.Selected(); ok {
+			if key := m.cacheKey(it); key != "" {
+				m.cache[key] = msg.Content
+			}
 		}
 		m.setPreviewContent()
 		m.viewport.GotoTop()
 		return m, nil
+	case spinner.TickMsg:
+		if !m.loading {
+			return m, nil // let the tick chain die once loading finishes
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
@@ -218,6 +318,7 @@ func (m SplitList[T]) navigate(delta int) (SplitList[T], tea.Cmd) {
 	if len(m.filtered) == 0 {
 		return m, nil
 	}
+	prev := m.selected
 	m.selected += delta
 	if m.selected < 0 {
 		m.selected = 0
@@ -225,18 +326,16 @@ func (m SplitList[T]) navigate(delta int) (SplitList[T], tea.Cmd) {
 	if m.selected >= len(m.filtered) {
 		m.selected = len(m.filtered) - 1
 	}
-	return m, selectionChanged
+	if m.selected == prev {
+		return m, nil // already at the boundary; nothing to reload
+	}
+	return m.requestPreview()
 }
 
 func (m SplitList[T]) applyFilter() (SplitList[T], tea.Cmd) {
 	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
 	m.selected = 0
-	if len(m.filtered) == 0 {
-		m.preview = ""
-		m.viewport.SetContent("")
-		return m, nil
-	}
-	return m, selectionChanged
+	return m.requestPreview()
 }
 
 func (m SplitList[T]) layout() SplitLayout {
@@ -247,11 +346,7 @@ func (m SplitList[T]) relayout() (SplitList[T], tea.Cmd) {
 	l := m.layout()
 	m.viewport.SetWidth(l.DiffWidth)
 	m.viewport.SetHeight(l.ContentHeight - 2)
-	m.setPreviewContent()
-	if len(m.filtered) == 0 {
-		return m, nil
-	}
-	return m, selectionChanged
+	return m.requestPreview()
 }
 
 func (m *SplitList[T]) setPreviewContent() {
@@ -262,7 +357,12 @@ func (m *SplitList[T]) setPreviewContent() {
 	m.vim.SetContent(&m.viewport, content)
 }
 
-func selectionChanged() tea.Msg { return SelectionChangedMsg{} }
+// clearPreview blanks the preview pane and stops the spinner.
+func (m *SplitList[T]) clearPreview() {
+	m.loading = false
+	m.preview = ""
+	m.setPreviewContent()
+}
 
 // View renders the full screen (header + split panes + footer) as a string. The
 // parent wraps it in a tea.View.
@@ -296,6 +396,9 @@ func (m SplitList[T]) View() string {
 	previewTitle := ""
 	if it, ok := m.Selected(); ok && m.cfg.PreviewTitle != nil {
 		previewTitle = m.cfg.PreviewTitle(it)
+	}
+	if m.loading {
+		previewTitle = m.spinner.View() + " " + previewTitle
 	}
 
 	listPanel := Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.active == splitListPane)

@@ -45,6 +45,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 		PreviewTitle: func(s git.StashEntry) string {
 			return fmt.Sprintf("stash@{%d} · %s", s.Index, s.Branch)
 		},
+		CacheKey: func(s git.StashEntry) string { return fmt.Sprintf("%d", s.Index) },
 		Row: func(s git.StashEntry, w int, selected, collapsed bool) string {
 			style := tui.TextStyle(selected)
 			if collapsed {
@@ -70,11 +71,13 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tui.SelectionChangedMsg:
-		return m, m.previewCmd()
+		return m, m.previewCmd(msg.ReqID)
 	case tea.KeyPressMsg:
 		if msg.String() == "\\" && !m.list.Filtering() {
 			m.display = m.display.Next()
-			return m, m.previewCmd()
+			var cmd tea.Cmd
+			m.list, cmd = m.list.ClearCacheAndReload()
+			return m, cmd
 		}
 		if action, ok := stashAction(msg.String()); ok && !m.list.Filtering() {
 			if _, sel := m.list.Selected(); sel {
@@ -102,7 +105,7 @@ func stashAction(key string) (StashAction, bool) {
 	return NoAction, false
 }
 
-func (m Model) previewCmd() tea.Cmd {
+func (m Model) previewCmd(reqID int) tea.Cmd {
 	entry, ok := m.list.Selected()
 	if !ok {
 		return nil
@@ -114,8 +117,8 @@ func (m Model) previewCmd() tea.Cmd {
 		color := tui.ColorEnabled()
 		content, err := engine.DiffCommit(context.Background(), repo.Root(), base, ref, color, width, display)
 		if err != nil {
-			return tui.PreviewMsg{Err: err}
+			return tui.PreviewMsg{Err: err, ReqID: reqID}
 		}
-		return tui.PreviewMsg{Content: content}
+		return tui.PreviewMsg{Content: content, ReqID: reqID}
 	}
 }

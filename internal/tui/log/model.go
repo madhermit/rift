@@ -37,6 +37,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 		},
 		Match:        func(c git.CommitInfo) string { return c.Hash + " " + c.Message },
 		PreviewTitle: func(c git.CommitInfo) string { return c.Hash },
+		CacheKey:     func(c git.CommitInfo) string { return c.Hash },
 		Row: func(c git.CommitInfo, w int, selected, collapsed bool) string {
 			style := tui.TextStyle(selected)
 			if collapsed {
@@ -53,11 +54,13 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tui.SelectionChangedMsg:
-		return m, m.previewCmd()
+		return m, m.previewCmd(msg.ReqID)
 	case tea.KeyPressMsg:
 		if msg.String() == "\\" && !m.list.Filtering() {
 			m.display = m.display.Next()
-			return m, m.previewCmd()
+			var cmd tea.Cmd
+			m.list, cmd = m.list.ClearCacheAndReload()
+			return m, cmd
 		}
 	}
 	var cmd tea.Cmd
@@ -67,7 +70,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View { return m.list.TeaView() }
 
-func (m Model) previewCmd() tea.Cmd {
+func (m Model) previewCmd(reqID int) tea.Cmd {
 	commit, ok := m.list.Selected()
 	if !ok {
 		return nil
@@ -84,9 +87,9 @@ func (m Model) previewCmd() tea.Cmd {
 		header := commitHeader(commit, files, color, width)
 		content, err := engine.DiffCommit(context.Background(), repo.Root(), base, commit.Hash, color, width, display)
 		if err != nil {
-			return tui.PreviewMsg{Content: content, Err: err}
+			return tui.PreviewMsg{Content: content, Err: err, ReqID: reqID}
 		}
-		return tui.PreviewMsg{Content: header + content}
+		return tui.PreviewMsg{Content: header + content, ReqID: reqID}
 	}
 }
 
