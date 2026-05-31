@@ -2,12 +2,25 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/output"
 	"github.com/madhermit/rift/internal/tui/menu"
 	"github.com/spf13/cobra"
 )
+
+// runGit runs a git write command with the terminal's stdio attached, so
+// interactive operations (editor prompts, conflict output) work after the TUI
+// exits.
+func runGit(args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
 
 var rootCmd = &cobra.Command{
 	Use:           "rift",

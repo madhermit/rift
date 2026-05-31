@@ -16,6 +16,16 @@ import (
 // that has no parent.
 const emptyTree = "4b825dc642cb6eb9a060e54bf899d69f82cf7207"
 
+// Action is a git operation the user chose to run on the selected commit; the
+// program quits with it and the command layer performs it.
+type Action int
+
+const (
+	NoAction Action = iota
+	CherryPick
+	Revert
+)
+
 type Model struct {
 	repo            *git.Repo
 	engine          diff.Engine
@@ -23,6 +33,19 @@ type Model struct {
 	canToggleEngine bool        // true when the two engines actually differ
 	list            tui.SplitList[git.CommitInfo]
 	display         diff.Display
+	action          Action
+}
+
+// Action reports the git operation chosen for the selected commit (NoAction if
+// the user just quit).
+func (m Model) Action() Action { return m.action }
+
+// SelectedHash is the hash of the commit the user acted on, or "" if none.
+func (m Model) SelectedHash() string {
+	if c, ok := m.list.Selected(); ok {
+		return c.Hash
+	}
+	return ""
 }
 
 func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
@@ -35,7 +58,9 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
-	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
+	hints = append(hints,
+		[2]string{"c", "cherry-pick"}, [2]string{"r", "revert"},
+		[2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.CommitInfo]{
 		Screen:       "log",
@@ -81,6 +106,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.engine, m.altEngine = m.altEngine, m.engine
 			m.list = m.list.SetContext(m.engine.Name())
 			return m.reloadFresh()
+		case "c":
+			if _, ok := m.list.Selected(); ok {
+				m.action = CherryPick
+				return m, tea.Quit
+			}
+		case "r":
+			if _, ok := m.list.Selected(); ok {
+				m.action = Revert
+				return m, tea.Quit
+			}
 		}
 	}
 	var cmd tea.Cmd

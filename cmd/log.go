@@ -65,7 +65,24 @@ func runLog(cmd *cobra.Command, args []string) error {
 	default:
 		engine := diff.NewEngine()
 		m := logui.New(repo, engine, commits)
-		_, err := tea.NewProgram(m).Run()
-		return err
+		result, err := tea.NewProgram(m).Run()
+		if err != nil {
+			return err
+		}
+		final, ok := result.(logui.Model)
+		if !ok {
+			return nil
+		}
+		hash := final.SelectedHash()
+		if hash == "" {
+			return nil
+		}
+		switch final.Action() {
+		case logui.CherryPick:
+			return runGit("cherry-pick", hash)
+		case logui.Revert:
+			return runGit("revert", hash)
+		}
+		return nil
 	}
 }
