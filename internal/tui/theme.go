@@ -1,11 +1,24 @@
 package tui
 
 import (
+	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
+
+// ColorEnabled reports whether ANSI color output is enabled (i.e. NO_COLOR is
+// unset). Callers pass the result to the diff engine and styling helpers.
+func ColorEnabled() bool { return os.Getenv("NO_COLOR") == "" }
+
+// TextStyle returns the list-row text style for a selected vs unselected row.
+func TextStyle(selected bool) lipgloss.Style {
+	if selected {
+		return SelectedTextStyle
+	}
+	return NormalTextStyle
+}
 
 // Palette — a blue accent over a neutral gray scale, shared by every screen so
 // the chrome stays consistent. Kept on ANSI 256 indices for broad terminal

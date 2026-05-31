@@ -3,7 +3,6 @@ package stageui
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -404,7 +403,7 @@ func (m Model) loadSelectedDiff() tea.Cmd {
 	width := m.viewport.Width()
 	return func() tea.Msg {
 		untracked := f.StagingStatus == "Untracked" || f.WorktreeStatus == "Untracked"
-		color := os.Getenv("NO_COLOR") == ""
+		color := tui.ColorEnabled()
 		var result []displayHunk
 
 		if untracked {
