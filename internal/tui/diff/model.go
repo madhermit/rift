@@ -331,83 +331,84 @@ func (m Model) View() tea.View {
 	}
 
 	l := m.layout()
-
-	titleText := fmt.Sprintf("rift diff  [%s]", m.engine.Name())
-	if !m.commitDiff {
-		label := "unstaged"
-		if m.staged {
-			label = "staged"
-		}
-		titleText += "  " + label
-	}
-	title := titleStyle.Render(titleText)
-
-	// File list with scroll
-	var fileList strings.Builder
-	listInnerHeight := l.ContentHeight - 2
-	scrollOffset := 0
-	if m.selectedIdx >= listInnerHeight {
-		scrollOffset = m.selectedIdx - listInnerHeight + 1
-	}
 	collapsed := m.activePane == diffPane
-	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerHeight; i++ {
+
+	// File list body.
+	var list strings.Builder
+	listInnerH := l.ContentHeight - 2
+	scrollOffset := 0
+	if m.selectedIdx >= listInnerH {
+		scrollOffset = m.selectedIdx - listInnerH + 1
+	}
+	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerH; i++ {
 		f := m.filteredFiles[i]
+		selected := i == m.selectedIdx
+		textStyle := tui.NormalTextStyle
+		if selected {
+			textStyle = tui.SelectedTextStyle
+		}
 		var line string
-		if f.Path == "" {
-			if collapsed {
-				line = "*"
-			} else {
-				line = fmt.Sprintf("* All (%d files)", len(m.filteredFiles)-1)
-			}
-		} else if collapsed {
-			line = git.StatusChar(f.Status) + " " + tui.FileIcon(f.Path)
-		} else {
-			line = git.StatusChar(f.Status) + " " + tui.FileIcon(f.Path) + " " + tui.TruncatePath(f.Path, l.ListWidth-8)
+		switch {
+		case f.Path == "" && collapsed:
+			line = textStyle.Render("∗")
+		case f.Path == "":
+			line = textStyle.Render(fmt.Sprintf("∗ All (%d files)", len(m.filteredFiles)-1))
+		case collapsed:
+			line = tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path)
+		default:
+			line = tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " +
+				tui.FileIcon(f.Path) + " " + textStyle.Render(tui.TruncatePath(f.Path, l.ListWidth-8))
 		}
-		if i == m.selectedIdx {
-			fileList.WriteString(selectedFileStyle.Render(line))
-		} else {
-			fileList.WriteString(fileItemStyle.Render(line))
-		}
-		fileList.WriteString("\n")
+		list.WriteString(tui.Marker(selected) + line + "\n")
 	}
 
-	// Pane rendering — active pane gets accent border
-	listStyle, vpStyle := paneStyle, paneStyle
-	if m.activePane == filePane {
-		listStyle = activePaneStyle
-	} else {
-		vpStyle = activePaneStyle
+	listTitle := "changes"
+	if !m.commitDiff {
+		listTitle = "unstaged"
+		if m.staged {
+			listTitle = "staged"
+		}
 	}
-	listPane := listStyle.Width(l.ListWidth - 2).Height(l.ContentHeight - 2).Render(fileList.String())
-	diffPaneView := vpStyle.Width(l.DiffWidth).Height(l.ContentHeight - 2).Render(m.viewport.View())
+	diffTitle := ""
+	if collapsed {
+		listTitle = ""
+	}
+	if len(m.filteredFiles) > 0 {
+		if diffTitle = m.filteredFiles[m.selectedIdx].Path; diffTitle == "" {
+			diffTitle = "All"
+		}
+	}
+	listPanel := tui.Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.activePane == filePane)
+	diffPanel := tui.Panel(diffTitle, m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
-	content := lipgloss.JoinHorizontal(lipgloss.Top, listPane, diffPaneView)
+	header := tui.Header("diff", m.engine.Name(), m.width)
 
-	// Status bar
-	var status string
+	var footer string
 	switch {
 	case m.filtering:
-		status = m.filter.View()
+		footer = tui.FooterContent(m.width, m.filter.View())
 	case m.diffErr != nil:
-		status = statusBarStyle.Render(fmt.Sprintf("Error: %v", m.diffErr))
-	case len(m.filteredFiles) > 0:
-		f := m.filteredFiles[m.selectedIdx]
-		label := f.Path
-		if label == "" {
-			label = "All"
-		}
-		pct := m.viewport.ScrollPercent() * 100
-		keys := "q:quit /filter tab:switch j/k:nav gg/G:top/bot {/}:section"
-		if !m.commitDiff {
-			keys += " s:staged/unstaged"
-		}
-		status = statusBarStyle.Render(fmt.Sprintf("%s  %.0f%%  [%d/%d]  %s", label, pct, m.selectedIdx+1, len(m.filteredFiles), keys))
+		footer = tui.Footer(m.width, fmt.Sprintf("Error: %v", m.diffErr), nil)
 	default:
-		status = statusBarStyle.Render("No changes found")
+		status := "No changes found"
+		if len(m.filteredFiles) > 0 {
+			status = fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filteredFiles))
+			if collapsed {
+				status += fmt.Sprintf(" · %.0f%%", m.viewport.ScrollPercent()*100)
+			}
+		}
+		hints := [][2]string{
+			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"}, {"gg/G", "top/bot"}, {"{/}", "section"},
+		}
+		if !m.commitDiff {
+			hints = append(hints, [2]string{"s", "staged"})
+		}
+		hints = append(hints, [2]string{"q", "quit"})
+		footer = tui.Footer(m.width, status, hints)
 	}
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))
 	v.AltScreen = true
 	return v
 }

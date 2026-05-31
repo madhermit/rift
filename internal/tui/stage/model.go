@@ -538,73 +538,66 @@ func (m Model) View() tea.View {
 	}
 
 	l := m.layout()
+	collapsed := m.activePane == diffPane
 
-	title := titleStyle.Render(fmt.Sprintf("rift stage  [%s]", m.engine.Name()))
-
-	// File list with scroll
-	var fileList strings.Builder
-	listInnerHeight := l.ContentHeight - 2
-	if listInnerHeight < 1 {
-		listInnerHeight = 1
+	// File list body.
+	var list strings.Builder
+	listInnerH := l.ContentHeight - 2
+	if listInnerH < 1 {
+		listInnerH = 1
 	}
 	scrollOffset := 0
-	if m.selectedIdx >= listInnerHeight {
-		scrollOffset = m.selectedIdx - listInnerHeight + 1
+	if m.selectedIdx >= listInnerH {
+		scrollOffset = m.selectedIdx - listInnerH + 1
 	}
-	collapsed := m.activePane == diffPane
-	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerHeight; i++ {
+	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerH; i++ {
 		f := m.filteredFiles[i]
 		selected := i == m.selectedIdx
-		cursor := "  "
-		if selected {
-			cursor = "▸ "
-		}
 		status := formatStatusShort(f)
+		textStyle := tui.NormalTextStyle
+		if selected {
+			textStyle = tui.SelectedTextStyle
+		}
 		var line string
 		if collapsed {
-			line = cursor + status + " " + tui.FileIcon(f.Path)
+			line = status + " " + tui.FileIcon(f.Path)
 		} else {
-			line = cursor + status + " " + tui.FileIcon(f.Path) + " " + tui.TruncatePath(f.Path, l.ListWidth-12)
+			line = status + " " + tui.FileIcon(f.Path) + " " + textStyle.Render(tui.TruncatePath(f.Path, l.ListWidth-9))
 		}
-		if selected {
-			fileList.WriteString(selectedFileStyle.Render(line))
-		} else {
-			fileList.WriteString(fileItemStyle.Render(line))
-		}
-		fileList.WriteString("\n")
+		list.WriteString(tui.Marker(selected) + line + "\n")
 	}
 
-	// Pane rendering
-	listStyle, vpStyle := paneStyle, paneStyle
-	if m.activePane == filePane {
-		listStyle = activePaneStyle
-	} else {
-		vpStyle = activePaneStyle
+	listTitle, diffTitle := "changes", ""
+	if collapsed {
+		listTitle = ""
 	}
-	listPane := listStyle.Width(l.ListWidth - 2).Height(l.ContentHeight - 2).Render(fileList.String())
-	diffPaneView := vpStyle.Width(l.DiffWidth).Height(l.ContentHeight - 2).Render(m.viewport.View())
+	if len(m.filteredFiles) > 0 {
+		diffTitle = m.filteredFiles[m.selectedIdx].Path
+	}
+	listPanel := tui.Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.activePane == filePane)
+	diffPanel := tui.Panel(diffTitle, m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
-	content := lipgloss.JoinHorizontal(lipgloss.Top, listPane, diffPaneView)
+	header := tui.Header("stage", m.engine.Name(), m.width)
 
-	// Status bar
-	var status string
+	var footer string
 	switch {
 	case m.filtering:
-		status = m.filter.View()
+		footer = tui.FooterContent(m.width, m.filter.View())
 	case m.diffErr != nil:
-		status = statusBarStyle.Render(fmt.Sprintf("Error: %v", m.diffErr))
-	case len(m.filteredFiles) > 0:
-		f := m.filteredFiles[m.selectedIdx]
-		pct := m.viewport.ScrollPercent() * 100
-		status = statusBarStyle.Render(fmt.Sprintf(
-			"%s  %.0f%%  [%d/%d]  s:stage u:unstage a:all tab:switch n/p:hunk",
-			f.Path, pct, m.selectedIdx+1, len(m.filteredFiles),
-		))
+		footer = tui.Footer(m.width, fmt.Sprintf("Error: %v", m.diffErr), nil)
 	default:
-		status = statusBarStyle.Render("No changes found")
+		status := "No changes found"
+		if len(m.filteredFiles) > 0 {
+			status = fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filteredFiles))
+		}
+		footer = tui.Footer(m.width, status, [][2]string{
+			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
+			{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"q", "quit"},
+		})
 	}
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))
 	v.AltScreen = true
 	return v
 }

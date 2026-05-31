@@ -158,33 +158,40 @@ func (m Model) View() tea.View {
 		return tea.NewView("Loading...")
 	}
 
-	title := titleStyle.Render("rift")
-
 	var items strings.Builder
 	for i, cmd := range m.filtered {
-		name := cmd.Name
+		selected := i == m.selectedIdx
+		nameStyle := tui.NormalTextStyle
+		switch {
+		case !cmd.Available:
+			nameStyle = dimStyle
+		case selected:
+			nameStyle = tui.SelectedTextStyle
+		}
+		desc := cmd.Description
 		if !cmd.Available {
-			name += " (coming soon)"
+			desc += " (soon)"
 		}
-
-		if i == m.selectedIdx {
-			items.WriteString(selectedItemStyle.Render(name))
-		} else {
-			items.WriteString(itemStyle.Render(name))
-		}
-		items.WriteString("\n")
-		items.WriteString(descriptionStyle.Render(cmd.Description))
-		items.WriteString("\n\n")
+		row := tui.Marker(selected) + nameStyle.Render(fmt.Sprintf("%-9s", cmd.Name)) +
+			"  " + dimStyle.Render(desc)
+		items.WriteString(row + "\n")
 	}
 
-	var status string
+	contentH := m.height - tui.HeaderRows - tui.FooterRows
+	panel := tui.Panel("commands", items.String(), m.width, contentH, true)
+
+	header := tui.Header("", "a composable fuzzy git tool", m.width)
+
+	var footer string
 	if m.filtering {
-		status = m.filter.View()
+		footer = tui.FooterContent(m.width, m.filter.View())
 	} else {
-		status = statusBarStyle.Render(fmt.Sprintf("[%d/%d]  q:quit  /:filter  j/k:nav  enter:select", m.selectedIdx+1, len(m.filtered)))
+		footer = tui.Footer(m.width, fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filtered)), [][2]string{
+			{"↑↓", "nav"}, {"/", "filter"}, {"⏎", "select"}, {"q", "quit"},
+		})
 	}
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, items.String(), status))
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, panel, footer))
 	v.AltScreen = true
 	return v
 }

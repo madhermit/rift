@@ -4,9 +4,17 @@ package tui
 // active and the list collapses to a narrow strip.
 const CollapsedListWidth = 12
 
+// HeaderRows and FooterRows are the vertical chrome reserved above and below
+// the split-pane content (see Header and Footer).
+const (
+	HeaderRows = 2
+	FooterRows = 2
+)
+
 // SplitLayout holds the computed dimensions of a list/diff split-pane view.
+// ContentHeight is the height of each pane (border included), with the header
+// and footer rows already subtracted.
 type SplitLayout struct {
-	HeaderHeight  int
 	ContentHeight int
 	ListWidth     int
 	DiffWidth     int
@@ -18,8 +26,8 @@ type SplitLayout struct {
 // [minList, maxList]. The diff pane takes the remainder less 2 columns for its
 // border, floored at 10.
 func ComputeSplitLayout(width, height int, collapsed bool, minList, maxList int) SplitLayout {
-	l := SplitLayout{HeaderHeight: 3}
-	l.ContentHeight = height - l.HeaderHeight
+	l := SplitLayout{}
+	l.ContentHeight = height - HeaderRows - FooterRows
 
 	if collapsed {
 		l.ListWidth = CollapsedListWidth

@@ -1,60 +1,20 @@
 package stageui
 
-import "charm.land/lipgloss/v2"
+import (
+	"charm.land/lipgloss/v2"
+	"github.com/madhermit/rift/internal/tui"
+)
 
 var (
-	subtle = lipgloss.Color("241")
-	accent = lipgloss.Color("39")
-	white  = lipgloss.Color("15")
-	green  = lipgloss.Color("2")
-	red    = lipgloss.Color("1")
+	// Per-file staged/unstaged status chars.
+	stagedStyle   = lipgloss.NewStyle().Foreground(tui.Green)
+	unstagedStyle = lipgloss.NewStyle().Foreground(tui.Red)
 
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(accent).
-			PaddingLeft(1)
+	// Hunk separators and gutter markers in the diff pane.
+	hunkSepStyle    = lipgloss.NewStyle().Foreground(tui.Green).Bold(true)
+	hunkSepDimStyle = lipgloss.NewStyle().Foreground(tui.Subtle)
 
-	statusBarStyle = lipgloss.NewStyle().
-			Foreground(subtle).
-			PaddingLeft(1)
-
-	fileItemStyle = lipgloss.NewStyle().
-			Foreground(subtle).
-			PaddingLeft(1)
-
-	selectedFileStyle = lipgloss.NewStyle().
-				Foreground(white).
-				Background(lipgloss.Color("236")).
-				PaddingLeft(1)
-
-	paneStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(subtle)
-
-	activePaneStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(accent)
-
-	stagedStyle = lipgloss.NewStyle().
-			Foreground(green)
-
-	unstagedStyle = lipgloss.NewStyle().
-			Foreground(red)
-
-	hunkSepStyle = lipgloss.NewStyle().
-			Foreground(green).
-			Bold(true)
-
-	hunkSepDimStyle = lipgloss.NewStyle().
-			Foreground(subtle)
-
-	sidebarUnstaged = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("5")).
-			Render("▎") + " "
-
-	sidebarStaged = lipgloss.NewStyle().
-			Foreground(green).
-			Render("▎") + " "
-
+	sidebarUnstaged = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render("▎") + " "
+	sidebarStaged   = lipgloss.NewStyle().Foreground(tui.Green).Render("▎") + " "
 	sidebarInactive = "  "
 )

@@ -288,64 +288,61 @@ func (m Model) View() tea.View {
 	}
 
 	l := m.layout()
-
-	title := titleStyle.Render(fmt.Sprintf("rift stash  [%s]", m.engine.Name()))
-
-	// Stash list with scroll
-	var stashList strings.Builder
 	collapsed := m.activePane == diffPane
-	listInnerHeight := l.ContentHeight - 2
+
+	// Stash list body.
+	var list strings.Builder
+	listInnerH := l.ContentHeight - 2
 	scrollOffset := 0
-	if m.selectedIdx >= listInnerHeight {
-		scrollOffset = m.selectedIdx - listInnerHeight + 1
+	if m.selectedIdx >= listInnerH {
+		scrollOffset = m.selectedIdx - listInnerH + 1
 	}
-	for i := scrollOffset; i < len(m.filteredStashes) && i-scrollOffset < listInnerHeight; i++ {
+	for i := scrollOffset; i < len(m.filteredStashes) && i-scrollOffset < listInnerH; i++ {
 		s := m.filteredStashes[i]
-		var line string
-		if collapsed {
-			line = fmt.Sprintf("{%d}", s.Index)
-		} else {
-			line = tui.Truncate(fmt.Sprintf("stash@{%d} %s", s.Index, s.Message), l.ListWidth-6)
+		selected := i == m.selectedIdx
+		text := fmt.Sprintf("{%d}", s.Index)
+		if !collapsed {
+			text = tui.Truncate(fmt.Sprintf("stash@{%d}  %s", s.Index, s.Message), l.ListWidth-4)
 		}
-		if i == m.selectedIdx {
-			stashList.WriteString(selectedItemStyle.Render(line))
-		} else {
-			stashList.WriteString(itemStyle.Render(line))
+		style := tui.NormalTextStyle
+		if selected {
+			style = tui.SelectedTextStyle
 		}
-		stashList.WriteString("\n")
+		list.WriteString(tui.Marker(selected) + style.Render(text) + "\n")
 	}
 
-	// Pane rendering
-	listStyle, vpStyle := paneStyle, paneStyle
-	if m.activePane == listPane {
-		listStyle = activePaneStyle
-	} else {
-		vpStyle = activePaneStyle
+	listTitle, diffTitle := "stashes", ""
+	if collapsed {
+		listTitle = ""
 	}
-	listPaneView := listStyle.Width(l.ListWidth - 2).Height(l.ContentHeight - 2).Render(stashList.String())
-	diffPaneView := vpStyle.Width(l.DiffWidth).Height(l.ContentHeight - 2).Render(m.viewport.View())
+	if len(m.filteredStashes) > 0 {
+		diffTitle = fmt.Sprintf("stash@{%d}", m.filteredStashes[m.selectedIdx].Index)
+	}
+	listPanel := tui.Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.activePane == listPane)
+	diffPanel := tui.Panel(diffTitle, m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
-	content := lipgloss.JoinHorizontal(lipgloss.Top, listPaneView, diffPaneView)
+	header := tui.Header("stash", m.engine.Name(), m.width)
 
-	// Status bar
-	var status string
+	var footer string
 	switch {
 	case m.filtering:
-		status = m.filter.View()
+		footer = tui.FooterContent(m.width, m.filter.View())
 	case m.diffErr != nil:
-		status = statusBarStyle.Render(fmt.Sprintf("Error: %v", m.diffErr))
-	case len(m.filteredStashes) > 0:
-		s := m.filteredStashes[m.selectedIdx]
-		pct := m.viewport.ScrollPercent() * 100
-		status = statusBarStyle.Render(fmt.Sprintf(
-			"stash@{%d} %s  %.0f%%  [%d/%d]  q:quit /filter tab:switch j/k:nav a:apply p:pop x:drop gg/G:top/bot",
-			s.Index, s.Branch, pct, m.selectedIdx+1, len(m.filteredStashes),
-		))
+		footer = tui.Footer(m.width, fmt.Sprintf("Error: %v", m.diffErr), nil)
 	default:
-		status = statusBarStyle.Render("No stashes found")
+		status := "No stashes found"
+		if len(m.filteredStashes) > 0 {
+			s := m.filteredStashes[m.selectedIdx]
+			status = fmt.Sprintf("%d/%d · %s", m.selectedIdx+1, len(m.filteredStashes), s.Branch)
+		}
+		footer = tui.Footer(m.width, status, [][2]string{
+			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
+			{"a", "apply"}, {"p", "pop"}, {"x", "drop"}, {"q", "quit"},
+		})
 	}
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))
 	v.AltScreen = true
 	return v
 }

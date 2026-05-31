@@ -261,7 +261,7 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 		for _, f := range files {
 			icon := git.StatusChar(f.Status)
 			if color {
-				icon = statusStyle(f.Status).Render(icon)
+				icon = tui.StatusStyle(f.Status).Render(icon)
 			}
 			fmt.Fprintf(&b, "  %s %s %s\n", icon, tui.FileIcon(f.Path), f.Path)
 		}
@@ -269,21 +269,6 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 
 	fmt.Fprintf(&b, "\n%s\n\n", sep)
 	return b.String()
-}
-
-func statusStyle(status string) lipgloss.Style {
-	switch status {
-	case "Added":
-		return statusAddedStyle
-	case "Deleted":
-		return statusDeletedStyle
-	case "Modified":
-		return statusModifiedStyle
-	case "Renamed":
-		return statusRenamedStyle
-	default:
-		return lipgloss.NewStyle()
-	}
 }
 
 func longestLine(s string) int {
@@ -350,64 +335,63 @@ func (m Model) View() tea.View {
 	}
 
 	l := m.layout()
-
-	title := titleStyle.Render(fmt.Sprintf("rift log  [%s]", m.engine.Name()))
-
-	// Commit list with scroll
-	var commitList strings.Builder
 	collapsed := m.activePane == diffPane
-	listInnerHeight := l.ContentHeight - 2
+
+	// Commit list body.
+	var list strings.Builder
+	listInnerH := l.ContentHeight - 2
 	scrollOffset := 0
-	if m.selectedIdx >= listInnerHeight {
-		scrollOffset = m.selectedIdx - listInnerHeight + 1
+	if m.selectedIdx >= listInnerH {
+		scrollOffset = m.selectedIdx - listInnerH + 1
 	}
-	for i := scrollOffset; i < len(m.filteredCommits) && i-scrollOffset < listInnerHeight; i++ {
+	for i := scrollOffset; i < len(m.filteredCommits) && i-scrollOffset < listInnerH; i++ {
 		c := m.filteredCommits[i]
-		var line string
-		if collapsed {
-			line = c.Hash
-		} else {
-			line = tui.Truncate(c.Hash+" "+c.Message, l.ListWidth-6)
+		selected := i == m.selectedIdx
+		text := c.Hash
+		if !collapsed {
+			text = tui.Truncate(c.Hash+"  "+c.Message, l.ListWidth-4)
 		}
-		if i == m.selectedIdx {
-			commitList.WriteString(selectedCommitStyle.Render(line))
-		} else {
-			commitList.WriteString(commitItemStyle.Render(line))
+		style := tui.NormalTextStyle
+		if selected {
+			style = tui.SelectedTextStyle
 		}
-		commitList.WriteString("\n")
+		list.WriteString(tui.Marker(selected) + style.Render(text) + "\n")
 	}
 
-	// Pane rendering
-	listStyle, vpStyle := paneStyle, paneStyle
-	if m.activePane == commitPane {
-		listStyle = activePaneStyle
-	} else {
-		vpStyle = activePaneStyle
+	listTitle, diffTitle := "commits", ""
+	if collapsed {
+		listTitle = ""
 	}
-	listPane := listStyle.Width(l.ListWidth - 2).Height(l.ContentHeight - 2).Render(commitList.String())
-	diffPaneView := vpStyle.Width(l.DiffWidth).Height(l.ContentHeight - 2).Render(m.viewport.View())
+	if len(m.filteredCommits) > 0 {
+		diffTitle = m.filteredCommits[m.selectedIdx].Hash
+	}
+	listPanel := tui.Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.activePane == commitPane)
+	diffPanel := tui.Panel(diffTitle, m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
-	content := lipgloss.JoinHorizontal(lipgloss.Top, listPane, diffPaneView)
+	header := tui.Header("log", m.engine.Name(), m.width)
 
-	// Status bar
-	var status string
+	var footer string
 	switch {
 	case m.filtering:
-		status = m.filter.View()
+		footer = tui.FooterContent(m.width, m.filter.View())
 	case m.diffErr != nil:
-		status = statusBarStyle.Render(fmt.Sprintf("Error: %v", m.diffErr))
-	case len(m.filteredCommits) > 0:
-		c := m.filteredCommits[m.selectedIdx]
-		pct := m.viewport.ScrollPercent() * 100
-		status = statusBarStyle.Render(fmt.Sprintf(
-			"%s %s  %.0f%%  [%d/%d commits]  q:quit /filter tab:switch j/k:nav gg/G:top/bot {/}:section",
-			c.Hash, c.Date, pct, m.selectedIdx+1, len(m.filteredCommits),
-		))
+		footer = tui.Footer(m.width, fmt.Sprintf("Error: %v", m.diffErr), nil)
 	default:
-		status = statusBarStyle.Render("No commits found")
+		status := "No commits found"
+		if len(m.filteredCommits) > 0 {
+			status = fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filteredCommits))
+			if collapsed {
+				status += fmt.Sprintf(" · %.0f%%", m.viewport.ScrollPercent()*100)
+			}
+		}
+		footer = tui.Footer(m.width, status, [][2]string{
+			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
+			{"gg/G", "top/bot"}, {"{/}", "section"}, {"q", "quit"},
+		})
 	}
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, content, status))
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))
 	v.AltScreen = true
 	return v
 }

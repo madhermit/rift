@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/tui"
 )
@@ -155,7 +156,8 @@ func (m *Model) clampScroll() {
 }
 
 func (m Model) listHeight() int {
-	h := m.height - 4 // title (with padding) + status + blank line
+	// header + footer chrome, plus the panel's top/bottom border.
+	h := m.height - tui.HeaderRows - tui.FooterRows - 2
 	if h < 1 {
 		h = 1
 	}
@@ -167,7 +169,6 @@ func (m Model) View() tea.View {
 		return tea.NewView("Loading...")
 	}
 
-	title := titleStyle.Render("rift branch")
 	visible := m.listHeight()
 
 	var list strings.Builder
@@ -175,52 +176,46 @@ func (m Model) View() tea.View {
 		b := m.filtered[i]
 		selected := i == m.selectedIdx
 
-		cursor := "  "
-		if selected {
-			cursor = "> "
-		}
-
-		prefix := "  "
+		flag := " "
 		if b.Current {
-			prefix = "* "
+			flag = currentFlagStyle.Render("●")
 		}
 
-		line := cursor + prefix + b.Name
-		if b.Remote != "" {
-			line += "  [" + b.Remote + "]"
-		}
-		line += "  " + b.Date + "  " + b.Message
-
-		style := normalLineStyle
+		nameStyle := tui.NormalTextStyle
 		switch {
 		case selected:
-			style = selectedLineStyle
+			nameStyle = tui.SelectedTextStyle
 		case b.Current:
-			style = currentLineStyle
+			nameStyle = currentLineStyle
 		}
-		list.WriteString(style.Width(m.width).Render(line) + "\n")
+
+		line := tui.Marker(selected) + flag + " " + nameStyle.Render(b.Name)
+		if b.Remote != "" {
+			line += "  " + dimStyle.Render("["+b.Remote+"]")
+		}
+		line += "  " + dimStyle.Render(b.Date+"  "+b.Message)
+		list.WriteString(line + "\n")
 	}
 
-	// Scroll indicator
-	var scrollHint string
-	if len(m.filtered) > visible {
-		scrollHint = subtleStyle.Render(fmt.Sprintf(" (%d more)", len(m.filtered)-visible))
-	}
+	contentH := m.height - tui.HeaderRows - tui.FooterRows
+	panel := tui.Panel("branches", list.String(), m.width, contentH, true)
 
-	var status string
+	header := tui.Header("branch", "", m.width)
+
+	var footer string
 	switch {
 	case m.filtering:
-		status = m.filter.View()
+		footer = tui.FooterContent(m.width, m.filter.View())
 	case len(m.filtered) > 0:
-		status = statusBarStyle.Render(fmt.Sprintf(
-			"[%d/%d]%s  q:quit  /:filter  j/k:nav  enter:checkout",
-			m.selectedIdx+1, len(m.filtered), scrollHint,
-		))
+		status := fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filtered))
+		footer = tui.Footer(m.width, status, [][2]string{
+			{"↑↓", "nav"}, {"/", "filter"}, {"⏎", "checkout"}, {"q", "quit"},
+		})
 	default:
-		status = statusBarStyle.Render("No branches found")
+		footer = tui.Footer(m.width, "No branches found", nil)
 	}
 
-	v := tea.NewView(title + "\n" + list.String() + status)
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, panel, footer))
 	v.AltScreen = true
 	return v
 }
