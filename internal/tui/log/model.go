@@ -35,7 +35,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
-	hints = append(hints, [2]string{"q", "quit"})
+	hints = append(hints, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.CommitInfo]{
 		Screen:       "log",
@@ -66,7 +66,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SelectionChangedMsg:
 		return m, m.previewCmd(msg.ReqID)
 	case tea.KeyPressMsg:
-		if m.list.Filtering() {
+		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
 		}
 		switch msg.String() {

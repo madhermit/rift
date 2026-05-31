@@ -93,7 +93,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
-	hints = append(hints, [2]string{"q", "quit"})
+	hints = append(hints, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.ChangedFile]{
 		Screen:      "diff",
@@ -157,7 +157,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list, cmd = m.list.SetItems(prependAllEntry(msg.files))
 		return m, cmd
 	case tea.KeyPressMsg:
-		if m.list.Filtering() {
+		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
 		}
 		switch msg.String() {

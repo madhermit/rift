@@ -78,8 +78,9 @@ type SplitList[T any] struct {
 	preview  string
 	prevErr  error
 
-	spinner spinner.Model
-	loading bool // a preview is being loaded for the current selection
+	spinner  spinner.Model
+	loading  bool // a preview is being loaded for the current selection
+	showHelp bool // the keybinding overlay is open
 
 	cache map[string]string // rendered previews, keyed by cfg.CacheKey
 	reqID int               // increments per preview request; stale results are dropped
@@ -182,6 +183,10 @@ func (m SplitList[T]) VisibleItems() []T { return m.filtered }
 // Filtering reports whether the filter input is active.
 func (m SplitList[T]) Filtering() bool { return m.filtering }
 
+// ShowingHelp reports whether the keybinding overlay is open. Parents check this
+// (like Filtering) to stop intercepting keys while it's up.
+func (m SplitList[T]) ShowingHelp() bool { return m.showHelp }
+
 // PreviewWidth is the inner width of the preview pane, for wrapping content.
 func (m SplitList[T]) PreviewWidth() int { return m.viewport.Width() }
 
@@ -250,14 +255,19 @@ func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
 }
 
 func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	if m.showHelp {
+		m.showHelp = false // any key dismisses the help overlay
+		return m, nil
+	}
+
 	if m.active == splitPreviewPane && !m.filtering && m.vim.HandleKey(&m.viewport, msg) {
 		return m, nil
 	}
 
-	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
+	if msg.String() == "esc" {
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -287,6 +297,9 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 	case "/":
 		m.filtering = true
 		m.filter.Focus()
+		return m, nil
+	case "?":
+		m.showHelp = true
 		return m, nil
 	case "q":
 		return m, tea.Quit
@@ -372,12 +385,48 @@ func (m *SplitList[T]) clearPreview() {
 
 // View renders the full screen (header + split panes + footer) as a string. The
 // parent wraps it in a tea.View.
+// helpBody renders the keybinding overlay: the screen's footer hints (shown in
+// full, unlike the footer which truncates) plus the always-available navigation
+// keys.
+func (m SplitList[T]) helpBody() string {
+	rows := append([][2]string{}, m.cfg.Hints...)
+	rows = append(rows,
+		[2]string{"", ""}, // spacer
+		[2]string{"ctrl+d/u", "scroll half-page (preview)"},
+		[2]string{"ctrl+f/b", "scroll page (preview)"},
+		[2]string{"esc", "clear filter / quit"},
+	)
+
+	keyW := 0
+	for _, h := range rows {
+		if w := lipgloss.Width(h[0]); w > keyW {
+			keyW = w
+		}
+	}
+
+	var b strings.Builder
+	for _, h := range rows {
+		if h[0] == "" {
+			b.WriteString("\n")
+			continue
+		}
+		b.WriteString("  " + keyStyle.Render(h[0]) + strings.Repeat(" ", keyW-lipgloss.Width(h[0])) + "   " + keyDescDim.Render(h[1]) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func (m SplitList[T]) View() string {
 	if !m.ready {
 		return "Loading..."
 	}
 
 	l := m.layout()
+	if m.showHelp {
+		header := Header(m.cfg.Screen, m.cfg.Context, m.width)
+		help := Panel("keybindings", m.helpBody(), m.width, l.ContentHeight, true)
+		footer := FooterContent(m.width, keyDescDim.Render("press any key to close"))
+		return lipgloss.JoinVertical(lipgloss.Left, header, help, footer)
+	}
 	collapsed := m.active == splitPreviewPane
 
 	innerH := l.ContentHeight - 2
