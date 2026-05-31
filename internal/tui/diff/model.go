@@ -93,7 +93,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
-	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
+	hints = append(hints, [2]string{"o", "open"}, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.ChangedFile]{
 		Screen:      "diff",
@@ -149,6 +149,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tui.SelectionChangedMsg:
 		return m, m.previewCmd(msg.ReqID)
+	case tui.EditorClosedMsg:
+		return m.reloadFresh() // the file may have changed
 	case filesLoadedMsg:
 		if msg.err != nil {
 			m.list = m.list.SetError(msg.err)
@@ -175,6 +177,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			if !m.commitDiff {
 				return m.toggleStaged()
+			}
+		case "o":
+			if sel, ok := m.list.Selected(); ok && sel.Path != "" {
+				return m, tui.OpenInEditor(m.repo.Root(), sel.Path)
 			}
 		}
 	}

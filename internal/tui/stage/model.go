@@ -60,7 +60,7 @@ type Model struct {
 
 var stageHints = [][2]string{
 	{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-	{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"?", "help"}, {"q", "quit"},
+	{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"o", "open"}, {"?", "help"}, {"q", "quit"},
 }
 
 type hunkDiffsMsg struct {
@@ -101,6 +101,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tui.EditorClosedMsg:
+		return m, m.reloadFiles() // the file may have changed
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -205,6 +207,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.showHelp = true
 		return m, nil
+	case "o":
+		if m.selectedIdx < len(m.filteredFiles) {
+			return m, tui.OpenInEditor(m.repo.Root(), m.filteredFiles[m.selectedIdx].Path)
+		}
 	case "tab":
 		if m.activePane == filePane {
 			m.activePane = diffPane
