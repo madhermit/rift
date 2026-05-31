@@ -8,17 +8,50 @@ import (
 	"github.com/madhermit/rift/internal/tooling"
 )
 
+// Display selects difftastic's layout. Auto picks side-by-side only when the
+// pane is wide enough, otherwise inline — side-by-side halves an already-narrow
+// pane and difftastic doesn't reliably honor --width.
+type Display int
+
+const (
+	DisplayAuto Display = iota
+	DisplayInline
+	DisplaySideBySide
+)
+
+// sideBySideMinWidth is the pane width (columns) below which Auto uses inline.
+const sideBySideMinWidth = 120
+
+// difftValue resolves the mode to difftastic's --display argument.
+func (d Display) difftValue(width int) string {
+	switch d {
+	case DisplayInline:
+		return "inline"
+	case DisplaySideBySide:
+		return "side-by-side"
+	default:
+		if width >= sideBySideMinWidth {
+			return "side-by-side"
+		}
+		return "inline"
+	}
+}
+
+// Next cycles Auto → Inline → SideBySide → Auto for the layout toggle.
+func (d Display) Next() Display { return (d + 1) % 3 }
+
 type DiffOpts struct {
-	Staged bool
-	Base   string
-	Target string
-	Color  bool
-	Width  int
+	Staged  bool
+	Base    string
+	Target  string
+	Color   bool
+	Width   int
+	Display Display
 }
 
 type Engine interface {
 	Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error)
-	DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int) (string, error)
+	DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int, display Display) (string, error)
 	DiffHunks(ctx context.Context, hunks []Hunk, filename, baseContent string, color bool, width int) []string
 	Name() string
 }

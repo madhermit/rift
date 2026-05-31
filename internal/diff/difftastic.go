@@ -62,10 +62,10 @@ func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot, file string
 	}
 
 	oldPath := showOrNull(ctx, repoRoot, oldRef, file, filepath.Join(tmpDir, "a", file))
-	return d.diffFiles(ctx, oldPath, newPath, opts.Color, opts.Width)
+	return d.diffFiles(ctx, oldPath, newPath, opts.Color, opts.Width, opts.Display)
 }
 
-func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int) (string, error) {
+func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int, display Display) (string, error) {
 	// Get list of changed files
 	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", base+".."+target)
 	cmd.Dir = repoRoot
@@ -94,7 +94,7 @@ func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, targe
 		oldPath := showOrNull(ctx, repoRoot, base, file, filepath.Join(aDir, file))
 		newPath := showOrNull(ctx, repoRoot, target, file, filepath.Join(bDir, file))
 
-		diffOut, err := d.diffFiles(ctx, oldPath, newPath, color, width)
+		diffOut, err := d.diffFiles(ctx, oldPath, newPath, color, width, display)
 		if err != nil {
 			continue
 		}
@@ -109,8 +109,8 @@ func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, targe
 // diffFiles calls difft directly in 2-arg mode. Note: difft ignores --width
 // for pure additions (old=/dev/null) even in side-by-side mode. Callers should
 // hard-wrap the output as a safety net. See https://github.com/Wilfred/difftastic/issues/861
-func (d *difftasticEngine) diffFiles(ctx context.Context, oldPath, newPath string, color bool, width int) (string, error) {
-	args := []string{"--display", "side-by-side"}
+func (d *difftasticEngine) diffFiles(ctx context.Context, oldPath, newPath string, color bool, width int, display Display) (string, error) {
+	args := []string{"--display", display.difftValue(width)}
 	if width > 0 {
 		args = append(args, "--width", strconv.Itoa(width))
 	}
@@ -169,7 +169,8 @@ func (d *difftasticEngine) diffContent(ctx context.Context, old, new, ext string
 	if err := os.WriteFile(newPath, []byte(new), 0600); err != nil {
 		return "", err
 	}
-	return d.diffFiles(ctx, oldPath, newPath, color, width)
+	// Hunks are small; inline keeps them readable regardless of pane width.
+	return d.diffFiles(ctx, oldPath, newPath, color, width, DisplayInline)
 }
 
 func showOrNull(ctx context.Context, repoRoot, ref, file, destPath string) string {

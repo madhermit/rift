@@ -20,10 +20,11 @@ const (
 )
 
 type Model struct {
-	repo   *git.Repo
-	engine diff.Engine
-	list   tui.SplitList[git.StashEntry]
-	action StashAction
+	repo    *git.Repo
+	engine  diff.Engine
+	list    tui.SplitList[git.StashEntry]
+	action  StashAction
+	display diff.Display
 }
 
 func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
@@ -36,7 +37,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 		EmptyStatus: "No stashes found",
 		Hints: [][2]string{
 			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-			{"a", "apply"}, {"p", "pop"}, {"x", "drop"}, {"q", "quit"},
+			{"a", "apply"}, {"p", "pop"}, {"x", "drop"}, {"\\", "layout"}, {"q", "quit"},
 		},
 		Match: func(s git.StashEntry) string {
 			return fmt.Sprintf("stash@{%d} %s %s", s.Index, s.Branch, s.Message)
@@ -71,6 +72,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SelectionChangedMsg:
 		return m, m.previewCmd()
 	case tea.KeyPressMsg:
+		if msg.String() == "\\" && !m.list.Filtering() {
+			m.display = m.display.Next()
+			return m, m.previewCmd()
+		}
 		if action, ok := stashAction(msg.String()); ok && !m.list.Filtering() {
 			if _, sel := m.list.Selected(); sel {
 				m.action = action
@@ -102,12 +107,12 @@ func (m Model) previewCmd() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	repo, engine, width := m.repo, m.engine, m.list.PreviewWidth()
+	repo, engine, width, display := m.repo, m.engine, m.list.PreviewWidth(), m.display
 	return func() tea.Msg {
 		ref := fmt.Sprintf("stash@{%d}", entry.Index)
 		base := ref + "^"
 		color := tui.ColorEnabled()
-		content, err := engine.DiffCommit(context.Background(), repo.Root(), base, ref, color, width)
+		content, err := engine.DiffCommit(context.Background(), repo.Root(), base, ref, color, width, display)
 		if err != nil {
 			return tui.PreviewMsg{Err: err}
 		}

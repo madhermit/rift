@@ -20,6 +20,7 @@ type Model struct {
 	base       string
 	target     string
 	commitDiff bool
+	display    diff.Display
 }
 
 // filesLoadedMsg carries a refreshed file list after toggling staged/unstaged.
@@ -52,7 +53,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if !commitDiff {
 		hints = append(hints, [2]string{"s", "staged"})
 	}
-	hints = append(hints, [2]string{"q", "quit"})
+	hints = append(hints, [2]string{"\\", "layout"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.ChangedFile]{
 		Screen:      "diff",
@@ -112,6 +113,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list, cmd = m.list.SetItems(prependAllEntry(msg.files))
 		return m, cmd
 	case tea.KeyPressMsg:
+		if msg.String() == "\\" && !m.list.Filtering() {
+			m.display = m.display.Next()
+			return m, m.previewCmd()
+		}
 		if msg.String() == "s" && !m.commitDiff && !m.list.Filtering() {
 			return m.toggleStaged()
 		}
@@ -160,11 +165,12 @@ func (m Model) previewCmd() tea.Cmd {
 
 	repo, engine := m.repo, m.engine
 	opts := diff.DiffOpts{
-		Staged: m.staged,
-		Base:   m.base,
-		Target: m.target,
-		Color:  tui.ColorEnabled(),
-		Width:  m.list.PreviewWidth(),
+		Staged:  m.staged,
+		Base:    m.base,
+		Target:  m.target,
+		Color:   tui.ColorEnabled(),
+		Width:   m.list.PreviewWidth(),
+		Display: m.display,
 	}
 	return func() tea.Msg {
 		var result strings.Builder

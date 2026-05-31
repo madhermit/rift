@@ -16,7 +16,7 @@ func (stubEngine) Name() string { return "difftastic" }
 func (stubEngine) Diff(context.Context, string, string, diff.DiffOpts) (string, error) {
 	return "", nil
 }
-func (stubEngine) DiffCommit(context.Context, string, string, string, bool, int) (string, error) {
+func (stubEngine) DiffCommit(context.Context, string, string, string, bool, int, diff.Display) (string, error) {
 	return "", nil
 }
 func (stubEngine) DiffHunks(context.Context, []diff.Hunk, string, string, bool, int) []string {

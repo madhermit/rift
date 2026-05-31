@@ -17,9 +17,10 @@ import (
 const emptyTree = "4b825dc642cb6eb9a060e54bf899d69f82cf7207"
 
 type Model struct {
-	repo   *git.Repo
-	engine diff.Engine
-	list   tui.SplitList[git.CommitInfo]
+	repo    *git.Repo
+	engine  diff.Engine
+	list    tui.SplitList[git.CommitInfo]
+	display diff.Display
 }
 
 func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
@@ -32,7 +33,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 		EmptyStatus: "No commits found",
 		Hints: [][2]string{
 			{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-			{"gg/G", "top/bot"}, {"{/}", "section"}, {"q", "quit"},
+			{"gg/G", "top/bot"}, {"\\", "layout"}, {"q", "quit"},
 		},
 		Match:        func(c git.CommitInfo) string { return c.Hash + " " + c.Message },
 		PreviewTitle: func(c git.CommitInfo) string { return c.Hash },
@@ -50,8 +51,14 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 func (m Model) Init() tea.Cmd { return nil }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(tui.SelectionChangedMsg); ok {
+	switch msg := msg.(type) {
+	case tui.SelectionChangedMsg:
 		return m, m.previewCmd()
+	case tea.KeyPressMsg:
+		if msg.String() == "\\" && !m.list.Filtering() {
+			m.display = m.display.Next()
+			return m, m.previewCmd()
+		}
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
@@ -65,7 +72,7 @@ func (m Model) previewCmd() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	repo, engine, width := m.repo, m.engine, m.list.PreviewWidth()
+	repo, engine, width, display := m.repo, m.engine, m.list.PreviewWidth(), m.display
 	return func() tea.Msg {
 		base := commit.Hash + "~1"
 		files, err := repo.DiffBetweenCommits(base, commit.Hash)
@@ -75,7 +82,7 @@ func (m Model) previewCmd() tea.Cmd {
 		}
 		color := tui.ColorEnabled()
 		header := commitHeader(commit, files, color, width)
-		content, err := engine.DiffCommit(context.Background(), repo.Root(), base, commit.Hash, color, width)
+		content, err := engine.DiffCommit(context.Background(), repo.Root(), base, commit.Hash, color, width, display)
 		if err != nil {
 			return tui.PreviewMsg{Content: content, Err: err}
 		}
