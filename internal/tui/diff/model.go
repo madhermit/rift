@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/tui"
@@ -29,11 +30,42 @@ type filesLoadedMsg struct {
 	err   error
 }
 
-// prependAllEntry adds a synthetic "All" row that previews every file at once.
+// prependAllEntry adds a synthetic "All" row (carrying the totals) that previews
+// every file at once.
 func prependAllEntry(files []git.ChangedFile) []git.ChangedFile {
-	all := make([]git.ChangedFile, 0, len(files)+1)
-	all = append(all, git.ChangedFile{Path: "", Status: "All"})
-	return append(all, files...)
+	all := git.ChangedFile{Path: "", Status: "All"}
+	for _, f := range files {
+		all.Added += f.Added
+		all.Deleted += f.Deleted
+	}
+	out := make([]git.ChangedFile, 0, len(files)+1)
+	return append(append(out, all), files...)
+}
+
+// rowWithStat right-aligns stat (e.g. "+3 -1") at the end of a row of width w,
+// dropping it if there's no room.
+func rowWithStat(left, stat string, w int) string {
+	if stat == "" {
+		return left
+	}
+	gap := w - lipgloss.Width(left) - lipgloss.Width(stat)
+	if gap < 1 {
+		return left
+	}
+	return left + strings.Repeat(" ", gap) + stat
+}
+
+// pathRow renders prefix + a styled path truncated to fit, right-aligning stat
+// within total width w (reserving a one-column gap before it).
+func pathRow(prefix string, style lipgloss.Style, path, stat string, w int) string {
+	avail := w - lipgloss.Width(prefix)
+	if stat != "" {
+		avail -= lipgloss.Width(stat) + 1
+	}
+	if avail < 1 {
+		avail = 1
+	}
+	return rowWithStat(prefix+style.Render(tui.TruncatePath(path, avail)), stat, w)
 }
 
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
@@ -76,12 +108,12 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 			case f.Path == "" && collapsed:
 				return style.Render("∗")
 			case f.Path == "":
-				return style.Render("∗ All changes")
+				return rowWithStat(style.Render("∗ All changes"), tui.DiffStat(f.Added, f.Deleted), w)
 			case collapsed:
 				return tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path)
 			default:
-				return tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " +
-					tui.FileIcon(f.Path) + " " + style.Render(tui.TruncatePath(f.Path, w-4))
+				prefix := tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path) + " "
+				return pathRow(prefix, style, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
 			}
 		},
 	}

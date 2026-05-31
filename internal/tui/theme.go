@@ -2,11 +2,32 @@ package tui
 
 import (
 	"os"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
+
+var (
+	addStyle = lipgloss.NewStyle().Foreground(Green)
+	delStyle = lipgloss.NewStyle().Foreground(Red)
+)
+
+// DiffStat renders "+A -B" with green/red counts, or "" when both are zero.
+func DiffStat(added, deleted int) string {
+	if added == 0 && deleted == 0 {
+		return ""
+	}
+	var parts []string
+	if added > 0 {
+		parts = append(parts, addStyle.Render("+"+strconv.Itoa(added)))
+	}
+	if deleted > 0 {
+		parts = append(parts, delStyle.Render("-"+strconv.Itoa(deleted)))
+	}
+	return strings.Join(parts, " ")
+}
 
 // ColorEnabled reports whether ANSI color output is enabled (i.e. NO_COLOR is
 // unset). Callers pass the result to the diff engine and styling helpers.

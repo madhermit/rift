@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	gogit "github.com/go-git/go-git/v6"
@@ -11,19 +12,64 @@ import (
 )
 
 type ChangedFile struct {
-	Path   string `json:"path"`
-	Status string `json:"status"`
+	Path    string `json:"path"`
+	Status  string `json:"status"`
+	Added   int    `json:"added"`
+	Deleted int    `json:"deleted"`
 }
 
 func (r *Repo) ChangedFiles(staged bool) ([]ChangedFile, error) {
+	var files []ChangedFile
+	var err error
 	if r.linkedWorktree {
-		return r.changedFilesShell(staged)
+		files, err = r.changedFilesShell(staged)
+	} else {
+		files, err = r.changedFilesGoGit(staged)
+		if err != nil {
+			files, err = r.changedFilesShell(staged)
+		}
 	}
-	files, err := r.changedFilesGoGit(staged)
 	if err != nil {
-		return r.changedFilesShell(staged)
+		return nil, err
 	}
+	r.addStats(files, staged)
 	return files, nil
+}
+
+// addStats fills in per-file added/deleted line counts from git diff --numstat.
+// Best-effort: stats are a display nicety, so failures leave counts at zero.
+func (r *Repo) addStats(files []ChangedFile, staged bool) {
+	args := []string{"diff", "--numstat"}
+	if staged {
+		args = append(args, "--staged")
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.root
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	stats := parseNumstat(string(out))
+	for i := range files {
+		if s, ok := stats[files[i].Path]; ok {
+			files[i].Added, files[i].Deleted = s[0], s[1]
+		}
+	}
+}
+
+// parseNumstat parses "added\tdeleted\tpath" lines. Binary files report "-".
+func parseNumstat(out string) map[string][2]int {
+	stats := make(map[string][2]int)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		added, _ := strconv.Atoi(parts[0])   // "-" (binary) → 0
+		deleted, _ := strconv.Atoi(parts[1]) // "-" (binary) → 0
+		stats[parts[2]] = [2]int{added, deleted}
+	}
+	return stats
 }
 
 func (r *Repo) changedFilesGoGit(staged bool) ([]ChangedFile, error) {
