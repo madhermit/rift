@@ -1,6 +1,6 @@
 # rift
 
-Syntax-aware, composable fuzzy git tool.
+Syntax-aware, worktree-aware, composable fuzzy git tool.
 
 rift wraps the git workflows where UX is the bottleneck — staging, diffing, log browsing, stashing — with structural understanding via [difftastic](https://difftastic.wilfred.me.uk/) and composable output that works for both humans and scripts.
 
@@ -18,19 +18,27 @@ rift is **worktree-aware** — every command reads correctly inside bare-repo an
 
 [forgit](https://github.com/wfxr/forgit) and [git-fuzzy](https://github.com/bigH/git-fuzzy) proved that fuzzy search over git objects is a massive UX win. But they're shell scripts piping strings through fzf — every diff is flat text, and you can't pipe the output into anything.
 
-[lazygit](https://github.com/jesseduber/lazygit) is the gold standard for git TUIs, but it's a resident app you live inside, with no composable output and line-based diffs.
+[lazygit](https://github.com/jesseduffield/lazygit) is the gold standard for git TUIs, but it's a resident app you live inside, with no composable output and line-based diffs.
 
 rift occupies the space between them: **transient** (invoke, act, return to shell), **structural** (diffs understand your code's syntax), and **composable** (every command has `--print` and `--json` modes).
 
 ## Key Features
 
-### Structural Diffs
+### Structural diffs
 
-Powered by difftastic. Reformatting noise disappears. You see what actually changed at the expression level, not what lines moved.
+Powered by difftastic: reformatting noise disappears and you see what actually changed at the expression level, with syntax highlighting and intra-line emphasis. When difftastic isn't on your `$PATH`, rift falls back to git's own diff (with word-level and whitespace highlighting) — toggle between the two engines with `e`.
 
-### Composable Output
+### Split-pane browsing
 
-Every command supports three output modes:
+`rift diff` and `rift log` are two-panel browsers: a fuzzy-filterable list on the left, a structural diff preview on the right. Navigate with vim keys, jump hunk-to-hunk, and keep your place with a scrollbar and a sticky file header. Colored file-type icons and dimmed directories make the list scan fast. In the log, press `⏎` to drill into a commit's files, or `c` / `r` to cherry-pick / revert the selected commit.
+
+### Interactive staging
+
+`rift stage` replaces `git add -p` with a two-panel TUI: a file list with structural diff preview and hunk-level staging, the active hunk clearly marked in the gutter.
+
+### Composable output
+
+Every command is interactive by default but never traps you — each supports `--print` (plain selection) and `--json` (structured) modes:
 
 ```bash
 rift log                              # interactive TUI
@@ -42,9 +50,9 @@ rift diff --print | xargs -r "$EDITOR"          # open every changed file
 rift log --json | jq '.[] | select(.files_changed > 10)'
 ```
 
-### Interactive Staging
+### Shared TUI
 
-`rift stage` replaces `git add -p` with a two-panel TUI: file list with structural diff preview and hunk-level staging.
+Every screen behaves the same: type `/` to fuzzy-filter, `⇥` to switch panes, vim keys (`j`/`k`, `gg`/`G`, `ctrl-d`/`u`) to scroll, `\` to toggle the diff layout, `y` to yank the selection, `o` to open a file in `$EDITOR` at the change, `?` for the keybinding overlay, and `esc` to step back.
 
 ## Installation
 
@@ -62,7 +70,7 @@ Pre-built binaries for Linux and macOS are available on the [Releases](https://g
 
 ### External Tools
 
-On first run, rift automatically downloads [difftastic](https://difftastic.wilfred.me.uk/) to `~/.local/share/rift/bin/` if it's not already on your `$PATH`. If the download fails, rift falls back to built-in line diffs — no external tools are required.
+On first run, rift automatically downloads [difftastic](https://difftastic.wilfred.me.uk/) to `~/.local/share/rift/bin/` if it's not already on your `$PATH`. If it's unavailable (offline, or the download fails), rift falls back to git's own diff with word-level highlighting — no external tools are required.
 
 ## Agent-Friendly
 
@@ -78,7 +86,9 @@ rift log --json -n 10 | jq '.[].hash'
 
 ## Status
 
-**v0.1.0** — core commands implemented (diff, log, stash, stage). Config and code review planned for v0.2.0. Worktree and branch *management* are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
+The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.1.2**), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Config and local code review are planned next.
+
+Worktree and branch *management* are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
 
 ## License
 
