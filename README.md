@@ -90,6 +90,8 @@ The core consumption commands — `diff`, `log`, `stash`, `stage` — are implem
 
 Worktree and branch *management* are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
 
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
 ## License
 
 [MIT](LICENSE)

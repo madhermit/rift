@@ -51,6 +51,7 @@ main.go        # entrypoint
 ## Commits
 
 - **No AI attribution.** Do not add a `Co-Authored-By` trailer or any AI/assistant attribution to commit messages.
+- **Changelog.** For user-facing changes (new/removed commands or flags, behavior changes, notable UX), add a bullet under `## [Unreleased]` in `CHANGELOG.md` in the right category (Added / Changed / Removed / Fixed). At release time, rename `[Unreleased]` to the new `[x.y.z] - YYYY-MM-DD`, add the compare link, and start a fresh empty `[Unreleased]`. Purely internal changes (refactors, test-only, tooling) don't need an entry.
 
 ## Code Conventions
 
