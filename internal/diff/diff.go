@@ -104,7 +104,9 @@ func buildCommitDiffArgs(base, target string, color bool) []string {
 		args = append(args, "--color=never")
 	}
 	args = append(args, displayFlags(color)...)
-	args = append(args, base+".."+target)
+	// Two args, not base..target: the range form rejects a tree (e.g. the empty
+	// tree for a root commit) with "Invalid revision range".
+	args = append(args, base, target)
 	return args
 }
 

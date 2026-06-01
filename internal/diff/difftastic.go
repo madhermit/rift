@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/madhermit/rift/internal/git"
 )
 
 type difftasticEngine struct {
@@ -66,12 +68,19 @@ func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot, file string
 }
 
 func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int, display Display) (string, error) {
-	// Get list of changed files
-	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", base+".."+target)
+	// Get the list of changed files. Use two args (not the `base..target` range,
+	// which rejects a tree on either side); and for a root commit (base = the
+	// empty tree, whose object may be absent from the odb) list the target's
+	// files via `diff-tree --root` instead.
+	args := []string{"diff", "--name-only", base, target}
+	if base == git.EmptyTree {
+		args = []string{"diff-tree", "--root", "--no-commit-id", "--name-only", "-r", target}
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
-		return "", gitErr(fmt.Sprintf("git diff --name-only %s..%s", base, target), err)
+		return "", gitErr("git "+strings.Join(args, " "), err)
 	}
 
 	files := strings.Split(strings.TrimSpace(string(out)), "\n")

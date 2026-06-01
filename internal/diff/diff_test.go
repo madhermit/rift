@@ -100,14 +100,14 @@ func TestBuildCommitDiffArgs(t *testing.T) {
 			base:   "abc",
 			target: "def",
 			color:  true,
-			want:   []string{"diff", "--color=always", "--word-diff=color", "--ws-error-highlight=all", "abc..def"},
+			want:   []string{"diff", "--color=always", "--word-diff=color", "--ws-error-highlight=all", "abc", "def"},
 		},
 		{
 			name:   "no color",
 			base:   "abc",
 			target: "def",
 			color:  false,
-			want:   []string{"diff", "--color=never", "abc..def"},
+			want:   []string{"diff", "--color=never", "abc", "def"},
 		},
 	}
 

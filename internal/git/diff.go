@@ -11,6 +11,10 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
+// EmptyTree is git's well-known empty-tree object, used as the base when
+// diffing a root commit (which has no parent).
+const EmptyTree = "4b825dc642cb6eb9a060e54bf899d69f82cf7207"
+
 type ChangedFile struct {
 	Path    string `json:"path"`
 	Status  string `json:"status"`
@@ -169,6 +173,40 @@ func DiffTargets(args []string) (base, target string, err error) {
 }
 
 func (r *Repo) DiffBetweenCommits(baseRef, targetRef string) ([]ChangedFile, error) {
+	// go-git can't resolve revisions in a linked worktree's commondir layout, so
+	// shell out there (and as a fallback when the go-git path errors) — the same
+	// pattern ChangedFiles uses.
+	if r.linkedWorktree {
+		return r.diffBetweenCommitsShell(baseRef, targetRef)
+	}
+	files, err := r.diffBetweenCommitsGoGit(baseRef, targetRef)
+	if err != nil {
+		return r.diffBetweenCommitsShell(baseRef, targetRef)
+	}
+	return files, nil
+}
+
+// diffBetweenCommitsShell lists the files changed between two refs via shelled
+// git. It uses two args (not the `a..b` range, which rejects a tree on either
+// side), and for a root commit (base = the empty tree, whose object may not be
+// in the odb) it uses `diff-tree --root` against the target instead.
+func (r *Repo) diffBetweenCommitsShell(baseRef, targetRef string) ([]ChangedFile, error) {
+	var args []string
+	if baseRef == EmptyTree {
+		args = []string{"diff-tree", "--root", "--no-commit-id", "--name-status", "-r", targetRef}
+	} else {
+		args = []string{"diff", "--name-status", baseRef, targetRef}
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return parseNameStatus(string(out)), nil
+}
+
+func (r *Repo) diffBetweenCommitsGoGit(baseRef, targetRef string) ([]ChangedFile, error) {
 	baseCommit, err := r.resolveCommit(baseRef)
 	if err != nil {
 		return nil, fmt.Errorf("resolve base %q: %w", baseRef, err)

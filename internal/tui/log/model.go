@@ -13,10 +13,6 @@ import (
 	diffui "github.com/madhermit/rift/internal/tui/diff"
 )
 
-// emptyTree is git's well-known empty-tree object, used to diff a root commit
-// that has no parent.
-const emptyTree = "4b825dc642cb6eb9a060e54bf899d69f82cf7207"
-
 // Action is a git operation the user chose to run on the selected commit; the
 // program quits with it and the command layer performs it.
 type Action int
@@ -213,7 +209,7 @@ func commitFiles(repo *git.Repo, hash string) (base string, files []git.ChangedF
 	base = hash + "~1"
 	files, err := repo.DiffBetweenCommits(base, hash)
 	if err != nil {
-		base = emptyTree // root commit: diff against the empty tree
+		base = git.EmptyTree // root commit: diff against the empty tree
 		files, _ = repo.DiffBetweenCommits(base, hash)
 	}
 	return base, files
