@@ -2,11 +2,26 @@ package diff
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/madhermit/rift/internal/tooling"
 )
+
+// gitErr wraps a shelled-git failure with the command's stderr. cmd.Output()
+// captures stderr into ExitError.Stderr, so an opaque "exit status 128" carries
+// git's actual fatal message (e.g. a bad revision or wrong work tree).
+func gitErr(label string, err error) error {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+			return fmt.Errorf("%s: %w: %s", label, err, msg)
+		}
+	}
+	return fmt.Errorf("%s: %w", label, err)
+}
 
 // Display selects difftastic's layout. Auto picks side-by-side only when the
 // pane is wide enough, otherwise inline — side-by-side halves an already-narrow
@@ -126,7 +141,7 @@ func runGitDiff(cmd *exec.Cmd, label string) (string, error) {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return string(out), nil
 		}
-		return "", fmt.Errorf("%s: %w", label, err)
+		return "", gitErr(label, err)
 	}
 	return string(out), nil
 }

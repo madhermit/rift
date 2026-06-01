@@ -71,7 +71,7 @@ func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, targe
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git diff --name-only: %w", err)
+		return "", gitErr(fmt.Sprintf("git diff --name-only %s..%s", base, target), err)
 	}
 
 	files := strings.Split(strings.TrimSpace(string(out)), "\n")
