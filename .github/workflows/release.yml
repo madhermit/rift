@@ -35,8 +35,19 @@ jobs:
           GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-amd64 .
           GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-arm64 .
 
+      - name: Extract changelog section
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          NUM=${VERSION#v}
+          awk -v ver="$NUM" '
+            $0 ~ "^## \\[" ver "\\]" { f=1; next }
+            f && (/^## \[/ || /^\[.*\]: /) { exit }
+            f { print }
+          ' CHANGELOG.md | sed '/./,$!d' > release-notes.md
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body_path: release-notes.md
           generate_release_notes: true
