@@ -217,7 +217,7 @@ func (m Model) View() tea.View {
 	}
 
 	contentH := m.height - tui.HeaderRows - tui.FooterRows
-	panel := tui.Panel("branches", list.String(), m.width, contentH, true)
+	panel := tui.Panel("branches", list.String(), m.width, contentH, true, tui.Scrollbar{})
 
 	header := tui.Header("branch", "", m.width)
 

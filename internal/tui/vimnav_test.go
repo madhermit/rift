@@ -23,9 +23,14 @@ func TestScanSectionOffsets(t *testing.T) {
 			[]int{0, 6},
 		},
 		{
-			"horizontal rules",
+			"file banner is a section",
+			"preamble\n── internal/main.go ──────────\nbody\n",
+			[]int{1},
+		},
+		{
+			"bare rule line is not a section",
 			"commit abc1234\nAuthor: Alice\n\n─────────────────────\n\nsome diff\n",
-			[]int{3},
+			nil,
 		},
 		{
 			"colored git-diff header",
@@ -35,7 +40,7 @@ func TestScanSectionOffsets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := scanSectionOffsets(tt.content)
+			got := scanSectionOffsets(strings.Split(tt.content, "\n"))
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("scanSectionOffsets() = %v, want %v", got, tt.want)
 			}
@@ -108,7 +113,7 @@ func TestVimNav_HandleKey(t *testing.T) {
 func TestVimNav_SetContent(t *testing.T) {
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	var v VimNav
-	content := "line1\ndiff --git a/f.go b/f.go\nline3\n─────────────────────\nline5\n"
+	content := "line1\ndiff --git a/f.go b/f.go\nline3\n── b.go ────────────\nline5\n"
 	v.SetContent(&vp, content)
 
 	want := []int{1, 3}

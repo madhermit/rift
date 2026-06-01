@@ -197,7 +197,7 @@ func (m Model) View() tea.View {
 	}
 
 	contentH := m.height - tui.HeaderRows - tui.FooterRows
-	panel := tui.Panel("commands", items.String(), m.width, contentH, true)
+	panel := tui.Panel("commands", items.String(), m.width, contentH, true, tui.Scrollbar{})
 
 	header := tui.Header("", "a composable fuzzy git tool", m.width)
 

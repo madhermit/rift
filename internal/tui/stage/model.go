@@ -497,7 +497,7 @@ func (m *Model) renderHunks() {
 	n := len(m.displayHunks)
 	m.hunkOffsets = make([]int, n)
 	w := m.viewport.Width()
-	innerW := w - 2 // sidebar (▎ + space)
+	innerW := w - 2 // sidebar (bar + space)
 	if innerW < 1 {
 		innerW = 1
 	}
@@ -508,21 +508,24 @@ func (m *Model) renderHunks() {
 		active := i == m.hunkIdx
 		m.hunkOffsets[i] = lineCount
 
-		sidebar := sidebarUnstaged
-		if dh.staged {
-			sidebar = sidebarStaged
-		}
-		if !active {
+		var sidebar string
+		switch {
+		case !active:
 			sidebar = sidebarInactive
+		case dh.staged:
+			sidebar = sidebarStaged
+		default:
+			sidebar = sidebarUnstaged
 		}
 
-		sep := hunkSepDimStyle
+		// The active hunk gets a bright separator and a ▶ chevron lead-in ("▶─ "
+		// is the same width as the default "── ").
+		sep, lead := hunkSepDimStyle, "── "
 		if active {
-			sep = hunkSepStyle
+			sep, lead = hunkSepStyle, "▶─ "
 		}
 
-		// Top separator
-		label := fmt.Sprintf("── Hunk %d/%d ", i+1, n)
+		label := fmt.Sprintf("%sHunk %d/%d ", lead, i+1, n)
 		if dh.staged {
 			label += "[staged] "
 		}
@@ -578,23 +581,16 @@ func (m Model) View() tea.View {
 	if listInnerH < 1 {
 		listInnerH = 1
 	}
-	scrollOffset := 0
-	if m.selectedIdx >= listInnerH {
-		scrollOffset = m.selectedIdx - listInnerH + 1
-	}
+	scrollOffset, listBar := tui.ListWindow(m.selectedIdx, len(m.filteredFiles), listInnerH)
 	for i := scrollOffset; i < len(m.filteredFiles) && i-scrollOffset < listInnerH; i++ {
 		f := m.filteredFiles[i]
 		selected := i == m.selectedIdx
 		status := formatStatusShort(f)
-		textStyle := tui.NormalTextStyle
-		if selected {
-			textStyle = tui.SelectedTextStyle
-		}
 		var line string
 		if collapsed {
 			line = status + " " + tui.FileIcon(f.Path)
 		} else {
-			line = status + " " + tui.FileIcon(f.Path) + " " + textStyle.Render(tui.TruncatePath(f.Path, l.ListWidth-9))
+			line = status + " " + tui.FileIcon(f.Path) + " " + tui.RenderPath(f.Path, l.ListWidth-9, selected)
 		}
 		list.WriteString(tui.Marker(selected) + line + "\n")
 	}
@@ -606,8 +602,9 @@ func (m Model) View() tea.View {
 	if len(m.filteredFiles) > 0 {
 		diffTitle = m.filteredFiles[m.selectedIdx].Path
 	}
-	listPanel := tui.Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.activePane == filePane)
-	diffPanel := tui.Panel(diffTitle, m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane)
+	diffBar := tui.ScrollbarFor(&m.viewport)
+	listPanel := tui.Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.activePane == filePane, listBar)
+	diffPanel := tui.Panel(diffTitle, m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane, diffBar)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
 	header := tui.Header("stage", m.engine.Name(), m.width)

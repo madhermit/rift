@@ -266,6 +266,9 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 		Width:   m.list.PreviewWidth(),
 		Display: m.display,
 	}
+	// Banner each file when several are shown at once (the "All changes" view), so
+	// boundaries stand out as you scroll. A single file's pane title already names it.
+	banners := len(files) > 1 && opts.Color
 	return func() tea.Msg {
 		var result strings.Builder
 		for _, file := range files {
@@ -274,6 +277,9 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 				continue
 			}
 			if content != "" {
+				if banners {
+					result.WriteString(tui.SectionBanner(file, opts.Width) + "\n")
+				}
 				result.WriteString(content)
 				result.WriteString("\n")
 			}

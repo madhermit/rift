@@ -9,7 +9,7 @@ import (
 
 func TestPanelDimensions(t *testing.T) {
 	const w, h = 30, 8
-	out := Panel("title", "line one\nline two", w, h, true)
+	out := Panel("title", "line one\nline two", w, h, true, Scrollbar{})
 	if got := lipgloss.Height(out); got != h {
 		t.Errorf("Panel height = %d, want %d", got, h)
 	}
@@ -21,13 +21,13 @@ func TestPanelDimensions(t *testing.T) {
 }
 
 func TestPanelEmbeddedTitle(t *testing.T) {
-	out := Panel("commits", "", 24, 4, true)
+	out := Panel("commits", "", 24, 4, true, Scrollbar{})
 	top := strings.Split(out, "\n")[0]
 	if !strings.Contains(top, "commits") {
 		t.Errorf("top border missing title: %q", top)
 	}
 	// A title too wide for the panel falls back to a plain border.
-	plain := Panel("a very long title that will not fit", "", 10, 4, false)
+	plain := Panel("a very long title that will not fit", "", 10, 4, false, Scrollbar{})
 	if strings.Contains(strings.Split(plain, "\n")[0], "title") {
 		t.Errorf("expected oversized title to be dropped, got %q", plain)
 	}

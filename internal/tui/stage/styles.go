@@ -14,7 +14,9 @@ var (
 	hunkSepStyle    = lipgloss.NewStyle().Foreground(tui.Green).Bold(true)
 	hunkSepDimStyle = lipgloss.NewStyle().Foreground(tui.Subtle)
 
-	sidebarUnstaged = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render("▎") + " "
-	sidebarStaged   = lipgloss.NewStyle().Foreground(tui.Green).Render("▎") + " "
+	// The active hunk gets a heavy colored bar (┃) in the gutter — distinct from
+	// the list selection marker (▌) — while inactive hunks leave the gutter blank.
+	sidebarUnstaged = lipgloss.NewStyle().Foreground(tui.Magenta).Render("┃") + " "
+	sidebarStaged   = lipgloss.NewStyle().Foreground(tui.Green).Render("┃") + " "
 	sidebarInactive = "  "
 )

@@ -5,12 +5,14 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // VimNav provides vim-style viewport navigation (gg, G, Ctrl+d/u/f/b, {/}).
 // Embed in any TUI model with a scrollable viewport.
 type VimNav struct {
 	pendingG       bool
+	lines          []string // the current content, split once for offsets/sticky
 	sectionOffsets []int
 }
 
@@ -54,16 +56,35 @@ func (v *VimNav) HandleKey(vp *viewport.Model, msg tea.KeyPressMsg) bool {
 	return false
 }
 
-// SetContent updates the viewport content and scans for section offsets.
+// SetContent updates the viewport content and scans for section offsets,
+// splitting the content into lines once for both.
 func (v *VimNav) SetContent(vp *viewport.Model, content string) {
 	vp.SetContent(content)
-	v.sectionOffsets = scanSectionOffsets(content)
+	v.lines = strings.Split(content, "\n")
+	v.sectionOffsets = scanSectionOffsets(v.lines)
 }
 
-func scanSectionOffsets(content string) []int {
+// Lines returns the current content split into lines (shared with the sticky
+// header so the preview isn't re-split).
+func (v *VimNav) Lines() []string { return v.lines }
+
+// SectionOffsets returns the line indices of section boundaries (file banners /
+// diff headers) in the current content, for `{`/`}` jumps and sticky headers.
+func (v *VimNav) SectionOffsets() []int { return v.sectionOffsets }
+
+// ScrollbarFor builds a Scrollbar describing a viewport's scroll state, for
+// rendering a thumb in its panel border.
+func ScrollbarFor(vp *viewport.Model) Scrollbar {
+	return Scrollbar{Total: vp.TotalLineCount(), Visible: vp.Height(), Offset: vp.YOffset()}
+}
+
+func scanSectionOffsets(lines []string) []int {
 	var offsets []int
-	for i, line := range strings.Split(content, "\n") {
-		if strings.Contains(line, "diff --git ") || strings.HasPrefix(line, "───") {
+	for i, line := range lines {
+		s := ansi.Strip(line)
+		// "── " (with the trailing space) is a file banner; a bare run of dashes
+		// (a rule line, e.g. the commit header separator) is not a section.
+		if strings.Contains(s, "diff --git ") || strings.HasPrefix(s, "── ") {
 			offsets = append(offsets, i)
 		}
 	}

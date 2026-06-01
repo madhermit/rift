@@ -406,6 +406,28 @@ func (m *SplitList[T]) setPreviewContent() {
 	m.vim.SetContent(&m.viewport, content)
 }
 
+// stickyHeader returns the section line (e.g. a file banner) that the preview
+// has scrolled past, to pin at the top of the pane so the current file stays
+// visible. Empty when at the top or the current section's header is on screen.
+func (m SplitList[T]) stickyHeader() string {
+	y := m.viewport.YOffset()
+	if y <= 0 {
+		return ""
+	}
+	cur := -1
+	for _, off := range m.vim.SectionOffsets() {
+		if off > y {
+			break
+		}
+		cur = off
+	}
+	lines := m.vim.Lines()
+	if cur < 0 || cur == y || cur >= len(lines) {
+		return ""
+	}
+	return lines[cur]
+}
+
 // clearPreview blanks the preview pane and stops the spinner.
 func (m *SplitList[T]) clearPreview() {
 	m.loading = false
@@ -430,10 +452,7 @@ func (m SplitList[T]) View() string {
 	if innerH < 1 {
 		innerH = 1
 	}
-	scrollOffset := 0
-	if m.selected >= innerH {
-		scrollOffset = m.selected - innerH + 1
-	}
+	scrollOffset, listBar := ListWindow(m.selected, len(m.filtered), innerH)
 	rowWidth := l.ListWidth - 3 // border (2) + marker (1)
 	var list strings.Builder
 	for i := scrollOffset; i < len(m.filtered) && i-scrollOffset < innerH; i++ {
@@ -453,8 +472,16 @@ func (m SplitList[T]) View() string {
 		previewTitle = m.spinner.View() + " " + previewTitle
 	}
 
-	listPanel := Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.active == splitListPane)
-	previewPanel := Panel(previewTitle, m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.active == splitPreviewPane)
+	previewBody := m.viewport.View()
+	if hdr := m.stickyHeader(); hdr != "" {
+		if rows := strings.SplitN(previewBody, "\n", 2); len(rows) == 2 {
+			previewBody = hdr + "\n" + rows[1]
+		}
+	}
+
+	previewBar := ScrollbarFor(&m.viewport)
+	listPanel := Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.active == splitListPane, listBar)
+	previewPanel := Panel(previewTitle, previewBody, l.DiffWidth+2, l.ContentHeight, m.active == splitPreviewPane, previewBar)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, previewPanel)
 
 	header := Header(m.cfg.Screen, m.cfg.Context, m.width)
