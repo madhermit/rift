@@ -1,3 +1,4 @@
-.claude/
+# Track shared .claude config (commands); ignore only personal/local files.
+.claude/settings.local.json
 rift
 dist/
