@@ -2,16 +2,17 @@
 
 Syntax-aware, composable fuzzy git tool.
 
-rift wraps the git workflows where UX is the bottleneck — staging, diffing, branching, stashing — with structural understanding via [difftastic](https://difftastic.wilfred.me.uk/) and composable output that works for both humans and scripts.
+rift wraps the git workflows where UX is the bottleneck — staging, diffing, log browsing, stashing — with structural understanding via [difftastic](https://difftastic.wilfred.me.uk/) and composable output that works for both humans and scripts.
 
 ```
 rift              # contextual launchpad
 rift diff         # syntax-aware diff browser
 rift stage        # interactive staging with hunk granularity
 rift log          # structural commit explorer
-rift branch       # fuzzy branch switcher
 rift stash        # stash manager with diff preview
 ```
+
+rift is **worktree-aware** — every command reads correctly inside bare-repo and linked-worktree layouts — but it does not *manage* worktrees or branches. For creating, switching, and pruning worktrees, pair it with [worktrunk](https://github.com/max-sixty/worktrunk).
 
 ## Why
 
@@ -37,7 +38,7 @@ rift log --print                      # one commit hash per line
 rift log --json                       # structured JSON
 
 # pipe into anything
-rift branch --print | xargs git rebase
+rift diff --print | xargs -r "$EDITOR"          # open every changed file
 rift log --json | jq '.[] | select(.files_changed > 10)'
 ```
 
@@ -77,7 +78,7 @@ rift log --json -n 10 | jq '.[].hash'
 
 ## Status
 
-**v0.1.0** — core commands implemented (diff, log, branch, stash, stage). Worktree management, config, and code review planned for v0.2.0.
+**v0.1.0** — core commands implemented (diff, log, stash, stage). Config and code review planned for v0.2.0. Worktree and branch *management* are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
 
 ## License
 

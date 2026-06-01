@@ -1,6 +1,8 @@
 # git-flux: Design Document
 
-## A syntax-aware, worktree-native, composable fuzzy git tool
+## A syntax-aware, worktree-aware, composable fuzzy git tool
+
+> **Scope note (current direction).** rift focuses on *consuming* git state — structural diff, log, stash, and hunk staging — and reading it correctly inside any layout, including bare-repo / linked worktrees. It does **not** manage worktrees or branches; [worktrunk](https://github.com/max-sixty/worktrunk) does that well, and rift composes with it (worktrunk creates the worktrees, rift reads them). The `wt` worktree manager and `branch` manager described below are superseded by this decision and kept only as historical context.
 
 ---
 
@@ -17,7 +19,7 @@ As AI coding agents become the dominant way code is produced, review is becoming
 ## Core Design Principles
 
 1. **Structural, not textual.** Diffs understand syntax. Merges understand syntax. Staging understands syntax.
-2. **Worktrees are first-class.** Every command is worktree-aware. Switching context means switching worktrees, not stashing and branching.
+2. **Worktree-aware reads.** Every command works correctly inside bare-repo and linked-worktree layouts (the failure mode forgit/git-fuzzy have). rift reads worktrees; it doesn't manage them — that's worktrunk's job.
 3. **Composable by default.** Every command has a `--print` mode that outputs structured data (JSON or plain selection) to stdout. Interactive mode is the default, but the tool never traps you.
 4. **Transient, not resident.** Invoke, act, return to your shell. Not a persistent TUI you live inside.
 5. **Single binary, minimal dependencies.** No fzf, no bash, no delta, no bat. One `brew install` or binary download. Difftastic and mergiraf are auto-installed on first run (downloaded to `~/.local/share/git-flux/bin/`) or detected on `$PATH` — the user never installs them separately. If download fails or the user is offline, git-flux falls back to built-in line diff with syntax highlighting. The git-flux binary itself stays lean (~10MB); the managed toolchain adds ~30MB on first use.
@@ -34,6 +36,7 @@ These are explicitly out of scope. They're not future features — they reflect 
 - **git-flux does not aim for git parity.** It covers the ~12 commands that benefit most from structural awareness and fuzzy interactivity. `git push`, `git fetch`, `git remote` — these work fine already. git-flux wraps the workflows where UX is the bottleneck.
 - **git-flux is not a merge tool replacement.** It provides a better frontend to merge conflict resolution (via mergiraf), but it doesn't try to replace your editor's merge mode or a dedicated 3-way merge tool like Meld.
 - **git-flux is not a code review platform.** The `review` command is for local triage before you open a PR, not a replacement for GitHub's review interface, Reviewable, or Graphite.
+- **rift does not manage worktrees or branches.** No create/switch/list/prune of worktrees, no branch manager. It stays worktree-*aware* (reads correctly inside them) and defers management to [worktrunk](https://github.com/max-sixty/worktrunk).
 
 ---
 
@@ -51,14 +54,12 @@ The bare `git flux` command shows a status-first landing screen: current branch,
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  main ✓  │  3 worktrees (1 dirty)  │  2 stashes     │
+│  main ✓ (worktree)  │  2 stashes                     │
 ├─────────────────────────────────────────────────────┤
 │  > diff         structural diff browser             │
 │    add          interactive staging                  │
 │    log          commit explorer                      │
 │    review       risk-triaged code review             │
-│    branch       branch manager                       │
-│    wt           worktree manager                     │
 │    checkpoint   named snapshots                      │
 │    ...                                               │
 │                                                      │
@@ -70,9 +71,7 @@ The bare `git flux` command shows a status-first landing screen: current branch,
 git flux add          # interactive staging with hunk/line granularity
 git flux log          # structural log explorer
 git flux diff         # syntax-aware diff browser
-git flux branch       # branch manager
 git flux stash        # stash manager
-git flux wt           # worktree manager (first-class)
 git flux checkpoint   # named snapshots for iterative review (first-class)
 git flux conflict     # merge conflict resolver (mergiraf-powered)
 git flux bisect       # interactive bisect
@@ -95,7 +94,7 @@ git flux review       # code review with structural risk triage (first-class)
 ├─────────────────────────────────────────────────┤
 │                  Git Layer                       │
 │     go-git for reads  │  shelled git for writes  │
-│        worktree registry & awareness             │
+│            worktree-aware reads                  │
 ├─────────────────────────────────────────────────┤
 │                Composable I/O                    │
 │  --print [--format]  │  --json  │  stdin/stdout  │
@@ -111,69 +110,13 @@ git flux review       # code review with structural risk triage (first-class)
 
 ---
 
-## First-Class Concern: Worktrees
+## Worktree Awareness (not management)
 
-### The Problem
+rift does not create, switch, list, or prune worktrees. That space is well served by [worktrunk](https://github.com/max-sixty/worktrunk), and a second tool reimplementing it adds nothing. rift composes with it: worktrunk sets up and moves between worktrees; rift reads diffs, logs, and status inside whichever one you're in.
 
-Git worktrees are the correct answer to "I need to context-switch but don't want to stash." Yet they have zero interactive tooling. You end up memorizing paths and running `git worktree list` constantly.
+What rift owns is **correctness inside worktrees** — the part forgit and git-fuzzy get wrong. A bare-repo + linked-worktree layout (`.bare/worktrees/<name>/`) breaks naive tooling: ref resolution and object lookup fail when `.git` is a file pointing at a `commondir`. rift detects these layouts (`internal/git`: `isLinkedWorktree`, the `log.go` commondir shell fallback) and reads them correctly, so every command works the same whether you're in a plain clone or a worktree.
 
-### The Design
-
-`git flux wt` is the worktree command, but worktree awareness permeates everything:
-
-```
-git flux wt                    # list all worktrees with fuzzy search
-git flux wt new <branch>       # create worktree + branch in one step
-git flux wt switch             # fuzzy-pick a worktree and cd into it
-git flux wt remove             # fuzzy-pick and remove (with dirty check)
-git flux wt remove <wt> [<wt>] # remove one or more worktrees by name
-git flux wt status             # show dirty state across ALL worktrees
-git flux wt diff               # diff across worktrees (structural)
-```
-
-#### Worktree-Aware Status Bar
-
-Every git-flux command shows a subtle status line:
-
-```
- worktree: ~/src/project-main (main)  │  3 others: feature-auth ● feature-api  deploy ✓
-```
-
-The `●` means dirty, `✓` means clean. At a glance, you know the state of every worktree.
-
-#### Worktree-Aware Branching
-
-`git flux branch` shows which branches are checked out in which worktrees:
-
-```
-  main              ~/src/project-main
-  feature-auth ●    ~/src/project-auth
-  feature-api       ~/src/project-api
-  bugfix-123        (not checked out)
-```
-
-Trying to check out a branch that's active in another worktree offers to switch you there instead.
-
-#### Shell Integration for `cd`
-
-Because `cd` can't be run from a subprocess, `git flux wt switch` works via one of:
-
-- **Eval mode:** `eval "$(git flux wt switch --print-cd)"` — outputs `cd /path/to/worktree`
-- **Shell function:** Ship a tiny shell wrapper that sources from the binary:
-  ```bash
-  gfw() { cd "$(git flux wt switch --print)" }
-  ```
-- **tmux/terminal integration:** Option to open a new tmux pane/window at the worktree path
-
-#### Cross-Worktree Operations
-
-```
-git flux wt diff           # compare the same file across two worktrees (structural)
-```
-
-Structural diff between working trees — including uncommitted changes — is something plain git doesn't do well. `git flux wt diff` lets you compare the live state of a file across two worktrees using difftastic.
-
-Note: `git cherry-pick` already works across worktrees (the commit graph is shared), so git-flux doesn't wrap it. If you want to interactively pick a commit from another worktree's branch, use `git flux log --print` scoped to that branch and pipe it to `git cherry-pick`.
+That's the whole worktree story: be invisible and correct, and let worktrunk drive.
 
 ---
 

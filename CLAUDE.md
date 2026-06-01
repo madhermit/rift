@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-rift is a syntax-aware, worktree-native, composable fuzzy git tool. Single Go binary. See `git-flux-design.md` for full design doc.
+rift is a syntax-aware, worktree-aware, composable fuzzy git tool focused on consuming git state (diff, log, stash, stage) — fast, transient, scriptable. Single Go binary. See `git-flux-design.md` for full design doc.
+
+rift does **not** manage worktrees or branches (no create/switch/prune) — defer that to [worktrunk](https://github.com/max-sixty/worktrunk). rift's job is to read and present what's there, correctly, including inside bare-repo / linked-worktree layouts.
 
 ## Build & Dev Commands
 
@@ -37,7 +39,6 @@ internal/      # private packages
   merge/       # mergiraf integration
   review/      # risk classification, review state
   checkpoint/  # shadow commit checkpoint system
-  worktree/    # worktree management
   config/      # TOML config loading
   output/      # --print / --json / --format composable output
 main.go        # entrypoint
@@ -66,7 +67,7 @@ main.go        # entrypoint
 - **No global state.** Pass dependencies explicitly. No `init()` functions except for cobra command registration.
 - **Composable output on every command.** Every subcommand must support `--print` and `--json` flags. Use `internal/output` for consistent formatting.
 - **Graceful degradation.** If difftastic/mergiraf are unavailable, fall back to built-in alternatives. Never crash on missing external tools.
-- **Worktree awareness everywhere.** Commands should detect and respect worktree context. Use `internal/worktree` for shared logic.
+- **Worktree awareness, not management.** Commands detect and respect worktree context (bare-repo and linked-worktree layouts) so reads work correctly there; the logic lives in `internal/git` (e.g. `isLinkedWorktree`, the `log.go` commondir shell fallback). rift never creates, switches, or prunes worktrees — that's worktrunk's job.
 
 ## External Tool Management
 
