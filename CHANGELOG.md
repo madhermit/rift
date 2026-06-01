@@ -7,6 +7,15 @@ pre-1.0).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-01
+
+### Fixed
+
+- Diff previews in the log browser now render correctly inside linked
+  worktrees and for root (parentless) commits, instead of coming up empty.
+- Failed shelled-out diffs now surface git's stderr in the error message,
+  so the cause is visible instead of a bare exit code.
+
 ## [0.2.0] - 2026-05-31
 
 A big step toward being a daily driver for *reading* git state: the diff and log
@@ -46,5 +55,6 @@ tightened around what it does best.
 
 - The `branch` command. rift no longer manages branches or worktrees.
 
-[Unreleased]: https://github.com/madhermit/rift/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/madhermit/rift/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/madhermit/rift/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/madhermit/rift/compare/v0.1.2...v0.2.0
