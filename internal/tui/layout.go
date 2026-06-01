@@ -20,11 +20,17 @@ type SplitLayout struct {
 	DiffWidth     int
 }
 
+// minDiffWidth is the narrowest the diff pane is allowed to get before the list
+// pane is shrunk to make room.
+const minDiffWidth = 10
+
 // ComputeSplitLayout lays out a two-pane (list + diff) view for the given
 // terminal size. When collapsed (the diff pane is active) the list shrinks to
 // CollapsedListWidth; otherwise it takes ~1/3 of the width, clamped to
 // [minList, maxList]. The diff pane takes the remainder less 2 columns for its
-// border, floored at 10.
+// border; on a narrow terminal the list yields so the diff keeps minDiffWidth
+// and the panes fit within the screen (down to ~13 columns, below which a
+// split view isn't usable anyway).
 func ComputeSplitLayout(width, height int, collapsed bool, minList, maxList int) SplitLayout {
 	l := SplitLayout{}
 	l.ContentHeight = height - HeaderRows - FooterRows
@@ -42,8 +48,14 @@ func ComputeSplitLayout(width, height int, collapsed bool, minList, maxList int)
 	}
 
 	l.DiffWidth = width - l.ListWidth - 2
-	if l.DiffWidth < 10 {
-		l.DiffWidth = 10
+	if l.DiffWidth < minDiffWidth {
+		// Not enough room: shrink the list so the diff keeps its floor and the
+		// panes still fit within width (rather than overflowing it).
+		l.DiffWidth = minDiffWidth
+		l.ListWidth = width - l.DiffWidth - 2
+		if l.ListWidth < 1 {
+			l.ListWidth = 1
+		}
 	}
 	return l
 }
