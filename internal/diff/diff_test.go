@@ -7,13 +7,14 @@ import (
 
 func TestBuildGitDiffArgs(t *testing.T) {
 	tests := []struct {
-		name string
-		opts DiffOpts
-		file string
-		want []string
+		name    string
+		opts    DiffOpts
+		file    string
+		display bool
+		want    []string
 	}{
 		{
-			name: "staged with color",
+			name: "staged with color (no display flags)",
 			opts: DiffOpts{Staged: true, Color: true},
 			file: "main.go",
 			want: []string{"diff", "--color=always", "--staged", "--", "main.go"},
@@ -60,11 +61,25 @@ func TestBuildGitDiffArgs(t *testing.T) {
 			file: "",
 			want: []string{"diff", "--color=never", "--staged"},
 		},
+		{
+			name:    "display with color adds word-diff and ws flags",
+			opts:    DiffOpts{Staged: true, Color: true},
+			file:    "main.go",
+			display: true,
+			want:    []string{"diff", "--color=always", "--word-diff=color", "--ws-error-highlight=all", "--staged", "--", "main.go"},
+		},
+		{
+			name:    "display without color stays vanilla",
+			opts:    DiffOpts{Staged: true, Color: false},
+			file:    "main.go",
+			display: true,
+			want:    []string{"diff", "--color=never", "--staged", "--", "main.go"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildGitDiffArgs(tt.opts, tt.file)
+			got := buildGitDiffArgs(tt.opts, tt.file, tt.display)
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("buildGitDiffArgs() = %v, want %v", got, tt.want)
 			}
@@ -85,7 +100,7 @@ func TestBuildCommitDiffArgs(t *testing.T) {
 			base:   "abc",
 			target: "def",
 			color:  true,
-			want:   []string{"diff", "--color=always", "abc..def"},
+			want:   []string{"diff", "--color=always", "--word-diff=color", "--ws-error-highlight=all", "abc..def"},
 		},
 		{
 			name:   "no color",

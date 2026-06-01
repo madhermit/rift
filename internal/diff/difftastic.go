@@ -25,7 +25,7 @@ func (d *difftasticEngine) Diff(ctx context.Context, repoRoot, file string, opts
 }
 
 func (d *difftasticEngine) diffViaGit(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
-	args := buildGitDiffArgs(opts, file)
+	args := buildGitDiffArgs(opts, file, false)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot
 	colorEnv := "DFT_COLOR=never"
@@ -110,7 +110,7 @@ func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, targe
 // for pure additions (old=/dev/null) even in side-by-side mode. Callers should
 // hard-wrap the output as a safety net. See https://github.com/Wilfred/difftastic/issues/861
 func (d *difftasticEngine) diffFiles(ctx context.Context, oldPath, newPath string, color bool, width int, display Display) (string, error) {
-	args := []string{"--display", display.difftValue(width)}
+	args := []string{"--display", display.difftValue(width), "--tab-width", "4"}
 	if width > 0 {
 		args = append(args, "--width", strconv.Itoa(width))
 	}
@@ -140,11 +140,10 @@ func (d *difftasticEngine) diffFiles(ctx context.Context, oldPath, newPath strin
 // hunk to the full base file. This gives tree-sitter the full file context for
 // accurate syntax-aware diffs. Falls back to raw lines if difft fails.
 func (d *difftasticEngine) DiffHunks(ctx context.Context, hunks []Hunk, filename, baseContent string, color bool, width int) []string {
-	ext := filepath.Ext(filename)
 	results := make([]string, len(hunks))
 	for i, h := range hunks {
 		newContent := ApplyHunk(baseContent, h)
-		rendered, err := d.diffContent(ctx, baseContent, newContent, ext, color, width)
+		rendered, err := d.diffContent(ctx, baseContent, newContent, filename, color, width)
 		if err != nil || strings.TrimSpace(rendered) == "" {
 			results[i] = h.Header + "\n" + strings.Join(h.Lines, "\n")
 		} else {
@@ -154,23 +153,39 @@ func (d *difftasticEngine) DiffHunks(ctx context.Context, hunks []Hunk, filename
 	return results
 }
 
-func (d *difftasticEngine) diffContent(ctx context.Context, old, new, ext string, color bool, width int) (string, error) {
+func (d *difftasticEngine) diffContent(ctx context.Context, old, new, filename string, color bool, width int) (string, error) {
 	tmpDir, err := os.MkdirTemp("", "rift-hunk-*")
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(tmpDir)
 
-	oldPath := filepath.Join(tmpDir, "old"+ext)
-	newPath := filepath.Join(tmpDir, "new"+ext)
-	if err := os.WriteFile(oldPath, []byte(old), 0600); err != nil {
+	// Name the temp files with the real basename (in a/ and b/ subdirs to avoid a
+	// collision) so difftastic detects the language by filename — extensionless
+	// files like Makefile or Containerfile would otherwise render as plain text.
+	base := filepath.Base(filename)
+	if base == "." || base == string(filepath.Separator) {
+		base = "f"
+	}
+	oldPath := filepath.Join(tmpDir, "a", base)
+	newPath := filepath.Join(tmpDir, "b", base)
+	if err := writeTemp(oldPath, []byte(old)); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(newPath, []byte(new), 0600); err != nil {
+	if err := writeTemp(newPath, []byte(new)); err != nil {
 		return "", err
 	}
 	// Hunks are small; inline keeps them readable regardless of pane width.
 	return d.diffFiles(ctx, oldPath, newPath, color, width, DisplayInline)
+}
+
+// writeTemp writes content to destPath, creating its parent directory. Used for
+// the a/ and b/ scratch files difftastic diffs.
+func writeTemp(destPath string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(destPath, content, 0600)
 }
 
 func showOrNull(ctx context.Context, repoRoot, ref, file, destPath string) string {
@@ -187,8 +202,5 @@ func gitShow(ctx context.Context, repoRoot, ref, file, destPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
-		return err
-	}
-	return os.WriteFile(destPath, out, 0600)
+	return writeTemp(destPath, out)
 }

@@ -70,6 +70,17 @@ func NewPlainEngine() Engine {
 	return &fallbackEngine{}
 }
 
+// displayFlags add intra-line word coloring and whitespace-error highlighting to
+// the plain git-diff engine's output. They apply only in color mode and only to
+// the fallback engine — difftastic supplies its own structural intra-line
+// highlighting, and the raw-diff path used for hunk parsing must stay vanilla.
+func displayFlags(color bool) []string {
+	if !color {
+		return nil
+	}
+	return []string{"--word-diff=color", "--ws-error-highlight=all"}
+}
+
 func buildCommitDiffArgs(base, target string, color bool) []string {
 	args := []string{"diff"}
 	if color {
@@ -77,16 +88,23 @@ func buildCommitDiffArgs(base, target string, color bool) []string {
 	} else {
 		args = append(args, "--color=never")
 	}
+	args = append(args, displayFlags(color)...)
 	args = append(args, base+".."+target)
 	return args
 }
 
-func buildGitDiffArgs(opts DiffOpts, file string) []string {
+// buildGitDiffArgs builds `git diff` arguments. display adds the fallback
+// engine's readability flags; the difftastic-via-git path passes false so its
+// external-diff driver sees a plain diff.
+func buildGitDiffArgs(opts DiffOpts, file string, display bool) []string {
 	args := []string{"diff"}
 	if opts.Color {
 		args = append(args, "--color=always")
 	} else {
 		args = append(args, "--color=never")
+	}
+	if display {
+		args = append(args, displayFlags(opts.Color)...)
 	}
 	if opts.Staged {
 		args = append(args, "--staged")
