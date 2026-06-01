@@ -47,6 +47,10 @@ main.go        # entrypoint
 
 - **Refactoring pass required.** After implementing any feature or change, always do a refactoring pass before considering the work done. Review every file touched for: dead code (unused fields, methods, variables, imports), duplication (extract shared helpers), unnecessary indirection (methods that don't use their receiver should be plain functions), and structural simplicity (e.g. lift common logic above a switch instead of duplicating it in each branch). The code should be as simple and idiomatic as possible.
 
+## Commits
+
+- **No AI attribution.** Do not add a `Co-Authored-By` trailer or any AI/assistant attribution to commit messages.
+
 ## Code Conventions
 
 - **Error handling:** Return errors, don't panic. Use `fmt.Errorf("context: %w", err)` for wrapping.
