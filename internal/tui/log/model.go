@@ -295,11 +295,22 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 	if len(files) > 0 {
 		b.WriteString("\n")
 		for _, f := range files {
-			icon := git.StatusChar(f.Status)
-			if color {
-				icon = tui.StatusStyle(f.Status).Render(icon)
+			status := git.StatusChar(f.Status)
+			fileIcon := tui.FileIcon(f.Path)
+			// Reserve room for the "  <status> <icon> " prefix; fall back to the
+			// full path when the width isn't known yet (unsized preview).
+			pathWidth := width - 6
+			if pathWidth < 1 {
+				pathWidth = len(f.Path)
 			}
-			fmt.Fprintf(&b, "  %s %s %s\n", icon, tui.FileIcon(f.Path), f.Path)
+			path := tui.RenderPath(f.Path, pathWidth, false)
+			if color {
+				status = tui.StatusStyle(f.Status).Render(status)
+			} else {
+				fileIcon = ansi.Strip(fileIcon)
+				path = ansi.Strip(path)
+			}
+			fmt.Fprintf(&b, "  %s %s %s\n", status, fileIcon, path)
 		}
 	}
 

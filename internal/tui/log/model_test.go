@@ -3,6 +3,7 @@ package logui
 import (
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/tui"
 )
@@ -49,8 +50,8 @@ func TestCommitHeader(t *testing.T) {
 				{Path: "README.md", Status: "Added"},
 			},
 			want: "commit abc1234\nAuthor: Alice\nDate:   2026-01-15 14:30\n\n    Update code\n\n" +
-				"  M " + tui.FileIcon("main.go") + " main.go\n" +
-				"  A " + tui.FileIcon("README.md") + " README.md\n" +
+				"  M " + ansi.Strip(tui.FileIcon("main.go")) + " main.go\n" +
+				"  A " + ansi.Strip(tui.FileIcon("README.md")) + " README.md\n" +
 				"\n─────────────────────\n\n",
 		},
 	}

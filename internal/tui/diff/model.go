@@ -57,9 +57,9 @@ func rowWithStat(left, stat string, w int) string {
 	return left + strings.Repeat(" ", gap) + stat
 }
 
-// pathRow renders prefix + a styled path truncated to fit, right-aligning stat
-// within total width w (reserving a one-column gap before it).
-func pathRow(prefix string, style lipgloss.Style, path, stat string, w int) string {
+// pathRow renders prefix + a path (dim dir, emphasized basename) truncated to
+// fit, right-aligning stat within total width w (reserving a one-column gap).
+func pathRow(prefix string, selected bool, path, stat string, w int) string {
 	avail := w - lipgloss.Width(prefix)
 	if stat != "" {
 		avail -= lipgloss.Width(stat) + 1
@@ -67,7 +67,7 @@ func pathRow(prefix string, style lipgloss.Style, path, stat string, w int) stri
 	if avail < 1 {
 		avail = 1
 	}
-	return rowWithStat(prefix+style.Render(tui.TruncatePath(path, avail)), stat, w)
+	return rowWithStat(prefix+tui.RenderPath(path, avail, selected), stat, w)
 }
 
 // contextLabel is the header right-context: the engine name, prefixed with the
@@ -140,7 +140,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 				return tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path)
 			default:
 				prefix := tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path) + " "
-				return pathRow(prefix, style, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
+				return pathRow(prefix, selected, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
 			}
 		},
 	}

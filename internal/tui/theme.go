@@ -41,6 +41,23 @@ func TextStyle(selected bool) lipgloss.Style {
 	return NormalTextStyle
 }
 
+// RenderPath renders a file path with a dimmed directory and an emphasized
+// basename — so the eye lands on the filename — truncated to fit width.
+func RenderPath(path string, width int, selected bool) string {
+	path = TruncatePath(path, width)
+	dir, base := path, ""
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		dir, base = path[:i+1], path[i+1:]
+	} else {
+		dir, base = "", path
+	}
+	dirStyle, baseStyle := pathDirStyle, pathBaseStyle
+	if selected {
+		dirStyle, baseStyle = pathDirSelStyle, pathBaseSelStyle
+	}
+	return dirStyle.Render(dir) + baseStyle.Render(base)
+}
+
 // Palette — a blue accent over a neutral gray scale, shared by every screen so
 // the chrome stays consistent. Kept on ANSI 256 indices for broad terminal
 // support.
@@ -77,6 +94,12 @@ var (
 
 	SelectedTextStyle = lipgloss.NewStyle().Foreground(Bright)
 	NormalTextStyle   = lipgloss.NewStyle().Foreground(Subtle)
+
+	// Path rendering: dim directory, emphasized basename (see RenderPath).
+	pathDirStyle     = lipgloss.NewStyle().Foreground(Faint)
+	pathBaseStyle    = lipgloss.NewStyle().Foreground(Text)
+	pathDirSelStyle  = lipgloss.NewStyle().Foreground(Subtle)
+	pathBaseSelStyle = lipgloss.NewStyle().Foreground(Bright).Bold(true)
 )
 
 // StatusStyle returns the foreground style for a git status word
