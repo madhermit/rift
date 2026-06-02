@@ -15,6 +15,9 @@ pre-1.0).
   file); instead the diff panel's border legend shows the current file's name on
   the left (updating as you scroll between files) and its position — file `N/M`
   of the changeset — on the right. The footer hint reads `⇥ list`.
+- The diff browser's working-tree list title now shows both modes as a toggle —
+  `unstaged/staged` with the active one highlighted — instead of only the current
+  one, so the `s` toggle and the current state read at a glance.
 
 ## [0.3.0] - 2026-06-01
 

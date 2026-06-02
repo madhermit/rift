@@ -84,10 +84,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 
 	listTitle := "changes"
 	if !commitDiff {
-		listTitle = "unstaged"
-		if staged {
-			listTitle = "staged"
-		}
+		listTitle = tui.ToggleTitle("unstaged", "staged", staged)
 	}
 
 	hints := [][2]string{
@@ -221,11 +218,7 @@ func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
 
 func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	m.staged = !m.staged
-	title := "unstaged"
-	if m.staged {
-		title = "staged"
-	}
-	m.list = m.list.SetListTitle(title)
+	m.list = m.list.SetListTitle(tui.ToggleTitle("unstaged", "staged", m.staged))
 
 	repo, staged := m.repo, m.staged
 	return m, func() tea.Msg {

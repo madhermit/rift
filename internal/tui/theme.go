@@ -131,6 +131,23 @@ var (
 	pathBaseSelStyle = lipgloss.NewStyle().Foreground(Bright).Bold(true)
 )
 
+var (
+	toggleOn  = lipgloss.NewStyle().Foreground(Accent)
+	toggleOff = lipgloss.NewStyle().Foreground(Subtle)
+)
+
+// ToggleTitle renders a two-option toggle for a panel title (e.g.
+// "unstaged"/"staged"): the active option in accent, the other dimmed, so the
+// title names the current mode and shows the alternative the toggle key (`s`)
+// switches to.
+func ToggleTitle(left, right string, rightActive bool) string {
+	ls, rs := toggleOn, toggleOff
+	if rightActive {
+		ls, rs = toggleOff, toggleOn
+	}
+	return ls.Render(left) + toggleOff.Render("/") + rs.Render(right)
+}
+
 // StatusStyle returns the foreground style for a git status word
 // ("Added"/"Deleted"/"Modified"/"Renamed"). Unknown statuses are dim.
 func StatusStyle(status string) lipgloss.Style {
