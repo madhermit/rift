@@ -5,10 +5,47 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/madhermit/rift/internal/tooling"
 )
+
+// ParallelStream runs work(0..n-1) concurrently, bounded to the CPU count, and
+// returns a channel yielding each result in index order, closed when done. A
+// changeset's files are diffed in parallel — difftastic is CPU-bound at ~1s per
+// large file — while a progressive consumer gets each file as soon as the ones
+// before it are ready. The channel is buffered to n so the workers never block
+// if the consumer stops reading early (e.g. the user navigated away).
+func ParallelStream(n int, work func(i int) string) <-chan string {
+	out := make(chan string, max(n, 0))
+	go func() {
+		defer close(out)
+		results := make([]chan string, n)
+		for i := range results {
+			results[i] = make(chan string, 1)
+		}
+		limit := runtime.NumCPU()
+		if limit > n {
+			limit = n
+		}
+		if limit < 1 {
+			limit = 1
+		}
+		sem := make(chan struct{}, limit)
+		for i := 0; i < n; i++ {
+			go func(i int) {
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				results[i] <- work(i)
+			}(i)
+		}
+		for i := 0; i < n; i++ {
+			out <- <-results[i]
+		}
+	}()
+	return out
+}
 
 // gitErr wraps a shelled-git failure with the command's stderr. cmd.Output()
 // captures stderr into ExitError.Stderr, so an opaque "exit status 128" carries
@@ -66,7 +103,6 @@ type DiffOpts struct {
 
 type Engine interface {
 	Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error)
-	DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int, display Display) (string, error)
 	DiffHunks(ctx context.Context, hunks []Hunk, filename, baseContent string, color bool, width int) []string
 	Name() string
 }
@@ -94,20 +130,6 @@ func displayFlags(color bool) []string {
 		return nil
 	}
 	return []string{"--word-diff=color", "--ws-error-highlight=all"}
-}
-
-func buildCommitDiffArgs(base, target string, color bool) []string {
-	args := []string{"diff"}
-	if color {
-		args = append(args, "--color=always")
-	} else {
-		args = append(args, "--color=never")
-	}
-	args = append(args, displayFlags(color)...)
-	// Two args, not base..target: the range form rejects a tree (e.g. the empty
-	// tree for a root commit) with "Invalid revision range".
-	args = append(args, base, target)
-	return args
 }
 
 // buildGitDiffArgs builds `git diff` arguments. display adds the fallback

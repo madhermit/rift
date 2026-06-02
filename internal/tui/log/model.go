@@ -1,7 +1,6 @@
 package logui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -31,6 +30,7 @@ type Model struct {
 	list            tui.SplitList[git.CommitInfo]
 	display         diff.Display
 	action          Action
+	stream          *tui.PreviewStream // active commit-diff stream; nil otherwise
 
 	drilled  diffui.Model // file-level view of the selected commit (when drilling)
 	drilling bool
@@ -55,7 +55,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 	canToggleEngine := engine.Name() != altEngine.Name()
 
 	hints := [][2]string{
-		{"↑↓", "nav"}, {"⏎", "files"}, {"/", "filter"}, {"⇥", "switch"}, {"gg/G", "top/bot"}, {"\\", "layout"},
+		{"⏎", "files"}, {"/", "filter"}, {"⇥", "read"}, {"\\", "layout"},
 	}
 	if canToggleEngine {
 		hints = append(hints, [2]string{"e", "engine"})
@@ -68,20 +68,15 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 		Screen:       "log",
 		ListTitle:    "commits",
 		Context:      engine.Name(),
-		MinList:      30,
-		MaxList:      80,
+		NavFraction:  30,
 		EmptyStatus:  "No commits found",
 		Hints:        hints,
 		Match:        func(c git.CommitInfo) string { return c.Hash + " " + c.Message },
 		PreviewTitle: func(c git.CommitInfo) string { return c.Hash },
 		CacheKey:     func(c git.CommitInfo) string { return c.Hash },
 		Yank:         func(c git.CommitInfo) string { return c.Hash },
-		Row: func(c git.CommitInfo, w int, selected, collapsed bool) string {
-			style := tui.TextStyle(selected)
-			if collapsed {
-				return style.Render(c.Hash)
-			}
-			return style.Render(tui.Truncate(c.Hash+"  "+c.Message, w))
+		Row: func(c git.CommitInfo, w int, selected bool) string {
+			return tui.TextStyle(selected).Render(tui.Truncate(c.Hash+"  "+c.Message, w))
 		},
 	}
 	return Model{repo: repo, engine: engine, altEngine: altEngine, canToggleEngine: canToggleEngine, list: tui.NewSplitList(cfg, commits)}
@@ -118,7 +113,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, dc = m.sendDrilled(msg)
 		return m, tea.Batch(lc, dc)
 	case tui.SelectionChangedMsg:
+		m.stream.Cancel() // stop the previous commit's streaming work
+		m.stream = nil
+		if m.drilling {
+			return m, nil // the commit list is hidden; don't stream in the background
+		}
 		return m, m.previewCmd(msg.ReqID)
+	case tui.StreamReadyMsg:
+		if m.drilling {
+			if msg.Cancel != nil {
+				msg.Cancel() // a load that landed after we drilled in; drop it
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.list, m.stream, cmd = tui.ApplyStream(m.list, m.stream, msg)
+		return m, cmd
+	case tui.ChunkMsg:
+		var cmd tea.Cmd
+		m.list, m.stream, cmd = tui.AdvanceStream(m.list, m.stream, msg)
+		return m, cmd
 	case tea.KeyPressMsg:
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
@@ -174,7 +188,7 @@ func tagDrilled(cmd tea.Cmd) tea.Cmd {
 				tagged[i] = tagDrilled(c)
 			}
 			return tagged
-		case tui.SelectionChangedMsg, tui.PreviewMsg:
+		case tui.SelectionChangedMsg, tui.PreviewMsg, tui.StreamReadyMsg, tui.ChunkMsg:
 			return drilledMsg{msg}
 		default:
 			return msg
@@ -196,7 +210,11 @@ func (m Model) updateDrilled(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		if key.String() == "esc" && !m.drilled.Filtering() && !m.drilled.ShowingHelp() {
 			m.drilling = false
-			return m, nil
+			// Refresh the commit preview, which was frozen (and possibly cut off
+			// mid-stream) while drilled — a cache hit if it had finished.
+			var cmd tea.Cmd
+			m.list, cmd = m.list.Reload()
+			return m, cmd
 		}
 	}
 	m, cmd := m.sendDrilled(msg)
@@ -205,19 +223,23 @@ func (m Model) updateDrilled(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // commitFiles returns the files a commit changed, plus the base ref to diff it
 // against — the commit's parent, or the empty tree for a root commit.
-func commitFiles(repo *git.Repo, hash string) (base string, files []git.ChangedFile) {
+func commitFiles(repo *git.Repo, hash string) (base string, files []git.ChangedFile, err error) {
 	base = hash + "~1"
-	files, err := repo.DiffBetweenCommits(base, hash)
+	files, err = repo.DiffBetweenCommits(base, hash)
 	if err != nil {
 		base = git.EmptyTree // root commit: diff against the empty tree
-		files, _ = repo.DiffBetweenCommits(base, hash)
+		files, err = repo.DiffBetweenCommits(base, hash)
 	}
-	return base, files
+	return base, files, err
 }
 
-// drillInto opens the file-level diff view for a commit.
+// drillInto opens the file-level diff view for a commit. The commit-list's own
+// preview stream is cancelled — the drilled view does its own (streamed) diff,
+// and the hidden list preview shouldn't keep difftastic busy.
 func (m Model) drillInto(commit git.CommitInfo) (tea.Model, tea.Cmd) {
-	base, files := commitFiles(m.repo, commit.Hash)
+	m.stream.Cancel()
+	m.stream = nil
+	base, files, _ := commitFiles(m.repo, commit.Hash) // a list error surfaces as an empty drilldown
 	m.drilled = diffui.New(m.repo, m.engine, files, false, base, commit.Hash)
 	m.drilling = true
 	m, cmd := m.sendDrilled(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -239,21 +261,30 @@ func (m Model) View() tea.View {
 	return m.list.TeaView()
 }
 
+// previewCmd builds the selected commit's preview. The commit header (metadata +
+// file list) is shown as soon as the file list is computed; the per-file diffs
+// then stream in beneath it, in order, diffed in parallel — so a large commit
+// paints its header and first file immediately instead of blocking on the whole
+// diff. The accumulated result is cached (per commit) when the stream completes.
 func (m Model) previewCmd(reqID int) tea.Cmd {
 	commit, ok := m.list.Selected()
 	if !ok {
 		return nil
 	}
-	repo, engine, width, display := m.repo, m.engine, m.list.PreviewWidth(), m.display
+	repo, engine := m.repo, m.engine
+	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
 	return func() tea.Msg {
-		base, files := commitFiles(repo, commit.Hash)
-		color := tui.ColorEnabled()
-		header := commitHeader(commit, files, color, width)
-		content, err := engine.DiffCommit(context.Background(), repo.Root(), base, commit.Hash, color, width, display)
+		base, files, err := commitFiles(repo, commit.Hash)
 		if err != nil {
-			return tui.PreviewMsg{Content: content, Err: err, ReqID: reqID}
+			return tui.PreviewMsg{Err: err, ReqID: reqID}
 		}
-		return tui.PreviewMsg{Content: header + content, ReqID: reqID}
+		header := commitHeader(commit, files, opts.Color, opts.Width)
+		if len(files) == 0 {
+			return tui.StreamReadyMsg{ReqID: reqID, Header: header}
+		}
+		opts.Base, opts.Target = base, commit.Hash
+		ch, cancel := tui.StreamFiles(engine, repo.Root(), git.Paths(files), opts)
+		return tui.StreamReadyMsg{ReqID: reqID, Header: header, Ch: ch, Cancel: cancel}
 	}
 }
 

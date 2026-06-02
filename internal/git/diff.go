@@ -22,6 +22,15 @@ type ChangedFile struct {
 	Deleted int    `json:"deleted"`
 }
 
+// Paths returns just the paths of the changed files.
+func Paths(files []ChangedFile) []string {
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.Path
+	}
+	return paths
+}
+
 func (r *Repo) ChangedFiles(staged bool) ([]ChangedFile, error) {
 	var files []ChangedFile
 	var err error

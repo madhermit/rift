@@ -1,7 +1,6 @@
 package diffui
 
 import (
-	"context"
 	"sort"
 	"strings"
 
@@ -24,6 +23,7 @@ type Model struct {
 	target     string
 	commitDiff bool
 	display    diff.Display
+	stream     *tui.PreviewStream // active "all changes" stream; nil otherwise
 }
 
 // filesLoadedMsg carries a refreshed file list after toggling staged/unstaged.
@@ -94,7 +94,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	}
 
 	hints := [][2]string{
-		{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"}, {"gg/G", "top/bot"}, {"{/}", "section"},
+		{"/", "filter"}, {"⇥", "read"},
 	}
 	if !commitDiff {
 		hints = append(hints, [2]string{"s", "staged"})
@@ -114,8 +114,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		Screen:      "diff",
 		ListTitle:   listTitle,
 		Context:     contextLabel(commitDiff, target, engine.Name()),
-		MinList:     20,
-		MaxList:     60,
+		NavFraction: 30,
 		EmptyStatus: "No changes found",
 		Hints:       hints,
 		Match:       func(f git.ChangedFile) string { return f.Path },
@@ -129,19 +128,12 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		// Staged/display changes clear the cache (SetItems / ClearCacheAndReload).
 		CacheKey: func(f git.ChangedFile) string { return f.Path },
 		Yank:     func(f git.ChangedFile) string { return f.Path },
-		Row: func(f git.ChangedFile, w int, selected, collapsed bool) string {
-			style := tui.TextStyle(selected)
-			switch {
-			case f.Path == "" && collapsed:
-				return style.Render("∗")
-			case f.Path == "":
-				return rowWithStat(style.Render("∗ All changes"), tui.DiffStat(f.Added, f.Deleted), w)
-			case collapsed:
-				return tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path)
-			default:
-				prefix := tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path) + " "
-				return pathRow(prefix, selected, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
+		Row: func(f git.ChangedFile, w int, selected bool) string {
+			if f.Path == "" {
+				return rowWithStat(tui.TextStyle(selected).Render("∗ All changes"), tui.DiffStat(f.Added, f.Deleted), w)
 			}
+			prefix := tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path) + " "
+			return pathRow(prefix, selected, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
 		},
 	}
 
@@ -163,7 +155,17 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tui.SelectionChangedMsg:
+		m.stream.Cancel()
+		m.stream = nil
 		return m, m.previewCmd(msg.ReqID)
+	case tui.StreamReadyMsg:
+		var cmd tea.Cmd
+		m.list, m.stream, cmd = tui.ApplyStream(m.list, m.stream, msg)
+		return m, cmd
+	case tui.ChunkMsg:
+		var cmd tea.Cmd
+		m.list, m.stream, cmd = tui.AdvanceStream(m.list, m.stream, msg)
+		return m, cmd
 	case tui.EditorClosedMsg:
 		return m.reloadFresh() // the file may have changed
 	case filesLoadedMsg:
@@ -241,49 +243,44 @@ func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	}
 }
 
+// previewCmd streams the selected files' diffs: the selected file, or every file
+// for the synthetic "All changes" entry, diffed in parallel and emitted in order
+// so the first paints as soon as it's ready. An empty changeset streams nothing
+// (ApplyStream resolves the loading state and caches the empty result).
 func (m Model) previewCmd(reqID int) tea.Cmd {
 	sel, ok := m.list.Selected()
 	if !ok {
 		return nil
 	}
-	var files []string
-	if sel.Path == "" {
-		for _, f := range m.list.VisibleItems() {
-			if f.Path != "" {
-				files = append(files, f.Path)
-			}
-		}
-	} else {
-		files = []string{sel.Path}
-	}
-
-	repo, engine := m.repo, m.engine
-	opts := diff.DiffOpts{
-		Staged:  m.staged,
-		Base:    m.base,
-		Target:  m.target,
-		Color:   tui.ColorEnabled(),
-		Width:   m.list.PreviewWidth(),
-		Display: m.display,
-	}
-	// Banner each file when several are shown at once (the "All changes" view), so
-	// boundaries stand out as you scroll. A single file's pane title already names it.
-	banners := len(files) > 1 && opts.Color
+	files := previewFiles(sel, m.list.VisibleItems())
+	opts := m.previewOpts()
+	root, engine := m.repo.Root(), m.engine
 	return func() tea.Msg {
-		var result strings.Builder
-		for _, file := range files {
-			content, err := engine.Diff(context.Background(), repo.Root(), file, opts)
-			if err != nil {
-				continue
-			}
-			if content != "" {
-				if banners {
-					result.WriteString(tui.SectionBanner(file, opts.Width) + "\n")
-				}
-				result.WriteString(content)
-				result.WriteString("\n")
-			}
+		if len(files) == 0 {
+			return tui.StreamReadyMsg{ReqID: reqID}
 		}
-		return tui.PreviewMsg{Content: result.String(), ReqID: reqID}
+		ch, cancel := tui.StreamFiles(engine, root, files, opts)
+		return tui.StreamReadyMsg{ReqID: reqID, Ch: ch, Cancel: cancel}
 	}
+}
+
+func (m Model) previewOpts() diff.DiffOpts {
+	o := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
+	o.Staged, o.Base, o.Target = m.staged, m.base, m.target
+	return o
+}
+
+// previewFiles is the list of files a selection previews: just the selected file,
+// or every changed file for the synthetic "All changes" entry (empty path).
+func previewFiles(sel git.ChangedFile, visible []git.ChangedFile) []string {
+	if sel.Path != "" {
+		return []string{sel.Path}
+	}
+	var files []string
+	for _, f := range visible {
+		if f.Path != "" {
+			files = append(files, f.Path)
+		}
+	}
+	return files
 }

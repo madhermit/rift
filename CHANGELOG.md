@@ -7,6 +7,26 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Added
+
+- `J` / `K` (also `shift+↑`/`↓`, or `]`/`[`) step to the next/previous file or
+  commit without leaving the preview, so you can read straight through a
+  changeset file by file — a bigger-unit jump complementing the `j`/`k` scroll.
+
+### Changed
+
+- Diffs now load progressively: the "all changes", commit, and stash previews
+  diff their files in parallel but stream in top-to-bottom, so the first file
+  (and, for a commit, its header) paints as soon as it's ready instead of
+  blocking on the whole changeset (difftastic is CPU-bound at roughly a second
+  per large file). The full result is cached, so revisiting is instant.
+- The diff, log, and stash browsers now use a vertical layout: the list sits in
+  a strip on top (capped at ~⅓ of the height) with the diff filling the rest
+  below at full width — instead of a left sidebar that competed with the diff
+  for columns. Stepping the list updates the diff live; `⇥` focuses the diff
+  full-screen (the strip hides, the current file/commit and position move into
+  its title) and back.
+
 ### Fixed
 
 - Renamed files no longer show an empty diff in stash and linked-worktree

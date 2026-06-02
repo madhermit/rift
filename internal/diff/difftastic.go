@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/madhermit/rift/internal/git"
 )
 
 type difftasticEngine struct {
@@ -65,54 +63,6 @@ func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot, file string
 
 	oldPath := showOrNull(ctx, repoRoot, oldRef, file, filepath.Join(tmpDir, "a", file))
 	return d.diffFiles(ctx, oldPath, newPath, opts.Color, opts.Width, opts.Display)
-}
-
-func (d *difftasticEngine) DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int, display Display) (string, error) {
-	// Get the list of changed files. Use two args (not the `base..target` range,
-	// which rejects a tree on either side); and for a root commit (base = the
-	// empty tree, whose object may be absent from the odb) list the target's
-	// files via `diff-tree --root` instead.
-	args := []string{"diff", "--name-only", base, target}
-	if base == git.EmptyTree {
-		args = []string{"diff-tree", "--root", "--no-commit-id", "--name-only", "-r", target}
-	}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = repoRoot
-	out, err := cmd.Output()
-	if err != nil {
-		return "", gitErr("git "+strings.Join(args, " "), err)
-	}
-
-	files := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(files) == 0 || (len(files) == 1 && files[0] == "") {
-		return "", nil
-	}
-
-	tmpDir, err := os.MkdirTemp("", "rift-diff-*")
-	if err != nil {
-		return "", fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Use subdirs so difft shows "a/file" vs "b/file" in its header
-	aDir := filepath.Join(tmpDir, "a")
-	bDir := filepath.Join(tmpDir, "b")
-
-	var result strings.Builder
-	for _, file := range files {
-		oldPath := showOrNull(ctx, repoRoot, base, file, filepath.Join(aDir, file))
-		newPath := showOrNull(ctx, repoRoot, target, file, filepath.Join(bDir, file))
-
-		diffOut, err := d.diffFiles(ctx, oldPath, newPath, color, width, display)
-		if err != nil {
-			continue
-		}
-		if diffOut != "" {
-			result.WriteString(diffOut)
-			result.WriteString("\n")
-		}
-	}
-	return result.String(), nil
 }
 
 // diffFiles calls difft directly in 2-arg mode. Note: difft ignores --width

@@ -1,9 +1,32 @@
 package diff
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 )
+
+// TestParallelStreamOrdered verifies results stream in index order and the
+// channel closes — even when later items finish before earlier ones.
+func TestParallelStreamOrdered(t *testing.T) {
+	gate := []chan struct{}{make(chan struct{}), make(chan struct{}), make(chan struct{})}
+	ch := ParallelStream(len(gate), func(i int) string {
+		<-gate[i]
+		return fmt.Sprintf("r%d", i)
+	})
+	// Finish in reverse order; the output order must still be r0, r1, r2.
+	close(gate[2])
+	close(gate[1])
+	close(gate[0])
+
+	var got []string
+	for s := range ch {
+		got = append(got, s)
+	}
+	if want := []string{"r0", "r1", "r2"}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
 
 func TestBuildGitDiffArgs(t *testing.T) {
 	tests := []struct {
@@ -82,40 +105,6 @@ func TestBuildGitDiffArgs(t *testing.T) {
 			got := buildGitDiffArgs(tt.opts, tt.file, tt.display)
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("buildGitDiffArgs() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildCommitDiffArgs(t *testing.T) {
-	tests := []struct {
-		name   string
-		base   string
-		target string
-		color  bool
-		want   []string
-	}{
-		{
-			name:   "with color",
-			base:   "abc",
-			target: "def",
-			color:  true,
-			want:   []string{"diff", "--color=always", "--word-diff=color", "--ws-error-highlight=all", "abc", "def"},
-		},
-		{
-			name:   "no color",
-			base:   "abc",
-			target: "def",
-			color:  false,
-			want:   []string{"diff", "--color=never", "abc", "def"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := buildCommitDiffArgs(tt.base, tt.target, tt.color)
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("buildCommitDiffArgs() = %v, want %v", got, tt.want)
 			}
 		})
 	}

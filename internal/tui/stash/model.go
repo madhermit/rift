@@ -1,7 +1,6 @@
 package stashui
 
 import (
-	"context"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
@@ -27,6 +26,7 @@ type Model struct {
 	list            tui.SplitList[git.StashEntry]
 	action          StashAction
 	display         diff.Display
+	stream          *tui.PreviewStream // active stash-diff stream; nil otherwise
 }
 
 func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
@@ -34,7 +34,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 	canToggleEngine := engine.Name() != altEngine.Name()
 
 	hints := [][2]string{
-		{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
+		{"/", "filter"}, {"⇥", "read"},
 		{"a", "apply"}, {"p", "pop"}, {"x", "drop"}, {"\\", "layout"},
 	}
 	if canToggleEngine {
@@ -46,8 +46,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 		Screen:      "stash",
 		ListTitle:   "stashes",
 		Context:     engine.Name(),
-		MinList:     30,
-		MaxList:     80,
+		NavFraction: 30,
 		EmptyStatus: "No stashes found",
 		Hints:       hints,
 		Match: func(s git.StashEntry) string {
@@ -58,12 +57,8 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 		},
 		CacheKey: func(s git.StashEntry) string { return fmt.Sprintf("%d", s.Index) },
 		Yank:     func(s git.StashEntry) string { return fmt.Sprintf("stash@{%d}", s.Index) },
-		Row: func(s git.StashEntry, w int, selected, collapsed bool) string {
-			style := tui.TextStyle(selected)
-			if collapsed {
-				return style.Render(fmt.Sprintf("{%d}", s.Index))
-			}
-			return style.Render(tui.Truncate(fmt.Sprintf("stash@{%d}  %s", s.Index, s.Message), w))
+		Row: func(s git.StashEntry, w int, selected bool) string {
+			return tui.TextStyle(selected).Render(tui.Truncate(fmt.Sprintf("stash@{%d}  %s", s.Index, s.Message), w))
 		},
 	}
 	return Model{repo: repo, engine: engine, altEngine: altEngine, canToggleEngine: canToggleEngine, list: tui.NewSplitList(cfg, stashes)}
@@ -83,7 +78,17 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tui.SelectionChangedMsg:
+		m.stream.Cancel() // stop the previous stash's streaming work
+		m.stream = nil
 		return m, m.previewCmd(msg.ReqID)
+	case tui.StreamReadyMsg:
+		var cmd tea.Cmd
+		m.list, m.stream, cmd = tui.ApplyStream(m.list, m.stream, msg)
+		return m, cmd
+	case tui.ChunkMsg:
+		var cmd tea.Cmd
+		m.list, m.stream, cmd = tui.AdvanceStream(m.list, m.stream, msg)
+		return m, cmd
 	case tea.KeyPressMsg:
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
@@ -134,20 +139,27 @@ func stashAction(key string) (StashAction, bool) {
 	return NoAction, false
 }
 
+// previewCmd streams the selected stash's diff: its files (between the stash and
+// its parent) are diffed in parallel and streamed in order, like the log's commit
+// preview. The full result is cached per stash.
 func (m Model) previewCmd(reqID int) tea.Cmd {
 	entry, ok := m.list.Selected()
 	if !ok {
 		return nil
 	}
-	repo, engine, width, display := m.repo, m.engine, m.list.PreviewWidth(), m.display
+	repo, engine := m.repo, m.engine
+	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
 	return func() tea.Msg {
 		ref := fmt.Sprintf("stash@{%d}", entry.Index)
-		base := ref + "^"
-		color := tui.ColorEnabled()
-		content, err := engine.DiffCommit(context.Background(), repo.Root(), base, ref, color, width, display)
+		opts.Base, opts.Target = ref+"^", ref
+		files, err := repo.DiffBetweenCommits(opts.Base, ref)
 		if err != nil {
 			return tui.PreviewMsg{Err: err, ReqID: reqID}
 		}
-		return tui.PreviewMsg{Content: content, ReqID: reqID}
+		if len(files) == 0 {
+			return tui.StreamReadyMsg{ReqID: reqID}
+		}
+		ch, cancel := tui.StreamFiles(engine, repo.Root(), git.Paths(files), opts)
+		return tui.StreamReadyMsg{ReqID: reqID, Ch: ch, Cancel: cancel}
 	}
 }

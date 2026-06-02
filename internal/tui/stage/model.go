@@ -63,6 +63,17 @@ var stageHints = [][2]string{
 	{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"o", "open"}, {"?", "help"}, {"q", "quit"},
 }
 
+// stageNavKeys is the navigation reference for the stage help overlay. Stage is
+// not a SplitList, so it lists its own keys (incl. alternates) rather than the
+// SplitList PreviewHelpKeys, which advertises keys stage doesn't implement.
+var stageNavKeys = [][2]string{
+	{"j/k  ↑↓", "move / scroll"},
+	{"{/}  n/p", "prev / next hunk"},
+	{"ctrl+d/u", "scroll half-page"},
+	{"ctrl+f/b", "scroll page"},
+	{"esc", "back"},
+}
+
 type hunkDiffsMsg struct {
 	hunks []displayHunk
 }
@@ -568,7 +579,7 @@ func (m Model) View() tea.View {
 	l := m.layout()
 
 	if m.showHelp {
-		v := tea.NewView(tui.HelpView("stage", m.engine.Name(), stageHints, tui.PreviewHelpKeys, m.width, l.ContentHeight))
+		v := tea.NewView(tui.HelpView("stage", m.engine.Name(), stageHints, stageNavKeys, m.width, l.ContentHeight))
 		v.AltScreen = true
 		return v
 	}

@@ -22,27 +22,32 @@ import (
 type SelectionChangedMsg struct{ ReqID int }
 
 // PreviewMsg carries loaded preview content into a SplitList's preview pane. The
-// parent echoes the ReqID from the SelectionChangedMsg it is answering.
+// parent echoes the ReqID from the SelectionChangedMsg it is answering. When
+// Append is set, Content is appended to the existing preview (without resetting
+// scroll or caching) — used to stream a multi-file diff in progressively.
 type PreviewMsg struct {
 	Content string
 	Err     error
 	ReqID   int
+	Append  bool
 }
 
 // SplitConfig configures a SplitList for a concrete item type.
 type SplitConfig[T any] struct {
-	Screen      string // header screen label, e.g. "log"
-	ListTitle   string // list-pane title, e.g. "commits"
-	Context     string // header right-context, e.g. the diff engine name
-	MinList     int    // list-width clamp (expanded)
-	MaxList     int
+	Screen      string      // header screen label, e.g. "log"
+	ListTitle   string      // list-pane title, e.g. "commits"
+	Context     string      // header right-context, e.g. the diff engine name
 	Hints       [][2]string // footer keybinding hints
 	EmptyStatus string      // footer status when there are no items
 
+	// NavFraction caps the list strip at this fraction (percent) of the height;
+	// the strip still fits its contents below the cap, so a short list takes less.
+	// Defaults to ~2/5 when 0.
+	NavFraction int
+
 	// Row renders one item's text; the selection marker is added by SplitList.
-	// width is the available inner width; collapsed is true when the list pane
-	// is narrowed because the preview pane is focused.
-	Row func(item T, width int, selected, collapsed bool) string
+	// width is the available inner width.
+	Row func(item T, width int, selected bool) string
 	// Match returns an item's fuzzy-match target.
 	Match func(item T) string
 	// PreviewTitle returns the preview pane's title for an item (may be nil).
@@ -118,8 +123,7 @@ func (m SplitList[T]) cacheKey(it T) string {
 	}
 	// Width is part of the preview's identity: difftastic bakes the
 	// side-by-side/inline layout into its output, so a preview rendered at one
-	// pane width must not be served at another (e.g. after a resize or after
-	// tab/enter collapses the list pane).
+	// pane width must not be served at another (e.g. after a resize).
 	return fmt.Sprintf("%s\x00%d", k, m.viewport.Width())
 }
 
@@ -147,6 +151,7 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	}
 	m.preview = ""
 	m.setPreviewContent()
+	m.viewport.GotoTop() // so a progressive stream's first chunk paints at the top
 
 	reqID := m.reqID
 	emit := func() tea.Msg { return SelectionChangedMsg{ReqID: reqID} }
@@ -155,6 +160,25 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	}
 	m.loading = true
 	return m, tea.Batch(emit, m.spinner.Tick)
+}
+
+// cacheCurrent stores content under the selected item's cache key, skipping
+// items without one (e.g. the diff "All changes" entry, whose content depends on
+// the filtered set).
+func (m SplitList[T]) cacheCurrent(content string) {
+	if it, ok := m.Selected(); ok {
+		if key := m.cacheKey(it); key != "" {
+			m.cache[key] = content
+		}
+	}
+}
+
+// CacheCurrentPreview memoizes the accumulated preview. Parents call it once a
+// progressive stream completes — the per-chunk Append messages deliberately
+// don't cache — so the full result is served instantly on revisit.
+func (m SplitList[T]) CacheCurrentPreview() SplitList[T] {
+	m.cacheCurrent(m.preview)
+	return m
 }
 
 // yank copies the selected item's Yank value to the clipboard and flashes a
@@ -181,6 +205,13 @@ func (m SplitList[T]) yank() (SplitList[T], tea.Cmd) {
 // diff layout) changes.
 func (m SplitList[T]) ClearCacheAndReload() (SplitList[T], tea.Cmd) {
 	m.cache = map[string]string{}
+	return m.requestPreview()
+}
+
+// Reload re-requests the current selection's preview (a cache hit when it's
+// already loaded, otherwise a fresh load). Used to refresh a preview whose
+// stream was interrupted — e.g. returning from a drilldown.
+func (m SplitList[T]) Reload() (SplitList[T], tea.Cmd) {
 	return m.requestPreview()
 }
 
@@ -253,12 +284,17 @@ func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
 			return m, nil
 		}
 		m.loading = false
-		m.preview = msg.Content
-		if it, ok := m.Selected(); ok {
-			if key := m.cacheKey(it); key != "" {
-				m.cache[key] = msg.Content
-			}
+		if msg.Append {
+			// Streamed chunk: grow the preview and keep the scroll position.
+			// Streamed chunks are never cached individually (the parent caches the
+			// whole result on completion) and never reset scroll — the first chunk
+			// appends onto the empty, top-scrolled pane requestPreview left behind.
+			m.preview += msg.Content
+			m.setPreviewContent()
+			return m, nil
 		}
+		m.preview = msg.Content
+		m.cacheCurrent(msg.Content)
 		m.setPreviewContent()
 		m.viewport.GotoTop()
 		return m, nil
@@ -322,6 +358,10 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 		return m.navigate(-1)
 	case "down", "j":
 		return m.navigate(1)
+	case "J", "shift+down", "]":
+		return m.stepList(1)
+	case "K", "shift+up", "[":
+		return m.stepList(-1)
 	case "/":
 		m.filtering = true
 		m.filter.Focus()
@@ -355,6 +395,18 @@ func (m SplitList[T]) handleFilterKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cm
 	return m, tea.Batch(cmd, fcmd)
 }
 
+func clampIndex(i, n int) int {
+	if i < 0 || n == 0 {
+		return 0
+	}
+	if i >= n {
+		return n - 1
+	}
+	return i
+}
+
+// navigate handles up/down: scrolling the preview when it's focused, otherwise
+// stepping the list selection.
 func (m SplitList[T]) navigate(delta int) (SplitList[T], tea.Cmd) {
 	if m.active == splitPreviewPane {
 		if delta > 0 {
@@ -364,37 +416,78 @@ func (m SplitList[T]) navigate(delta int) (SplitList[T], tea.Cmd) {
 		}
 		return m, nil
 	}
+	return m.stepList(delta)
+}
+
+// stepList moves the list selection and loads the new item's preview, regardless
+// of which pane is focused. Bound to J/K (and shift+↑/↓, with ]/[ as a vim
+// alias) so you can step to the next/previous item without leaving the preview
+// (e.g. read the next file's diff in place) — a bigger-unit jump than the j/k
+// line scroll.
+func (m SplitList[T]) stepList(delta int) (SplitList[T], tea.Cmd) {
 	if len(m.filtered) == 0 {
 		return m, nil
 	}
-	prev := m.selected
-	m.selected += delta
-	if m.selected < 0 {
-		m.selected = 0
-	}
-	if m.selected >= len(m.filtered) {
-		m.selected = len(m.filtered) - 1
-	}
-	if m.selected == prev {
+	next := clampIndex(m.selected+delta, len(m.filtered))
+	if next == m.selected {
 		return m, nil // already at the boundary; nothing to reload
 	}
+	m.selected = next
 	return m.requestPreview()
 }
 
 func (m SplitList[T]) applyFilter() (SplitList[T], tea.Cmd) {
 	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
 	m.selected = 0
-	return m.requestPreview()
+	// relayout (not just requestPreview): the strip height tracks the item count,
+	// so the preview viewport must resize when the filter changes.
+	return m.relayout()
 }
 
-func (m SplitList[T]) layout() SplitLayout {
-	return ComputeSplitLayout(m.width, m.height, m.active == splitPreviewPane, m.cfg.MinList, m.cfg.MaxList)
+// panelMin is the minimum outer height of a panel (a 2-row border around at least
+// one content row) — the floor for both the list strip and the preview.
+const panelMin = 3
+
+// navGap is the blank row(s) between the list strip and the preview below it.
+const navGap = 1
+
+func (m SplitList[T]) contentHeight() int {
+	return maxInt(panelMin, m.height-HeaderRows-FooterRows)
+}
+
+// stackLayout computes the vertical split. While reading (preview focused) the
+// preview takes the whole content area and there is no strip. While surveying the
+// strip fits the list (capped at NavFraction of the height), a navGap separates
+// it from the preview, and the preview fills the rest.
+func (m SplitList[T]) stackLayout() (previewH, navH int) {
+	contentH := m.contentHeight()
+	// Reading, or too short to host a strip + gap + preview (each at least
+	// panelMin): the preview fills the whole content area and there is no strip.
+	if m.active == splitPreviewPane || contentH < 2*panelMin+navGap {
+		return contentH, 0
+	}
+	avail := contentH - navGap // reserve the blank gap between strip and preview
+	capPct := m.cfg.NavFraction
+	if capPct <= 0 {
+		capPct = 40 // ~2/5
+	}
+	navH = len(m.filtered) + 2 // +2 panel border; fit to content
+	if capH := avail * capPct / 100; navH > capH {
+		navH = capH
+	}
+	if navH > avail-panelMin {
+		navH = avail - panelMin // leave the preview at least one panel
+	}
+	if navH < panelMin {
+		navH = panelMin
+	}
+	return avail - navH, navH
 }
 
 func (m SplitList[T]) relayout() (SplitList[T], tea.Cmd) {
-	l := m.layout()
-	m.viewport.SetWidth(l.DiffWidth)
-	m.viewport.SetHeight(l.ContentHeight - 2)
+	previewH, _ := m.stackLayout()
+	m.viewport.SetWidth(maxInt(1, m.width-2))
+	m.viewport.SetHeight(maxInt(1, previewH-2))
 	return m.requestPreview()
 }
 
@@ -435,77 +528,130 @@ func (m *SplitList[T]) clearPreview() {
 	m.setPreviewContent()
 }
 
-// View renders the full screen (header + split panes + footer) as a string. The
+// listView renders the windowed list body (markers + rows) that keeps the
+// selection on screen, plus the matching scrollbar. rowWidth is the inner width
+// available to each row.
+func (m SplitList[T]) listView(innerH, rowWidth int) (string, Scrollbar) {
+	if innerH < 1 {
+		innerH = 1
+	}
+	offset, bar := ListWindow(m.selected, len(m.filtered), innerH)
+	var b strings.Builder
+	for i := offset; i < len(m.filtered) && i-offset < innerH; i++ {
+		selected := i == m.selected
+		b.WriteString(Marker(selected) + m.cfg.Row(m.filtered[i], rowWidth, selected) + "\n")
+	}
+	return b.String(), bar
+}
+
+// previewTitleView is the preview pane's title, prefixed with the spinner while
+// a preview is loading.
+func (m SplitList[T]) previewTitleView() string {
+	title := ""
+	if it, ok := m.Selected(); ok && m.cfg.PreviewTitle != nil {
+		title = m.cfg.PreviewTitle(it)
+	}
+	if m.loading {
+		title = m.spinner.View() + " " + title
+	}
+	return title
+}
+
+// previewBodyView is the viewport content with the sticky section header pinned
+// to the top row, plus the matching scrollbar.
+func (m SplitList[T]) previewBodyView() (string, Scrollbar) {
+	body := m.viewport.View()
+	if hdr := m.stickyHeader(); hdr != "" {
+		if rows := strings.SplitN(body, "\n", 2); len(rows) == 2 {
+			body = hdr + "\n" + rows[1]
+		}
+	}
+	return body, ScrollbarFor(&m.viewport)
+}
+
+// footerView renders the bottom bar: the filter prompt while filtering, an error
+// or flash message when present, otherwise the position (and scroll % while the
+// preview is focused) followed by the keybinding hints.
+func (m SplitList[T]) footerView() string {
+	switch {
+	case m.filtering:
+		return FooterContent(m.width, m.filter.View())
+	case m.prevErr != nil:
+		return Footer(m.width, fmt.Sprintf("Error: %v", m.prevErr), nil)
+	case m.flash != "":
+		return Footer(m.width, m.flash, m.cfg.Hints)
+	default:
+		return Footer(m.width, m.statusText(), m.cfg.Hints)
+	}
+}
+
+// positionText is the 1-based "N/M" selection position, or "" for ≤1 item.
+func (m SplitList[T]) positionText() string {
+	if len(m.filtered) <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d", m.selected+1, len(m.filtered))
+}
+
+// readingTitle is the preview panel's title while reading (the strip is hidden):
+// the current item plus its position in the list, so orientation stays at the
+// top where the eyes already are.
+func (m SplitList[T]) readingTitle() string {
+	title := m.previewTitleView()
+	if pos := m.positionText(); pos != "" {
+		title += " · " + pos
+	}
+	return title
+}
+
+// statusText is the footer status segment: the position while surveying. Reading
+// shows nothing here — the item and position are in the preview title and depth
+// is in the scrollbar.
+func (m SplitList[T]) statusText() string {
+	if len(m.filtered) == 0 {
+		return m.cfg.EmptyStatus
+	}
+	if m.active == splitPreviewPane {
+		return ""
+	}
+	return m.positionText()
+}
+
+// View renders the full screen (header + content + footer) as a string. The
 // parent wraps it in a tea.View.
 func (m SplitList[T]) View() string {
 	if !m.ready {
 		return "Loading..."
 	}
-
-	l := m.layout()
+	contentH := m.height - HeaderRows - FooterRows
 	if m.showHelp {
-		return HelpView(m.cfg.Screen, m.cfg.Context, m.cfg.Hints, PreviewHelpKeys, m.width, l.ContentHeight)
+		return HelpView(m.cfg.Screen, m.cfg.Context, m.cfg.Hints, PreviewHelpKeys, m.width, contentH)
 	}
-	collapsed := m.active == splitPreviewPane
-
-	innerH := l.ContentHeight - 2
-	if innerH < 1 {
-		innerH = 1
-	}
-	scrollOffset, listBar := ListWindow(m.selected, len(m.filtered), innerH)
-	rowWidth := l.ListWidth - 3 // border (2) + marker (1)
-	var list strings.Builder
-	for i := scrollOffset; i < len(m.filtered) && i-scrollOffset < innerH; i++ {
-		selected := i == m.selected
-		list.WriteString(Marker(selected) + m.cfg.Row(m.filtered[i], rowWidth, selected, collapsed) + "\n")
-	}
-
-	listTitle := m.cfg.ListTitle
-	if collapsed {
-		listTitle = ""
-	}
-	previewTitle := ""
-	if it, ok := m.Selected(); ok && m.cfg.PreviewTitle != nil {
-		previewTitle = m.cfg.PreviewTitle(it)
-	}
-	if m.loading {
-		previewTitle = m.spinner.View() + " " + previewTitle
-	}
-
-	previewBody := m.viewport.View()
-	if hdr := m.stickyHeader(); hdr != "" {
-		if rows := strings.SplitN(previewBody, "\n", 2); len(rows) == 2 {
-			previewBody = hdr + "\n" + rows[1]
-		}
-	}
-
-	previewBar := ScrollbarFor(&m.viewport)
-	listPanel := Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.active == splitListPane, listBar)
-	previewPanel := Panel(previewTitle, previewBody, l.DiffWidth+2, l.ContentHeight, m.active == splitPreviewPane, previewBar)
-	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, previewPanel)
 
 	header := Header(m.cfg.Screen, m.cfg.Context, m.width)
+	return lipgloss.JoinVertical(lipgloss.Left, header, m.content(), m.footerView())
+}
 
-	var footer string
-	switch {
-	case m.filtering:
-		footer = FooterContent(m.width, m.filter.View())
-	case m.prevErr != nil:
-		footer = Footer(m.width, fmt.Sprintf("Error: %v", m.prevErr), nil)
-	case m.flash != "":
-		footer = Footer(m.width, m.flash, m.cfg.Hints)
-	default:
-		status := m.cfg.EmptyStatus
-		if len(m.filtered) > 0 {
-			status = fmt.Sprintf("%d/%d", m.selected+1, len(m.filtered))
-			if collapsed {
-				status += fmt.Sprintf(" · %.0f%%", m.viewport.ScrollPercent()*100)
-			}
+// content renders the body. While reading, the preview fills the content area
+// (orientation in its title). While surveying, the list strip sits on top with
+// the preview filling the rest below.
+func (m SplitList[T]) content() string {
+	previewBody, previewBar := m.previewBodyView()
+	previewH, navH := m.stackLayout()
+	if navH == 0 {
+		// Reading, or too short for a strip: the preview fills the content area.
+		// Reading shows the reading orientation and a focused border.
+		title, focused := m.previewTitleView(), false
+		if m.active == splitPreviewPane {
+			title, focused = m.readingTitle(), true
 		}
-		footer = Footer(m.width, status, m.cfg.Hints)
+		return Panel(title, previewBody, m.width, previewH, focused, previewBar)
 	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+	listBody, listBar := m.listView(navH-2, m.width-3) // border(2)+marker(1)
+	navPanel := Panel(m.cfg.ListTitle, listBody, m.width, navH, true, listBar)
+	previewPanel := Panel(m.previewTitleView(), previewBody, m.width, previewH, false, previewBar)
+	gap := strings.Repeat("\n", navGap-1) // navGap blank rows between the panels
+	return lipgloss.JoinVertical(lipgloss.Left, navPanel, gap, previewPanel)
 }
 
 // TeaView wraps the rendered screen in a full-screen tea.View. Parent models

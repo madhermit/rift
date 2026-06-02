@@ -240,8 +240,16 @@ func FooterContent(width int, content string) string {
 // PreviewHelpKeys and BasicHelpKeys are the always-available keys listed at the
 // bottom of the help overlay. Screens with a scrollable preview use the former.
 var (
+	// PreviewHelpKeys is the navigation reference shown (in full) in every preview
+	// screen's help overlay, including alternate keys.
 	PreviewHelpKeys = [][2]string{
-		{"ctrl+d/u", "scroll half-page"}, {"ctrl+f/b", "scroll page"}, {"esc", "back"},
+		{"j/k  ↑↓", "move / scroll"},
+		{"J/K  ⇧↑↓  ]/[", "next / prev item"},
+		{"gg/G", "top / bottom"},
+		{"{/}", "prev / next section"},
+		{"ctrl+d/u", "scroll half-page"},
+		{"ctrl+f/b", "scroll page"},
+		{"esc", "back"},
 	}
 	BasicHelpKeys = [][2]string{{"esc", "back"}}
 )

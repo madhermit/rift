@@ -18,13 +18,6 @@ func (f *fallbackEngine) Diff(ctx context.Context, repoRoot, file string, opts D
 	return runGitDiff(cmd, "git diff")
 }
 
-func (f *fallbackEngine) DiffCommit(ctx context.Context, repoRoot, base, target string, color bool, width int, _ Display) (string, error) {
-	args := buildCommitDiffArgs(base, target, color)
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = repoRoot
-	return runGitDiff(cmd, "git diff commit")
-}
-
 func (f *fallbackEngine) DiffHunks(_ context.Context, hunks []Hunk, _, _ string, color bool, _ int) []string {
 	results := make([]string, len(hunks))
 	for i, h := range hunks {
