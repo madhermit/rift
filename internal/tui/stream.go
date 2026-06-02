@@ -40,40 +40,35 @@ func PreviewDiffOpts(width int, display diff.Display) diff.DiffOpts {
 // away from. Shared by the diff, log, and stash previews.
 func StreamFiles(engine diff.Engine, root string, paths []string, opts diff.DiffOpts) (<-chan string, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
-	// Banner each file only when several are shown at once, so boundaries stand
-	// out as you scroll; for a lone file the pane title already names it.
-	banner := len(paths) > 1
 	ch := diff.ParallelStream(len(paths), func(i int) string {
-		return renderFileDiff(ctx, engine, root, paths[i], opts, banner)
+		return renderFileDiff(ctx, engine, root, paths[i], opts)
 	})
 	return ch, cancel
 }
 
-// renderFileDiff diffs one file, optionally prefixing a section banner. A file
-// whose diff fails renders a visible marker rather than vanishing silently; a
-// cancelled diff (the user navigated away) renders nothing, since it's discarded.
-func renderFileDiff(ctx context.Context, engine diff.Engine, root, file string, opts diff.DiffOpts, banner bool) string {
+// renderFileDiff diffs one file, prefixing a section banner. The banner is a
+// hidden marker — the preview strips it from the body (the diff's own header is
+// the visible boundary) and pins its path in the legend as you scroll into the
+// file; see VimNav.SetContent. A file whose diff fails renders a visible marker
+// rather than vanishing silently; a cancelled diff (navigated away) renders
+// nothing, since it's discarded.
+func renderFileDiff(ctx context.Context, engine diff.Engine, root, file string, opts diff.DiffOpts) string {
 	content, err := engine.Diff(ctx, root, file, opts)
 	switch {
 	case ctx.Err() != nil:
 		return ""
 	case err != nil:
-		return diffErrorMarker(file, opts, banner, err)
+		return diffErrorMarker(file, opts, err)
 	case content == "":
 		return ""
-	case banner && opts.Color:
-		return SectionBanner(file, opts.Width) + "\n" + content + "\n"
 	default:
-		return content + "\n"
+		return SectionBanner(file, opts.Width) + "\n" + content + "\n"
 	}
 }
 
-func diffErrorMarker(file string, opts diff.DiffOpts, banner bool, err error) string {
+func diffErrorMarker(file string, opts diff.DiffOpts, err error) string {
 	line := strings.SplitN(err.Error(), "\n", 2)[0]
-	if banner && opts.Color {
-		return SectionBanner(file, opts.Width) + "\n  ⚠ diff unavailable: " + line + "\n"
-	}
-	return "  ⚠ " + file + ": diff unavailable: " + line + "\n"
+	return SectionBanner(file, opts.Width) + "\n  ⚠ diff unavailable: " + line + "\n"
 }
 
 // PreviewStream tracks an in-flight progressive preview feeding a SplitList: a

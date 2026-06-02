@@ -9,42 +9,43 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func TestScanSectionOffsets(t *testing.T) {
+func TestBannerLabel(t *testing.T) {
 	tests := []struct {
-		name    string
-		content string
-		want    []int
+		line string
+		want string
+		ok   bool
 	}{
-		{"empty", "", nil},
-		{"no sections", "hello\nworld\n", nil},
-		{
-			"git-diff headers",
-			"diff --git a/main.go b/main.go\n--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/util.go b/util.go\n",
-			[]int{0, 6},
-		},
-		{
-			"file banner is a section",
-			"preamble\n── internal/main.go ──────────\nbody\n",
-			[]int{1},
-		},
-		{
-			"bare rule line is not a section",
-			"commit abc1234\nAuthor: Alice\n\n─────────────────────\n\nsome diff\n",
-			nil,
-		},
-		{
-			"colored git-diff header",
-			"some preamble\n\x1b[1mdiff --git a/f.go b/f.go\x1b[m\nindex abc..def\n",
-			[]int{1},
-		},
+		{"── internal/main.go ──────────", "internal/main.go", true},
+		{"\x1b[2m── a/b.go ──\x1b[m", "a/b.go", true},
+		{"diff --git a/f.go b/f.go", "", false},
+		{"─────────────────────", "", false}, // bare rule line, not a banner
+		{"just content", "", false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := scanSectionOffsets(strings.Split(tt.content, "\n"))
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("scanSectionOffsets() = %v, want %v", got, tt.want)
-			}
-		})
+		got, ok := bannerLabel(tt.line)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("bannerLabel(%q) = %q, %v; want %q, %v", tt.line, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+func TestVimNav_CurrentSection(t *testing.T) {
+	// First section at offset 3 to exercise the "before the first file" case.
+	v := VimNav{sections: []section{{offset: 3, label: "a.go"}, {offset: 10, label: "b.go"}}}
+	tests := []struct {
+		y    int
+		want string
+	}{
+		{0, ""},      // before the first file (e.g. a commit header)
+		{3, "a.go"},  // at a.go's start — shown immediately, no scroll needed
+		{7, "a.go"},  // within a.go
+		{10, "b.go"}, // at b.go's start
+		{20, "b.go"}, // within b.go
+	}
+	for _, tt := range tests {
+		if got := v.CurrentSection(tt.y); got != tt.want {
+			t.Errorf("CurrentSection(%d) = %q, want %q", tt.y, got, tt.want)
+		}
 	}
 }
 
@@ -113,11 +114,16 @@ func TestVimNav_HandleKey(t *testing.T) {
 func TestVimNav_SetContent(t *testing.T) {
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	var v VimNav
-	content := "line1\ndiff --git a/f.go b/f.go\nline3\n── b.go ────────────\nline5\n"
+	content := "line1\n── a.go ──────────\nadiff\n── b.go ──────────\nbdiff\n"
 	v.SetContent(&vp, content)
 
-	want := []int{1, 3}
-	if !slices.Equal(v.sectionOffsets, want) {
-		t.Errorf("sectionOffsets = %v, want %v", v.sectionOffsets, want)
+	// Banners are stripped from the displayed content and recorded as sections at
+	// the displayed line where each file begins.
+	if strings.Contains(vp.View(), "──") {
+		t.Errorf("banner not stripped from displayed content:\n%s", vp.View())
+	}
+	want := []section{{offset: 1, label: "a.go"}, {offset: 2, label: "b.go"}}
+	if !slices.Equal(v.sections, want) {
+		t.Errorf("sections = %v, want %v", v.sections, want)
 	}
 }

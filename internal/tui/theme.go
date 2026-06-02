@@ -74,15 +74,19 @@ var (
 	Magenta = lipgloss.Color("5") // unstaged hunk sidebar
 )
 
-// SectionBanner renders a full-width divider embedding a label — used to mark
-// file boundaries in a multi-file diff so they stand out from the content. The
-// label is truncated so the banner always stays on one line (a wrapped banner
-// would break the sticky-header that pins it).
+// bannerPrefix leads every SectionBanner; VimNav.bannerLabel keys section
+// detection on it, so the producer and consumer share this one literal.
+const bannerPrefix = "── "
+
+// SectionBanner renders a full-width divider embedding a file path — a section
+// marker that the preview strips from the body (VimNav.SetContent) and pins in
+// the panel legend. The label is truncated so the banner always stays on one
+// line (a wrapped banner would break section detection).
 func SectionBanner(label string, width int) string {
-	if avail := width - 4; avail >= 1 { // "── " prefix + trailing space
+	if avail := width - 4; avail >= 1 { // prefix + trailing space
 		label = TruncatePath(label, avail)
 	}
-	head := bannerRuleStyle.Render("── ") + bannerLabelStyle.Render(label) + " "
+	head := bannerRuleStyle.Render(bannerPrefix) + bannerLabelStyle.Render(label) + " "
 	if pad := width - lipgloss.Width(head); pad > 0 {
 		head += bannerRuleStyle.Render(strings.Repeat("─", pad))
 	}
@@ -93,10 +97,11 @@ var (
 	bannerRuleStyle  = lipgloss.NewStyle().Foreground(Faint)
 	bannerLabelStyle = lipgloss.NewStyle().Foreground(Accent).Bold(true)
 
-	// Scrollbar thumb in a panel's right border (Subtle when idle, Accent when
-	// the pane is focused).
+	// Scrollbar thumb in a panel's right border. The border doubles as the track,
+	// so the thumb must contrast with it: Bright against the focused Accent
+	// border, Subtle against the dim Faint border.
 	scrollThumbDim    = lipgloss.NewStyle().Foreground(Subtle)
-	scrollThumbActive = lipgloss.NewStyle().Foreground(Accent)
+	scrollThumbActive = lipgloss.NewStyle().Foreground(Bright)
 
 	panelBorder = lipgloss.RoundedBorder()
 
@@ -259,7 +264,7 @@ var (
 // "press any key to close" footer.
 func HelpView(screen, context string, hints, extra [][2]string, width, contentHeight int) string {
 	header := Header(screen, context, width)
-	panel := Panel("keybindings", helpBody(hints, extra), width, contentHeight, true, Scrollbar{})
+	panel := Panel("keybindings", "", helpBody(hints, extra), width, contentHeight, true, Scrollbar{})
 	footer := FooterContent(width, keyDescDim.Render("press any key to close"))
 	return lipgloss.JoinVertical(lipgloss.Left, header, panel, footer)
 }
@@ -330,7 +335,7 @@ func ListWindow(selected, total, visible int) (offset int, bar Scrollbar) {
 	return offset, Scrollbar{Total: total, Visible: visible, Offset: offset}
 }
 
-func Panel(title, body string, width, height int, active bool, sb Scrollbar) string {
+func Panel(title, rightTitle, body string, width, height int, active bool, sb Scrollbar) string {
 	if width < 2 {
 		width = 2
 	}
@@ -346,17 +351,27 @@ func Panel(title, body string, width, height int, active bool, sb Scrollbar) str
 	}
 	thumbStart, thumbEnd, hasThumb := sb.thumb(innerH)
 
-	// Top border with optional embedded title: ╭─ title ──────╮
-	var top string
-	if title != "" && inner >= lipgloss.Width(title)+4 {
-		title = ts.Render(title)
-		fill := inner - 2 - lipgloss.Width(title) // 2 = leading "─" + space, trailing handled below
-		top = bs.Render(panelBorder.TopLeft+panelBorder.Top) +
-			" " + title + " " +
-			bs.Render(strings.Repeat(panelBorder.Top, maxInt(0, fill-1))+panelBorder.TopRight)
-	} else {
-		top = bs.Render(panelBorder.TopLeft + strings.Repeat(panelBorder.Top, inner) + panelBorder.TopRight)
+	// Top border with an optional left title and right annotation:
+	// ╭─ title ──────── right ─╮. When they don't fit, fall back to a plain border.
+	leftSeg, rightSeg := "", ""
+	if title != "" {
+		leftSeg = " " + ts.Render(title) + " "
 	}
+	if rightTitle != "" {
+		rightSeg = " " + ts.Render(rightTitle) + " "
+	}
+	midFill := inner - 2 - lipgloss.Width(leftSeg) - lipgloss.Width(rightSeg)
+	if midFill < 0 { // drop the secondary right annotation first, the title only if still too wide
+		rightSeg = ""
+		midFill = inner - 2 - lipgloss.Width(leftSeg)
+	}
+	if midFill < 0 {
+		leftSeg = ""
+		midFill = inner - 2
+	}
+	top := bs.Render(panelBorder.TopLeft+panelBorder.Top) + leftSeg +
+		bs.Render(strings.Repeat(panelBorder.Top, maxInt(0, midFill))) + rightSeg +
+		bs.Render(panelBorder.Top+panelBorder.TopRight)
 
 	left := bs.Render(panelBorder.Left)
 	right := bs.Render(panelBorder.Right)

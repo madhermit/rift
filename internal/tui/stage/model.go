@@ -614,8 +614,8 @@ func (m Model) View() tea.View {
 		diffTitle = m.filteredFiles[m.selectedIdx].Path
 	}
 	diffBar := tui.ScrollbarFor(&m.viewport)
-	listPanel := tui.Panel(listTitle, list.String(), l.ListWidth, l.ContentHeight, m.activePane == filePane, listBar)
-	diffPanel := tui.Panel(diffTitle, m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane, diffBar)
+	listPanel := tui.Panel(listTitle, "", list.String(), l.ListWidth, l.ContentHeight, m.activePane == filePane, listBar)
+	diffPanel := tui.Panel(diffTitle, "", m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane, diffBar)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
 	header := tui.Header("stage", m.engine.Name(), m.width)

@@ -448,40 +448,40 @@ func (m SplitList[T]) applyFilter() (SplitList[T], tea.Cmd) {
 // one content row) — the floor for both the list strip and the preview.
 const panelMin = 3
 
-// navGap is the blank row(s) between the list strip and the preview below it.
-const navGap = 1
-
 func (m SplitList[T]) contentHeight() int {
 	return maxInt(panelMin, m.height-HeaderRows-FooterRows)
 }
 
 // stackLayout computes the vertical split. While reading (preview focused) the
-// preview takes the whole content area and there is no strip. While surveying the
-// strip fits the list (capped at NavFraction of the height), a navGap separates
-// it from the preview, and the preview fills the rest.
+// strip shrinks to a one-row peek. While surveying the strip fits the list
+// (capped at NavFraction of the height); the preview fills the rest below it.
 func (m SplitList[T]) stackLayout() (previewH, navH int) {
 	contentH := m.contentHeight()
-	// Reading, or too short to host a strip + gap + preview (each at least
-	// panelMin): the preview fills the whole content area and there is no strip.
-	if m.active == splitPreviewPane || contentH < 2*panelMin+navGap {
+	// Too short to host two panels (strip + preview, each at least panelMin): the
+	// preview fills the whole content area and there is no strip.
+	if contentH < 2*panelMin {
 		return contentH, 0
 	}
-	avail := contentH - navGap // reserve the blank gap between strip and preview
+	// Reading: the strip shrinks to a one-row peek of the current item, the
+	// focused preview takes the rest.
+	if m.active == splitPreviewPane {
+		return contentH - panelMin, panelMin
+	}
 	capPct := m.cfg.NavFraction
 	if capPct <= 0 {
 		capPct = 40 // ~2/5
 	}
 	navH = len(m.filtered) + 2 // +2 panel border; fit to content
-	if capH := avail * capPct / 100; navH > capH {
+	if capH := contentH * capPct / 100; navH > capH {
 		navH = capH
 	}
-	if navH > avail-panelMin {
-		navH = avail - panelMin // leave the preview at least one panel
+	if navH > contentH-panelMin {
+		navH = contentH - panelMin // leave the preview at least one panel
 	}
 	if navH < panelMin {
 		navH = panelMin
 	}
-	return avail - navH, navH
+	return contentH - navH, navH
 }
 
 func (m SplitList[T]) relayout() (SplitList[T], tea.Cmd) {
@@ -499,26 +499,17 @@ func (m *SplitList[T]) setPreviewContent() {
 	m.vim.SetContent(&m.viewport, content)
 }
 
-// stickyHeader returns the section line (e.g. a file banner) that the preview
-// has scrolled past, to pin at the top of the pane so the current file stays
-// visible. Empty when at the top or the current section's header is on screen.
-func (m SplitList[T]) stickyHeader() string {
-	y := m.viewport.YOffset()
-	if y <= 0 {
-		return ""
-	}
-	cur := -1
-	for _, off := range m.vim.SectionOffsets() {
-		if off > y {
-			break
-		}
-		cur = off
-	}
-	lines := m.vim.Lines()
-	if cur < 0 || cur == y || cur >= len(lines) {
-		return ""
-	}
-	return lines[cur]
+// currentSection is the file the preview is currently showing, for the panel
+// legend — empty only before the first file (e.g. a commit header) or when the
+// preview has no file sections.
+func (m SplitList[T]) currentSection() string {
+	return m.vim.CurrentSection(m.viewport.YOffset())
+}
+
+// sectionProgress is the current file's "N/M" position (file of total), for the
+// right of the panel legend.
+func (m SplitList[T]) sectionProgress() string {
+	return m.vim.SectionProgress(m.viewport.YOffset())
 }
 
 // clearPreview blanks the preview pane and stops the spinner.
@@ -557,16 +548,10 @@ func (m SplitList[T]) previewTitleView() string {
 	return title
 }
 
-// previewBodyView is the viewport content with the sticky section header pinned
-// to the top row, plus the matching scrollbar.
+// previewBodyView is the viewport content plus its scrollbar. The current file
+// is shown in the legend, not the body — see currentSection / content.
 func (m SplitList[T]) previewBodyView() (string, Scrollbar) {
-	body := m.viewport.View()
-	if hdr := m.stickyHeader(); hdr != "" {
-		if rows := strings.SplitN(body, "\n", 2); len(rows) == 2 {
-			body = hdr + "\n" + rows[1]
-		}
-	}
-	return body, ScrollbarFor(&m.viewport)
+	return m.viewport.View(), ScrollbarFor(&m.viewport)
 }
 
 // footerView renders the bottom bar: the filter prompt while filtering, an error
@@ -579,10 +564,26 @@ func (m SplitList[T]) footerView() string {
 	case m.prevErr != nil:
 		return Footer(m.width, fmt.Sprintf("Error: %v", m.prevErr), nil)
 	case m.flash != "":
-		return Footer(m.width, m.flash, m.cfg.Hints)
+		return Footer(m.width, m.flash, m.hints())
 	default:
-		return Footer(m.width, m.statusText(), m.cfg.Hints)
+		return Footer(m.width, m.statusText(), m.hints())
 	}
+}
+
+// hints are the footer keybinding hints, with the ⇥ hint relabeled "list" while
+// reading — there tab expands the one-row peek back to the full navigable list.
+func (m SplitList[T]) hints() [][2]string {
+	if m.active != splitPreviewPane {
+		return m.cfg.Hints
+	}
+	out := make([][2]string, len(m.cfg.Hints))
+	copy(out, m.cfg.Hints)
+	for i := range out {
+		if out[i][0] == "⇥" {
+			out[i][1] = "list"
+		}
+	}
+	return out
 }
 
 // positionText is the 1-based "N/M" selection position, or "" for ≤1 item.
@@ -593,28 +594,13 @@ func (m SplitList[T]) positionText() string {
 	return fmt.Sprintf("%d/%d", m.selected+1, len(m.filtered))
 }
 
-// readingTitle is the preview panel's title while reading (the strip is hidden):
-// the current item plus its position in the list, so orientation stays at the
-// top where the eyes already are.
-func (m SplitList[T]) readingTitle() string {
-	title := m.previewTitleView()
-	if pos := m.positionText(); pos != "" {
-		title += " · " + pos
-	}
-	return title
-}
-
-// statusText is the footer status segment: the position while surveying. Reading
-// shows nothing here — the item and position are in the preview title and depth
-// is in the scrollbar.
+// statusText is the footer status segment. The selection position lives in the
+// list/peek title now, so this only surfaces the empty-list message.
 func (m SplitList[T]) statusText() string {
 	if len(m.filtered) == 0 {
 		return m.cfg.EmptyStatus
 	}
-	if m.active == splitPreviewPane {
-		return ""
-	}
-	return m.positionText()
+	return ""
 }
 
 // View renders the full screen (header + content + footer) as a string. The
@@ -632,26 +618,52 @@ func (m SplitList[T]) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, m.content(), m.footerView())
 }
 
-// content renders the body. While reading, the preview fills the content area
-// (orientation in its title). While surveying, the list strip sits on top with
-// the preview filling the rest below.
+// content renders the body: while surveying, the list strip (focused) sits on
+// top with the preview below; while reading, the strip collapses to a one-row
+// peek above the focused preview. A terminal too short for two panels falls back
+// to the preview alone.
 func (m SplitList[T]) content() string {
 	previewBody, previewBar := m.previewBodyView()
 	previewH, navH := m.stackLayout()
+	reading := m.active == splitPreviewPane
+
 	if navH == 0 {
-		// Reading, or too short for a strip: the preview fills the content area.
-		// Reading shows the reading orientation and a focused border.
-		title, focused := m.previewTitleView(), false
-		if m.active == splitPreviewPane {
-			title, focused = m.readingTitle(), true
+		// Too short for two panels: the preview fills the area and is the only
+		// orientation, so it keeps the item name (with the spinner while loading,
+		// via previewTitleView) plus the file position while reading.
+		right := ""
+		if reading {
+			right = m.sectionProgress()
 		}
-		return Panel(title, previewBody, m.width, previewH, focused, previewBar)
+		return Panel(m.previewTitleView(), right, previewBody, m.width, previewH, reading, previewBar)
+	}
+
+	// Two panels. The preview's border legend earns its place: the spinner (with
+	// the item) while loading; while reading (focused), the current file on the
+	// left and its position (file N/M) on the right; otherwise (unfocused,
+	// surveying) a clean border, since the peek already names the item.
+	previewTitle, previewRight := "", ""
+	switch {
+	case m.loading:
+		// Just the spinner while loading — including the item name here makes the
+		// filename flash in the unfocused preview legend as you navigate the strip.
+		previewTitle = m.spinner.View()
+	case reading:
+		previewTitle = m.currentSection()
+		previewRight = m.sectionProgress()
+	}
+	navTitle := m.cfg.ListTitle
+	if pos := m.positionText(); pos != "" {
+		navTitle += " · " + pos // the selection position rides with the list title
 	}
 	listBody, listBar := m.listView(navH-2, m.width-3) // border(2)+marker(1)
-	navPanel := Panel(m.cfg.ListTitle, listBody, m.width, navH, true, listBar)
-	previewPanel := Panel(m.previewTitleView(), previewBody, m.width, previewH, false, previewBar)
-	gap := strings.Repeat("\n", navGap-1) // navGap blank rows between the panels
-	return lipgloss.JoinVertical(lipgloss.Left, navPanel, gap, previewPanel)
+	if reading {
+		// Peek: one row of the current item, so a scrollbar would mislead.
+		listBar = Scrollbar{}
+	}
+	navPanel := Panel(navTitle, "", listBody, m.width, navH, !reading, listBar)
+	previewPanel := Panel(previewTitle, previewRight, previewBody, m.width, previewH, reading, previewBar)
+	return lipgloss.JoinVertical(lipgloss.Left, navPanel, previewPanel)
 }
 
 // TeaView wraps the rendered screen in a full-screen tea.View. Parent models

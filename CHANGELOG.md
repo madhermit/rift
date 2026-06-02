@@ -7,6 +7,15 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Changed
+
+- Reading mode (`⇥`) now collapses the list to a one-row peek of the current
+  item above the focused diff, rather than hiding it entirely. File-boundary
+  banners are no longer drawn in the body (the diff's own file header marks each
+  file); instead the diff panel's border legend shows the current file's name on
+  the left (updating as you scroll between files) and its position — file `N/M`
+  of the changeset — on the right. The footer hint reads `⇥ list`.
+
 ## [0.3.0] - 2026-06-01
 
 ### Added
