@@ -196,3 +196,21 @@ func TestDiffBetweenCommits(t *testing.T) {
 		t.Errorf("README.md status = %q, want %q", byPath["README.md"], "Modified")
 	}
 }
+
+func TestParseNameStatus(t *testing.T) {
+	out := "M\tinternal/diff/diff.go\nA\tinternal/tui/stream.go\nR100\tinternal/old/path.go\tinternal/new/path.go\n"
+	got := parseNameStatus(out)
+	want := []ChangedFile{
+		{Path: "internal/diff/diff.go", Status: "Modified"},
+		{Path: "internal/tui/stream.go", Status: "Added"},
+		{Path: "internal/new/path.go", Status: "Renamed"}, // new path, not the literal "old\tnew"
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d files, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("file %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

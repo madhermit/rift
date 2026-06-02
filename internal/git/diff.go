@@ -130,12 +130,15 @@ func parseNameStatus(out string) []ChangedFile {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 {
+		// A rename/copy row has three tab fields ("R100\told\tnew"); the new path
+		// is last. A plain change has two ("M\tpath"). Take the final field either
+		// way so a renamed path isn't returned as the literal "old\tnew".
+		parts := strings.Split(line, "\t")
+		if len(parts) < 2 {
 			continue
 		}
 		files = append(files, ChangedFile{
-			Path:   parts[1],
+			Path:   parts[len(parts)-1],
 			Status: nameStatusCode(parts[0]),
 		})
 	}

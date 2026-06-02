@@ -7,6 +7,11 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Fixed
+
+- Renamed files no longer show an empty diff in stash and linked-worktree
+  commit previews (`git diff --name-status` rename rows were misparsed).
+
 ## [0.2.1] - 2026-06-01
 
 ### Fixed
