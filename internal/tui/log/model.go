@@ -23,14 +23,12 @@ const (
 )
 
 type Model struct {
-	repo            *git.Repo
-	engine          diff.Engine
-	altEngine       diff.Engine // the other engine, swapped in by the `e` toggle
-	canToggleEngine bool        // true when the two engines actually differ
-	list            tui.SplitList[git.CommitInfo]
-	display         diff.Display
-	action          Action
-	stream          *tui.PreviewStream // active commit-diff stream; nil otherwise
+	repo    *git.Repo
+	engines tui.EngineToggle
+	list    tui.SplitList[git.CommitInfo]
+	display diff.Display
+	action  Action
+	stream  *tui.PreviewStream // active commit-diff stream; nil otherwise
 
 	drilled  diffui.Model // file-level view of the selected commit (when drilling)
 	drilling bool
@@ -51,13 +49,12 @@ func (m Model) SelectedHash() string {
 }
 
 func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
-	altEngine := diff.NewPlainEngine()
-	canToggleEngine := engine.Name() != altEngine.Name()
+	engines := tui.NewEngineToggle(engine)
 
 	hints := [][2]string{
 		{"⏎", "files"}, {"/", "filter"}, {"⇥", "read"}, {"\\", "layout"},
 	}
-	if canToggleEngine {
+	if engines.CanToggle() {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
 	hints = append(hints,
@@ -79,7 +76,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 			return tui.TextStyle(selected).Render(tui.Truncate(c.Hash+"  "+c.Message, w))
 		},
 	}
-	return Model{repo: repo, engine: engine, altEngine: altEngine, canToggleEngine: canToggleEngine, list: tui.NewSplitList(cfg, commits)}
+	return Model{repo: repo, engines: engines, list: tui.NewSplitList(cfg, commits)}
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -146,11 +143,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.display = m.display.Next()
 			return m.reloadFresh()
 		case "e":
-			if !m.canToggleEngine {
+			if !m.engines.CanToggle() {
 				break // only one engine available; nothing to toggle
 			}
-			m.engine, m.altEngine = m.altEngine, m.engine
-			m.list = m.list.SetContext(m.engine.Name())
+			m.engines = m.engines.Toggle()
+			m.list = m.list.SetContext(m.engines.Name())
 			return m.reloadFresh()
 		case "c":
 			if _, ok := m.list.Selected(); ok {
@@ -240,7 +237,7 @@ func (m Model) drillInto(commit git.CommitInfo) (tea.Model, tea.Cmd) {
 	m.stream.Cancel()
 	m.stream = nil
 	base, files, _ := commitFiles(m.repo, commit.Hash) // a list error surfaces as an empty drilldown
-	m.drilled = diffui.New(m.repo, m.engine, files, false, base, commit.Hash)
+	m.drilled = diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash)
 	m.drilling = true
 	m, cmd := m.sendDrilled(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	return m, cmd
@@ -271,7 +268,7 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	repo, engine := m.repo, m.engine
+	repo, engine := m.repo, m.engines.Engine()
 	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
 	return func() tea.Msg {
 		base, files, err := commitFiles(repo, commit.Hash)

@@ -19,25 +19,22 @@ const (
 )
 
 type Model struct {
-	repo            *git.Repo
-	engine          diff.Engine
-	altEngine       diff.Engine // the other engine, swapped in by the `e` toggle
-	canToggleEngine bool        // true when the two engines actually differ
-	list            tui.SplitList[git.StashEntry]
-	action          StashAction
-	display         diff.Display
-	stream          *tui.PreviewStream // active stash-diff stream; nil otherwise
+	repo    *git.Repo
+	engines tui.EngineToggle
+	list    tui.SplitList[git.StashEntry]
+	action  StashAction
+	display diff.Display
+	stream  *tui.PreviewStream // active stash-diff stream; nil otherwise
 }
 
 func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
-	altEngine := diff.NewPlainEngine()
-	canToggleEngine := engine.Name() != altEngine.Name()
+	engines := tui.NewEngineToggle(engine)
 
 	hints := [][2]string{
 		{"/", "filter"}, {"⇥", "read"},
 		{"a", "apply"}, {"p", "pop"}, {"x", "drop"}, {"\\", "layout"},
 	}
-	if canToggleEngine {
+	if engines.CanToggle() {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
 	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
@@ -61,7 +58,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 			return tui.TextStyle(selected).Render(tui.Truncate(fmt.Sprintf("stash@{%d}  %s", s.Index, s.Message), w))
 		},
 	}
-	return Model{repo: repo, engine: engine, altEngine: altEngine, canToggleEngine: canToggleEngine, list: tui.NewSplitList(cfg, stashes)}
+	return Model{repo: repo, engines: engines, list: tui.NewSplitList(cfg, stashes)}
 }
 
 func (m Model) Action() StashAction { return m.action }
@@ -98,11 +95,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.display = m.display.Next()
 			return m.reloadFresh()
 		case "e":
-			if !m.canToggleEngine {
+			if !m.engines.CanToggle() {
 				break // only one engine available; nothing to toggle
 			}
-			m.engine, m.altEngine = m.altEngine, m.engine
-			m.list = m.list.SetContext(m.engine.Name())
+			m.engines = m.engines.Toggle()
+			m.list = m.list.SetContext(m.engines.Name())
 			return m.reloadFresh()
 		}
 		if action, ok := stashAction(msg.String()); ok {
@@ -147,7 +144,7 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	repo, engine := m.repo, m.engine
+	repo, engine := m.repo, m.engines.Engine()
 	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
 	return func() tea.Msg {
 		ref := fmt.Sprintf("stash@{%d}", entry.Index)

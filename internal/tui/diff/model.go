@@ -12,11 +12,9 @@ import (
 )
 
 type Model struct {
-	repo            *git.Repo
-	engine          diff.Engine
-	altEngine       diff.Engine // the other engine, swapped in by the `e` toggle
-	canToggleEngine bool        // true when the two engines actually differ
-	list            tui.SplitList[git.ChangedFile]
+	repo    *git.Repo
+	engines tui.EngineToggle
+	list    tui.SplitList[git.ChangedFile]
 
 	staged     bool
 	base       string
@@ -82,8 +80,7 @@ func contextLabel(commitDiff bool, target, engineName string) string {
 
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
 	commitDiff := target != ""
-	altEngine := diff.NewPlainEngine()
-	canToggleEngine := engine.Name() != altEngine.Name()
+	engines := tui.NewEngineToggle(engine)
 
 	listTitle := "changes"
 	if !commitDiff {
@@ -100,7 +97,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		hints = append(hints, [2]string{"s", "staged"})
 	}
 	hints = append(hints, [2]string{"\\", "layout"})
-	if canToggleEngine {
+	if engines.CanToggle() {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
 	if !commitDiff {
@@ -138,15 +135,13 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	}
 
 	return Model{
-		repo:            repo,
-		engine:          engine,
-		staged:          staged,
-		base:            base,
-		target:          target,
-		commitDiff:      commitDiff,
-		list:            tui.NewSplitList(cfg, prependAllEntry(files)),
-		altEngine:       altEngine,
-		canToggleEngine: canToggleEngine,
+		repo:       repo,
+		engines:    engines,
+		staged:     staged,
+		base:       base,
+		target:     target,
+		commitDiff: commitDiff,
+		list:       tui.NewSplitList(cfg, prependAllEntry(files)),
 	}
 }
 
@@ -185,11 +180,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.display = m.display.Next()
 			return m.reloadFresh()
 		case "e":
-			if !m.canToggleEngine {
+			if !m.engines.CanToggle() {
 				break // only one engine available; nothing to toggle
 			}
-			m.engine, m.altEngine = m.altEngine, m.engine
-			m.list = m.list.SetContext(contextLabel(m.commitDiff, m.target, m.engine.Name()))
+			m.engines = m.engines.Toggle()
+			m.list = m.list.SetContext(contextLabel(m.commitDiff, m.target, m.engines.Name()))
 			return m.reloadFresh()
 		case "s":
 			if !m.commitDiff {
@@ -254,7 +249,7 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	}
 	files := previewFiles(sel, m.list.VisibleItems())
 	opts := m.previewOpts()
-	root, engine := m.repo.Root(), m.engine
+	root, engine := m.repo.Root(), m.engines.Engine()
 	return func() tea.Msg {
 		if len(files) == 0 {
 			return tui.StreamReadyMsg{ReqID: reqID}
