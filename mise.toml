@@ -53,3 +53,22 @@ GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-arm6
 echo "Built binaries in dist/"
 ls -la dist/
 """
+
+[tasks.demo]
+description = "Regenerate demo screenshots + GIFs with VHS (needs vhs + ttyd)"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+mise run build
+bash demo/setup.sh
+mkdir -p docs/images
+export PATH="$PWD:$PATH"
+# Pre-warm difftastic so the recording never captures a first-run download.
+(cd /tmp/rift-demo && rift diff --print >/dev/null 2>&1 || true)
+for tape in demo/diff.tape demo/log.tape demo/stash.tape demo/stage.tape; do
+  echo "vhs $tape"
+  vhs "$tape"
+done
+rm -f docs/images/log.gif docs/images/stash.gif
+echo "Wrote docs/images/{diff,log,stash,stage}.png + diff.gif, stage.gif"
+"""

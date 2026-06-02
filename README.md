@@ -14,6 +14,10 @@ rift stash        # stash manager with diff preview
 
 rift is **worktree-aware** — every command reads correctly inside bare-repo and linked-worktree layouts — but it does not *manage* worktrees or branches. For creating, switching, and pruning worktrees, pair it with [worktrunk](https://github.com/max-sixty/worktrunk).
 
+<p align="center">
+  <img src="docs/images/diff.gif" alt="rift diff — structural diff browser with a one-row peek and a per-file legend" width="900">
+</p>
+
 ## Why
 
 [forgit](https://github.com/wfxr/forgit) and [git-fuzzy](https://github.com/bigH/git-fuzzy) proved that fuzzy search over git objects is a massive UX win. But they're shell scripts piping strings through fzf — every diff is flat text, and you can't pipe the output into anything.
@@ -28,13 +32,23 @@ rift occupies the space between them: **transient** (invoke, act, return to shel
 
 Powered by difftastic: reformatting noise disappears and you see what actually changed at the expression level, with syntax highlighting and intra-line emphasis. When difftastic isn't on your `$PATH`, rift falls back to git's own diff (with word-level and whitespace highlighting) — toggle between the two engines with `e`.
 
+![A structural diff of a refactor](docs/images/diff.png)
+
 ### Split-pane browsing
 
 `rift diff` and `rift log` are two-panel browsers: a fuzzy-filterable list on the left, a structural diff preview on the right. Navigate with vim keys, jump hunk-to-hunk, and keep your place with a scrollbar and a sticky file header. Colored file-type icons and dimmed directories make the list scan fast. In the log, press `⏎` to drill into a commit's files, or `c` / `r` to cherry-pick / revert the selected commit.
 
+![rift log — commit explorer with a live diff preview](docs/images/log.png)
+
+`rift stash` shares the same browser for stash entries and their diffs:
+
+![rift stash — stash manager](docs/images/stash.png)
+
 ### Interactive staging
 
 `rift stage` replaces `git add -p` with a two-panel TUI: a file list with structural diff preview and hunk-level staging, the active hunk clearly marked in the gutter.
+
+![rift stage — interactive hunk staging](docs/images/stage.gif)
 
 ### Composable output
 
