@@ -34,6 +34,7 @@ type displayHunk struct {
 type Model struct {
 	repo   *git.Repo
 	engine diff.Engine
+	branch string
 
 	files         []git.StatusFile
 	filteredFiles []git.StatusFile
@@ -97,6 +98,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
 	return Model{
 		repo:          repo,
 		engine:        engine,
+		branch:        repo.CurrentBranch(),
 		files:         files,
 		filteredFiles: files,
 		viewport:      viewport.New(),
@@ -579,7 +581,7 @@ func (m Model) View() tea.View {
 	l := m.layout()
 
 	if m.showHelp {
-		v := tea.NewView(tui.HelpView("stage", m.engine.Name(), stageHints, stageNavKeys, m.width, l.ContentHeight))
+		v := tea.NewView(tui.HelpView("stage", tui.HeaderContext(m.branch, m.engine.Name()), stageHints, stageNavKeys, m.width, l.ContentHeight))
 		v.AltScreen = true
 		return v
 	}
@@ -618,7 +620,7 @@ func (m Model) View() tea.View {
 	diffPanel := tui.Panel(diffTitle, "", m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane, diffBar)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
-	header := tui.Header("stage", m.engine.Name(), m.width)
+	header := tui.Header("stage", tui.HeaderContext(m.branch, m.engine.Name()), m.width)
 
 	var footer string
 	switch {

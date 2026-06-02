@@ -50,6 +50,7 @@ func (m Model) SelectedHash() string {
 
 func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 	engines := tui.NewEngineToggle(engine)
+	branch := repo.CurrentBranch()
 
 	hints := [][2]string{
 		{"⏎", "files"}, {"/", "filter"}, {"⇥", "read"}, {"\\", "layout"},
@@ -64,6 +65,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo) Model {
 	cfg := tui.SplitConfig[git.CommitInfo]{
 		Screen:       "log",
 		ListTitle:    "commits",
+		Branch:       branch,
 		Context:      engine.Name(),
 		NavFraction:  30,
 		EmptyStatus:  "No commits found",

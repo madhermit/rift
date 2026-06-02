@@ -36,6 +36,7 @@ type PreviewMsg struct {
 type SplitConfig[T any] struct {
 	Screen      string      // header screen label, e.g. "log"
 	ListTitle   string      // list-pane title, e.g. "commits"
+	Branch      string      // current branch, prefixed onto Context in the header
 	Context     string      // header right-context, e.g. the diff engine name
 	Hints       [][2]string // footer keybinding hints
 	EmptyStatus string      // footer status when there are no items
@@ -610,11 +611,12 @@ func (m SplitList[T]) View() string {
 		return "Loading..."
 	}
 	contentH := m.height - HeaderRows - FooterRows
+	context := HeaderContext(m.cfg.Branch, m.cfg.Context)
 	if m.showHelp {
-		return HelpView(m.cfg.Screen, m.cfg.Context, m.cfg.Hints, PreviewHelpKeys, m.width, contentH)
+		return HelpView(m.cfg.Screen, context, m.cfg.Hints, PreviewHelpKeys, m.width, contentH)
 	}
 
-	header := Header(m.cfg.Screen, m.cfg.Context, m.width)
+	header := Header(m.cfg.Screen, context, m.width)
 	return lipgloss.JoinVertical(lipgloss.Left, header, m.content(), m.footerView())
 }
 

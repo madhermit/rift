@@ -3,7 +3,9 @@ package git
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	gogit "github.com/go-git/go-git/v6"
 )
@@ -47,4 +49,32 @@ func isLinkedWorktree(root string) bool {
 
 func (r *Repo) Root() string {
 	return r.root
+}
+
+// CurrentBranch returns the checked-out branch name, the short commit hash when
+// HEAD is detached, or "" if it can't be determined. go-git can't resolve HEAD
+// in linked worktrees (go-git#1842), so those (and any go-git failure) shell out.
+func (r *Repo) CurrentBranch() string {
+	if r == nil {
+		return ""
+	}
+	if !r.linkedWorktree {
+		if head, err := r.repo.Head(); err == nil {
+			if head.Name().IsBranch() {
+				return head.Name().Short()
+			}
+			return head.Hash().String()[:7] // detached HEAD
+		}
+	}
+	out, err := exec.Command("git", "-C", r.root, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	if name := strings.TrimSpace(string(out)); name != "HEAD" {
+		return name
+	}
+	if h, err := exec.Command("git", "-C", r.root, "rev-parse", "--short", "HEAD").Output(); err == nil {
+		return strings.TrimSpace(string(h))
+	}
+	return ""
 }

@@ -29,6 +29,7 @@ type Model struct {
 
 func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 	engines := tui.NewEngineToggle(engine)
+	branch := repo.CurrentBranch()
 
 	hints := [][2]string{
 		{"/", "filter"}, {"⇥", "read"},
@@ -42,6 +43,7 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 	cfg := tui.SplitConfig[git.StashEntry]{
 		Screen:      "stash",
 		ListTitle:   "stashes",
+		Branch:      branch,
 		Context:     engine.Name(),
 		NavFraction: 30,
 		EmptyStatus: "No stashes found",

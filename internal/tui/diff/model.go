@@ -70,7 +70,7 @@ func pathRow(prefix string, selected bool, path, stat string, w int) string {
 
 // contextLabel is the header right-context: the engine name, prefixed with the
 // commit being viewed when this is a commit diff (so the drilldown shows which
-// commit, even after an engine toggle).
+// commit, even after an engine toggle). The branch is prepended by the SplitList.
 func contextLabel(commitDiff bool, target, engineName string) string {
 	if commitDiff {
 		return target + " · " + engineName
@@ -81,6 +81,7 @@ func contextLabel(commitDiff bool, target, engineName string) string {
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
 	commitDiff := target != ""
 	engines := tui.NewEngineToggle(engine)
+	branch := repo.CurrentBranch()
 
 	listTitle := "changes"
 	if !commitDiff {
@@ -107,6 +108,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	cfg := tui.SplitConfig[git.ChangedFile]{
 		Screen:      "diff",
 		ListTitle:   listTitle,
+		Branch:      branch,
 		Context:     contextLabel(commitDiff, target, engine.Name()),
 		NavFraction: 30,
 		EmptyStatus: "No changes found",

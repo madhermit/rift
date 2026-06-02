@@ -176,20 +176,39 @@ func Marker(selected bool) string {
 	return " "
 }
 
-// Header renders the two-row top bar: "rift · <screen>" on the left and an
-// optional dim context (e.g. the diff engine, current branch) on the right.
+// Header renders the two-row top bar: a "rift ❯ <screen>" chevron breadcrumb on
+// the left and an optional dim context (e.g. branch · engine) on the right, then
+// a thin rule separating it from the content (mirroring the footer).
 func Header(screen, context string, width int) string {
 	left := " " + appNameStyle.Render("rift")
 	if screen != "" {
-		left += dotStyle.Render(" · ") + screenStyle.Render(screen)
+		left += dotStyle.Render(" ❯ ") + screenStyle.Render(screen)
 	}
 	right := contextStyle.Render(context)
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 1
 	if gap < 1 {
 		gap = 1
 	}
-	line := left + strings.Repeat(" ", gap) + right + " "
-	return line + "\n" // second (blank) row as breathing room
+	return left + strings.Repeat(" ", gap) + right + " " + "\n" + ruleLine(width)
+}
+
+// ruleLine is the thin horizontal separator drawn under the header and above the
+// footer hints.
+func ruleLine(width int) string {
+	return ruleStyle.Render("╶" + strings.Repeat("─", maxInt(0, width-2)) + "╴")
+}
+
+// HeaderContext joins the current branch with a screen-specific context (e.g.
+// the diff engine) for the header's right side, omitting either when empty.
+func HeaderContext(branch, rest string) string {
+	switch {
+	case branch == "":
+		return rest
+	case rest == "":
+		return branch
+	default:
+		return branch + " · " + rest
+	}
 }
 
 // Footer renders the two-row bottom bar: a faint rule then a status segment
@@ -197,7 +216,7 @@ func Header(screen, context string, width int) string {
 // don't fit, the trailing hints (e.g. "? help", "q quit") are kept and the
 // middle is dropped with an ellipsis, so help and quit stay discoverable.
 func Footer(width int, status string, hints [][2]string) string {
-	rule := ruleStyle.Render("╶" + strings.Repeat("─", maxInt(0, width-2)) + "╴")
+	rule := ruleLine(width)
 	sep := ruleStyle.Render(" · ")
 	render := func(h [2]string) string { return keyStyle.Render(h[0]) + " " + keyDescDim.Render(h[1]) }
 
@@ -255,7 +274,7 @@ func minInt(a, b int) int {
 // FooterContent renders the bottom rule above an arbitrary content line, used
 // for the filter-input prompt while filtering.
 func FooterContent(width int, content string) string {
-	rule := ruleStyle.Render("╶" + strings.Repeat("─", maxInt(0, width-2)) + "╴")
+	rule := ruleLine(width)
 	return rule + "\n " + ansi.Truncate(content, maxInt(0, width-1), "")
 }
 
