@@ -7,6 +7,8 @@ pre-1.0).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-01
+
 ### Added
 
 - `J` / `K` (also `shift+↑`/`↓`, or `]`/`[`) step to the next/previous file or
@@ -80,6 +82,7 @@ tightened around what it does best.
 
 - The `branch` command. rift no longer manages branches or worktrees.
 
-[Unreleased]: https://github.com/madhermit/rift/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/madhermit/rift/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/madhermit/rift/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/madhermit/rift/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/madhermit/rift/compare/v0.1.2...v0.2.0
