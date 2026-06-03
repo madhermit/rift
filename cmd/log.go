@@ -25,6 +25,7 @@ var logCmd = &cobra.Command{
 func init() {
 	logCmd.Flags().IntP("max-count", "n", 200, "Maximum number of commits to show (0 for unlimited)")
 	logCmd.Flags().Bool("all", false, "Show commits from all branches")
+	logCmd.Flags().Bool("tests", false, "Drill into each commit's touched test cases instead of its files")
 	rootCmd.AddCommand(logCmd)
 }
 
@@ -64,7 +65,8 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return output.WritePlain(os.Stdout, lines)
 	default:
 		engine := diff.NewEngine()
-		m := logui.New(repo, engine, commits)
+		tests, _ := cmd.Flags().GetBool("tests")
+		m := logui.New(repo, engine, commits, tests)
 		result, err := tea.NewProgram(m).Run()
 		if err != nil {
 			return err

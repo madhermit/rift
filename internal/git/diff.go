@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,13 @@ import (
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
+
+// SortByPath orders changed files by path, for a stable listing (go-git returns
+// map order). Callers that present a file list sort through this so the ordering
+// rule lives in one place.
+func SortByPath(files []ChangedFile) {
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+}
 
 // EmptyTree is git's well-known empty-tree object, used as the base when
 // diffing a root commit (which has no parent).

@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/output"
-	diffui "github.com/madhermit/rift/internal/tui/diff"
+	"github.com/madhermit/rift/internal/review"
+	lensui "github.com/madhermit/rift/internal/tui/lens"
 	"github.com/spf13/cobra"
 )
 
@@ -24,6 +24,7 @@ var diffCmd = &cobra.Command{
 func init() {
 	diffCmd.Flags().Bool("staged", false, "Show staged changes")
 	diffCmd.Flags().Bool("name-only", false, "Only show changed file names")
+	diffCmd.Flags().Bool("tests", false, "Show the test cases the diff touches instead of files")
 	rootCmd.AddCommand(diffCmd)
 }
 
@@ -51,6 +52,19 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Committed() keys on Target, so a working-tree scope ignores Base and a
+	// committed range ignores Staged — one literal covers both.
+	scope := review.DiffScope{Staged: staged, Base: base, Target: target, Paths: pathArgs}
+	tests, _ := cmd.Flags().GetBool("tests")
+
+	// The interactive view is a lens that toggles files↔tests, so the tests flag
+	// just chooses which side it opens on. --print/--json render the tests list
+	// directly (no toggle to offer). --name-only is a file-name output, so it
+	// takes precedence over --tests regardless of TTY.
+	if tests && !nameOnly && mode != output.Interactive {
+		return runTestsLens(mode, repo, scope)
+	}
+
 	files, err := listChangedFiles(repo, staged, base, target)
 	if err != nil {
 		return err
@@ -67,7 +81,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	case output.Print:
 		return printDiffs(engine, repo, files, staged, base, target)
 	default:
-		m := diffui.New(repo, engine, files, staged, base, target)
+		m := lensui.New(repo, engine, files, scope, tests)
 		_, err := tea.NewProgram(m).Run()
 		return err
 	}
@@ -89,9 +103,7 @@ func listChangedFiles(repo *git.Repo, staged bool, base, target string) ([]git.C
 	if files == nil {
 		files = []git.ChangedFile{}
 	}
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].Path < files[j].Path
-	})
+	git.SortByPath(files)
 	return files, nil
 }
 

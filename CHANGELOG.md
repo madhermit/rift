@@ -7,6 +7,30 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Added
+
+- `--tests` — a lens on the diff-producing commands that lists the test cases a
+  diff touches instead of files, so you can read what was built from its specs.
+  It extracts tests across Go (standard parser, including `t.Run` subtests and
+  table-driven cases — keyed-struct, map, and positional tables) and — via tree-sitter — JS/TS
+  (Jest/Vitest/Mocha `describe`/`it`), Ruby (RSpec and Rails/Minitest `test "…"`
+  macros), Python (pytest/unittest), and Rust (`#[test]`/`#[tokio::test]`). Each
+  case is prefaced with its nesting — `describe`/`context` blocks, and the
+  enclosing class for Python/Rails test classes — plus any embedded ticket IDs.
+  Only tests the diff actually touches are shown. Each is marked by how the diff
+  changed it — `+` added, `→` renamed (its name changed), `~` modified (its body
+  changed under an unchanged name); the `~` cases are the ones worth a close read,
+  since that's where an assertion can be quietly weakened.
+  - `rift diff` shows the file list and toggles to the tests view live with `t`
+    (the header reads `rift ❯ diff ❯ tests` to show it's a lens); `--tests` just
+    opens straight into it. Works on the working tree, `--staged`, or a `<commit>
+    <commit>` range, with `--print`/`--json` for scripting. The diff preview
+    scrolls to the selected test and labels it in the panel's border, so a
+    body-only change stays named even when its declaration isn't in the diff;
+    `o` opens it in `$EDITOR` at its line.
+  - `rift log --tests` makes drilling into a commit (`⏎`) show the test cases it
+    touched rather than its files.
+
 ## [0.3.1] - 2026-06-02
 
 ### Changed

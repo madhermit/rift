@@ -1,7 +1,6 @@
 package diffui
 
 import (
-	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,12 +21,6 @@ type Model struct {
 	commitDiff bool
 	display    diff.Display
 	stream     *tui.PreviewStream // active "all changes" stream; nil otherwise
-}
-
-// filesLoadedMsg carries a refreshed file list after toggling staged/unstaged.
-type filesLoadedMsg struct {
-	files []git.ChangedFile
-	err   error
 }
 
 // prependAllEntry adds a synthetic "All" row (carrying the totals) that previews
@@ -68,17 +61,7 @@ func pathRow(prefix string, selected bool, path, stat string, w int) string {
 	return rowWithStat(prefix+tui.RenderPath(path, avail, selected), stat, w)
 }
 
-// contextLabel is the header right-context: the engine name, prefixed with the
-// commit being viewed when this is a commit diff (so the drilldown shows which
-// commit, even after an engine toggle). The branch is prepended by the SplitList.
-func contextLabel(commitDiff bool, target, engineName string) string {
-	if commitDiff {
-		return target + " · " + engineName
-	}
-	return engineName
-}
-
-func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string) Model {
+func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string, lensToggle bool) Model {
 	commitDiff := target != ""
 	engines := tui.NewEngineToggle(engine)
 	branch := repo.CurrentBranch()
@@ -90,6 +73,9 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 
 	hints := [][2]string{
 		{"/", "filter"}, {"⇥", "read"},
+	}
+	if lensToggle {
+		hints = append(hints, [2]string{"t", "tests"})
 	}
 	if !commitDiff {
 		hints = append(hints, [2]string{"s", "staged"})
@@ -109,7 +95,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		Screen:      "diff",
 		ListTitle:   listTitle,
 		Branch:      branch,
-		Context:     contextLabel(commitDiff, target, engine.Name()),
+		Context:     tui.ContextLabel(target, engine.Name()),
 		NavFraction: 30,
 		EmptyStatus: "No changes found",
 		Hints:       hints,
@@ -162,14 +148,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tui.EditorClosedMsg:
 		return m.reloadFresh() // the file may have changed
-	case filesLoadedMsg:
-		if msg.err != nil {
-			m.list = m.list.SetError(msg.err)
-			return m, nil
-		}
-		var cmd tea.Cmd
-		m.list, cmd = m.list.SetItems(prependAllEntry(msg.files))
-		return m, cmd
 	case tea.KeyPressMsg:
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
@@ -183,12 +161,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break // only one engine available; nothing to toggle
 			}
 			m.engines = m.engines.Toggle()
-			m.list = m.list.SetContext(contextLabel(m.commitDiff, m.target, m.engines.Name()))
+			m.list = m.list.SetContext(tui.ContextLabel(m.target, m.engines.Name()))
 			return m.reloadFresh()
-		case "s":
-			if !m.commitDiff {
-				return m.toggleStaged()
-			}
 		case "o":
 			// Disabled for a commit diff: the files are historical, so editing the
 			// working tree copy would be misleading.
@@ -218,19 +192,12 @@ func (m Model) View() tea.View { return m.list.TeaView() }
 func (m Model) Filtering() bool   { return m.list.Filtering() }
 func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
 
-func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
-	m.staged = !m.staged
-	m.list = m.list.SetListTitle(tui.ToggleTitle("unstaged", "staged", m.staged))
-
-	repo, staged := m.repo, m.staged
-	return m, func() tea.Msg {
-		files, err := repo.ChangedFiles(staged)
-		if err != nil {
-			return filesLoadedMsg{err: err}
-		}
-		sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-		return filesLoadedMsg{files: files}
-	}
+// CancelPreview stops this model's in-flight diff stream — used by the lens
+// wrapper before hiding it, so a backgrounded difftastic run doesn't linger.
+func (m Model) CancelPreview() tea.Model {
+	m.stream.Cancel()
+	m.stream = nil
+	return m
 }
 
 // previewCmd streams the selected files' diffs: the selected file, or every file

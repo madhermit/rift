@@ -28,7 +28,7 @@ func TestViewFillsWindow(t *testing.T) {
 		{Hash: "d4e5f6a", Date: "2026-05-30 09:12", Message: "Bump Charm ecosystem"},
 	}
 	for _, size := range []struct{ w, h int }{{80, 24}, {120, 40}, {60, 16}} {
-		m := New(nil, stubEngine{}, commits)
+		m := New(nil, stubEngine{}, commits, false)
 		next, _ := m.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
 		content := next.(Model).View().Content
 		if got := lipgloss.Height(content); got != size.h {
