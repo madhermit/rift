@@ -44,6 +44,12 @@ Powered by difftastic: reformatting noise disappears and you see what actually c
 
 ![rift stash — stash manager](docs/images/stash.png)
 
+### Test lens
+
+Add `--tests` to `rift diff` or `rift log` to read a change by the *tests* it touches instead of its files — handy for reviewing agent-generated code. Each spec is marked by how the diff changed it: `+` added, `→` renamed, `~` modified (the `~` cases, where an assertion can be quietly weakened under an unchanged name, are the ones worth a close read). The preview scrolls to the selected test and names it in the border. Toggle live between the file view and the tests view with `t`; works on the working tree, `--staged`, or a commit range, and supports `--print` / `--json`. Tests are extracted across Go, JavaScript/TypeScript, Ruby, Python, and Rust — including `t.Run` subtests and table-driven cases.
+
+![rift diff --tests — the tests a change added, renamed, or modified](docs/images/tests.gif)
+
 ### Interactive staging
 
 `rift stage` replaces `git add -p` with a two-panel TUI: a file list with structural diff preview and hunk-level staging, the active hunk clearly marked in the gutter.

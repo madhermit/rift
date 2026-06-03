@@ -87,6 +87,27 @@ func classify(c byte) Kind {
 	}
 }
 EOF
+cat > internal/parse/lexer_test.go <<'EOF'
+package parse
+
+import "testing"
+
+func TestNext(t *testing.T) {
+	lex := New([]byte("ab"))
+	if tok, _ := lex.Next(); tok.Value != "a" {
+		t.Fatalf("first token = %q, want a", tok.Value)
+	}
+}
+
+func TestClassify(t *testing.T) {
+	if classify('7') != Number {
+		t.Error("digit should be Number")
+	}
+	if classify('q') != Ident {
+		t.Error("letter should be Ident")
+	}
+}
+EOF
 git add -A
 commit "2026-05-22T14:30:00" "Add token classification"
 
@@ -140,5 +161,37 @@ func (l *Lexer) Next() (Token, bool) {
 }
 EOF
 echo '{"name":"nibble","version":"0.2.0","license":"MIT"}' > package.json
+
+# unstaged: the test file tracks the refactor — one test modified (its body now
+# expects whitespace skipped), one renamed, and a new test added. Gives `rift
+# diff --tests` a clean spread of ~ modified / → renamed / + added specs.
+cat > internal/parse/lexer_test.go <<'EOF'
+package parse
+
+import "testing"
+
+func TestNext(t *testing.T) {
+	lex := New([]byte("  ab"))
+	if tok, _ := lex.Next(); tok.Value != "a" {
+		t.Fatalf("first token = %q, want a (leading space skipped)", tok.Value)
+	}
+}
+
+func TestSkipsWhitespace(t *testing.T) {
+	lex := New([]byte("\t\n a"))
+	if tok, ok := lex.Next(); !ok || tok.Value != "a" {
+		t.Fatalf("got %q (ok=%v), want a", tok.Value, ok)
+	}
+}
+
+func TestClassifyByte(t *testing.T) {
+	if classify('7') != Number {
+		t.Error("digit should be Number")
+	}
+	if classify('q') != Ident {
+		t.Error("letter should be Ident")
+	}
+}
+EOF
 
 echo "demo repo ready at $DEMO"

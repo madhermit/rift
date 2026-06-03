@@ -71,10 +71,10 @@ mkdir -p docs/images
 export PATH="$PWD:$PATH"
 # Pre-warm difftastic so the recording never captures a first-run download.
 (cd /tmp/rift-demo && rift diff --print >/dev/null 2>&1 || true)
-for tape in demo/diff.tape demo/log.tape demo/stash.tape demo/stage.tape; do
+for tape in demo/diff.tape demo/log.tape demo/stash.tape demo/stage.tape demo/tests.tape; do
   echo "vhs $tape"
   vhs "$tape"
 done
 rm -f docs/images/log.gif docs/images/stash.gif
-echo "Wrote docs/images/{diff,log,stash,stage}.png + diff.gif, stage.gif"
+echo "Wrote docs/images/{diff,log,stash,stage,tests}.png + diff.gif, stage.gif, tests.gif"
 """
