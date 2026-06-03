@@ -69,7 +69,10 @@ func (v *VimNav) HandleKey(vp *viewport.Model, msg tea.KeyPressMsg) bool {
 // section's path is surfaced in the panel legend instead (see
 // SplitList.currentSection). Each banner is stripped from the shown content and
 // recorded as the section starting at the next displayed line.
-func (v *VimNav) SetContent(vp *viewport.Model, content string) {
+// SetContent updates the viewport, records section boundaries, and returns the
+// displayed (banner-stripped) lines so the caller can locate text within them
+// (e.g. to anchor-scroll); the line indices line up with viewport offsets.
+func (v *VimNav) SetContent(vp *viewport.Model, content string) []string {
 	raw := strings.Split(content, "\n")
 	display := make([]string, 0, len(raw))
 	v.sections = nil
@@ -81,6 +84,7 @@ func (v *VimNav) SetContent(vp *viewport.Model, content string) {
 		display = append(display, line)
 	}
 	vp.SetContent(strings.Join(display, "\n"))
+	return display
 }
 
 // bannerLabel returns the file path from a SectionBanner line ("── path ──────").

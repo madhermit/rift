@@ -176,13 +176,24 @@ func Marker(selected bool) string {
 	return " "
 }
 
+// breadcrumbSep joins screen segments in a header breadcrumb (rift ❯ diff ❯ tests).
+const breadcrumbSep = " ❯ "
+
+// Breadcrumb joins screen segments for a SplitConfig.Screen so the header renders
+// them as a "a ❯ b" trail (e.g. a lens over a parent screen).
+func Breadcrumb(segments ...string) string {
+	return strings.Join(segments, breadcrumbSep)
+}
+
 // Header renders the two-row top bar: a "rift ❯ <screen>" chevron breadcrumb on
 // the left and an optional dim context (e.g. branch · engine) on the right, then
 // a thin rule separating it from the content (mirroring the footer).
 func Header(screen, context string, width int) string {
 	left := " " + appNameStyle.Render("rift")
 	if screen != "" {
-		left += dotStyle.Render(" ❯ ") + screenStyle.Render(screen)
+		for _, seg := range strings.Split(screen, breadcrumbSep) {
+			left += dotStyle.Render(breadcrumbSep) + screenStyle.Render(seg)
+		}
 	}
 	right := contextStyle.Render(context)
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 1
@@ -209,6 +220,16 @@ func HeaderContext(branch, rest string) string {
 	default:
 		return branch + " · " + rest
 	}
+}
+
+// ContextLabel is the header right-context for a diff-backed screen: the engine
+// name, prefixed with the target ref when viewing a committed range (target is
+// "" for a working-tree/staged diff).
+func ContextLabel(target, engineName string) string {
+	if target == "" {
+		return engineName
+	}
+	return target + " · " + engineName
 }
 
 // Footer renders the two-row bottom bar: a faint rule then a status segment

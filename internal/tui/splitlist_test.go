@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -173,5 +174,59 @@ func TestWidthInCacheKey(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 9})
 	if !m.loading {
 		t.Error("resize should miss the width-keyed cache and reload")
+	}
+}
+
+// TestNewGutter covers the preview anchor's parse of difftastic's new-side line
+// gutter in both layouts: inline (new number left-indented past the margin) and
+// side-by-side (new number in a right gutter). The anchor must read the NEW
+// side, never the old one, so an insertion that shifts the two apart still lands
+// the scroll on the right row. Right-aligned numbers of differing widths share
+// an end column, which is why detection keys on the end, not the start.
+func TestNewGutter(t *testing.T) {
+	inline := []string{
+		"167    ",                       // old-side context, margin gutter
+		"168   test \"excludes hold\"",  // old-side, removed
+		"   168   test \"covers hold\"", // new-side, end col 6
+		"   169     loan = create_loan", // new-side
+		"      x := 9999",               // content number, not a gutter
+	}
+	if got := newGutterEnd(inline); got != 6 {
+		t.Fatalf("inline gutter end = %d, want 6", got)
+	}
+	if got := newLineNum(inline[2], 6); got != 168 {
+		t.Errorf("inline new line = %d, want 168", got)
+	}
+	if got := newLineNum(inline[1], 6); got != -1 {
+		t.Errorf("old-side row should have no new line, got %d", got)
+	}
+
+	// Side-by-side: old number at the margin, new number in a right gutter that
+	// difftastic right-aligns to a fixed end column. Build rows with a constant
+	// left field so the new gutter lands consistently; a removed row has "..."
+	// (no new side) and one new number is 2-digit to exercise right-alignment.
+	rows := []struct{ oldNum, oldTxt, newNum, newTxt string }{
+		{"165", "assert_equal 900.0, x", "165", "assert_equal 900.0, x"},
+		{"168", `test "excludes hold"`, "168", `test "covers hold"`},
+		{"175", "loan.update!(:dont_repay)", "", ""}, // removed: no new side
+		{"177", "end", "99", "end"},                  // right-aligned 2-digit
+	}
+	var sbs []string
+	for _, r := range rows {
+		right := "..."
+		if r.newNum != "" {
+			right = fmt.Sprintf("%3s  %s", r.newNum, r.newTxt) // 3-wide right-aligned gutter
+		}
+		sbs = append(sbs, fmt.Sprintf("%-3s  %-40s%s", r.oldNum, r.oldTxt, right))
+	}
+	end := newGutterEnd(sbs)
+	if got := newLineNum(sbs[1], end); got != 168 {
+		t.Errorf("sbs new line = %d, want 168", got)
+	}
+	if got := newLineNum(sbs[2], end); got != -1 {
+		t.Errorf("sbs removed row should have no new line, got %d", got)
+	}
+	if got := newLineNum(sbs[3], end); got != 99 {
+		t.Errorf("sbs right-aligned 2-digit new line = %d, want 99", got)
 	}
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/spinner"
@@ -53,6 +54,12 @@ type SplitConfig[T any] struct {
 	Match func(item T) string
 	// PreviewTitle returns the preview pane's title for an item (may be nil).
 	PreviewTitle func(item T) string
+	// PreviewHeader, when set, labels the preview pane's border with the selected
+	// item even while surveying (where the border is otherwise clean) and in place
+	// of the file section while reading. Lenses whose preview details a single
+	// item (the tests lens) set this so the change stays named even when the diff
+	// doesn't show the item's own declaration line. May be nil.
+	PreviewHeader func(item T) string
 	// CacheKey returns a stable identity for an item's preview, used to cache
 	// rendered previews. Return "" to skip caching for an item. May be nil.
 	// The cache is keyed by item identity only; the parent clears it (ClearCache
@@ -62,6 +69,10 @@ type SplitConfig[T any] struct {
 	// pressed (e.g. a commit hash or file path). Return "" or leave nil to
 	// disable yanking.
 	Yank func(item T) string
+	// PreviewLine returns the source line an item maps to; when selected the
+	// preview scrolls to the first shown row at or past it (e.g. a test, so the
+	// diff lands on it). Return 0 or leave nil to disable anchoring.
+	PreviewLine func(item T) int
 }
 
 type splitPane int
@@ -88,6 +99,7 @@ type SplitList[T any] struct {
 	vim      VimNav
 	preview  string
 	prevErr  error
+	anchored bool // the preview has been scrolled to the selection's PreviewLine
 
 	spinner  spinner.Model
 	loading  bool   // a preview is being loaded for the current selection
@@ -134,8 +146,9 @@ func (m SplitList[T]) cacheKey(it T) string {
 // the spinner, and asks the parent to load via SelectionChangedMsg.
 func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	m.reqID++
-	m.prevErr = nil // a new selection clears any previous load error
-	m.flash = ""    // and any transient message (e.g. "copied …")
+	m.prevErr = nil    // a new selection clears any previous load error
+	m.flash = ""       // and any transient message (e.g. "copied …")
+	m.anchored = false // a new selection re-anchors its preview
 	it, ok := m.Selected()
 	if !ok {
 		m.clearPreview()
@@ -145,8 +158,9 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 		if cached, hit := m.cache[key]; hit {
 			m.loading = false
 			m.preview = cached
-			m.setPreviewContent()
+			lines := m.setPreviewContent()
 			m.viewport.GotoTop()
+			m.applyAnchor(lines)
 			return m, nil
 		}
 	}
@@ -291,13 +305,14 @@ func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
 			// whole result on completion) and never reset scroll — the first chunk
 			// appends onto the empty, top-scrolled pane requestPreview left behind.
 			m.preview += msg.Content
-			m.setPreviewContent()
+			m.applyAnchor(m.setPreviewContent()) // anchor once its line streams in
 			return m, nil
 		}
 		m.preview = msg.Content
 		m.cacheCurrent(msg.Content)
-		m.setPreviewContent()
+		lines := m.setPreviewContent()
 		m.viewport.GotoTop()
+		m.applyAnchor(lines)
 		return m, nil
 	case spinner.TickMsg:
 		if !m.loading {
@@ -492,12 +507,113 @@ func (m SplitList[T]) relayout() (SplitList[T], tea.Cmd) {
 	return m.requestPreview()
 }
 
-func (m *SplitList[T]) setPreviewContent() {
+// setPreviewContent renders the current preview into the viewport and returns the
+// displayed (banner-stripped) lines, which applyAnchor consumes — the two always
+// run back to back, so the lines never need to be stashed on the struct.
+func (m *SplitList[T]) setPreviewContent() []string {
 	content := m.preview
 	if w := m.viewport.Width(); w > 0 && content != "" {
 		content = ansi.Hardwrap(content, w, true)
 	}
-	m.vim.SetContent(&m.viewport, content)
+	return m.vim.SetContent(&m.viewport, content)
+}
+
+// applyAnchor scrolls the preview to the selection's PreviewLine the first time
+// a shown row reaches it (once per selection), so e.g. the diff lands on the
+// selected test. It anchors by line number, not text: difftastic's compact view
+// can omit a test's declaration line when several changes cluster, so matching
+// the name would miss — but every row carries its line number in the gutter.
+// Once anchored, the user scrolls freely.
+func (m *SplitList[T]) applyAnchor(lines []string) {
+	if m.anchored || m.cfg.PreviewLine == nil {
+		return
+	}
+	it, ok := m.Selected()
+	if !ok {
+		return
+	}
+	target := m.cfg.PreviewLine(it)
+	if target <= 0 {
+		return
+	}
+	stripped := make([]string, len(lines))
+	for i, line := range lines {
+		stripped[i] = ansi.Strip(line)
+	}
+	gutter := newGutterEnd(stripped)
+	if gutter < 0 {
+		return
+	}
+	for i, s := range stripped {
+		if n := newLineNum(s, gutter); n >= target {
+			m.viewport.SetYOffset(i)
+			m.anchored = true
+			return
+		}
+	}
+}
+
+// newGutterEnd finds the column at which difftastic's new-side line-number
+// gutter ends, or -1 if the preview carries no such gutter. It works for both
+// layouts: inline prints the new number in a left-indented gutter (old-side
+// rows sit at the margin), side-by-side prints it in a right gutter past the
+// old pane. In both, a new gutter is a digit run that starts past column 0 (the
+// old gutter owns the margin) and is followed by padding spaces, landing at the
+// same end column on every new-side row — so the most frequent such end column
+// is the gutter. Keying on the end, not the start, tolerates right-aligned
+// numbers of differing widths (e.g. line 9 vs line 168 in one file).
+func newGutterEnd(stripped []string) int {
+	counts := map[int]int{}
+	for _, s := range stripped {
+		for i := 0; i < len(s); {
+			if s[i] < '0' || s[i] > '9' {
+				i++
+				continue
+			}
+			start := i
+			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+				i++
+			}
+			if start > 0 && s[start-1] == ' ' && i < len(s) && s[i] == ' ' {
+				counts[i]++ // i is the exclusive end: the first padding space
+			}
+		}
+	}
+	best, bestN := -1, 0
+	for col, n := range counts {
+		// Tie-break on the larger column for a stable result: map iteration order
+		// is randomized, so without it the anchor could pick a different gutter
+		// (and scroll differently) across runs of the same diff.
+		if n > bestN || (n == bestN && col > best) {
+			best, bestN = col, n
+		}
+	}
+	return best
+}
+
+// newLineNum reads the new-side line number of a row whose gutter ends at end,
+// or -1 if the row has no new-side number there: an old-side/removed row, a
+// wrapped continuation, or a header. The digits must end exactly at end (the
+// gutter is right-aligned to a fixed column) and be preceded by a space.
+func newLineNum(s string, end int) int {
+	if end <= 0 || end > len(s) {
+		return -1
+	}
+	if end < len(s) && s[end] != ' ' {
+		return -1
+	}
+	if s[end-1] < '0' || s[end-1] > '9' {
+		return -1
+	}
+	start := end
+	for start > 0 && s[start-1] >= '0' && s[start-1] <= '9' {
+		start--
+	}
+	if start > 0 && s[start-1] != ' ' {
+		return -1
+	}
+	n, _ := strconv.Atoi(s[start:end])
+	return n
 }
 
 // currentSection is the file the preview is currently showing, for the panel
@@ -539,14 +655,28 @@ func (m SplitList[T]) listView(innerH, rowWidth int) (string, Scrollbar) {
 // previewTitleView is the preview pane's title, prefixed with the spinner while
 // a preview is loading.
 func (m SplitList[T]) previewTitleView() string {
-	title := ""
-	if it, ok := m.Selected(); ok && m.cfg.PreviewTitle != nil {
-		title = m.cfg.PreviewTitle(it)
+	title := m.previewHeader()
+	if title == "" {
+		if it, ok := m.Selected(); ok && m.cfg.PreviewTitle != nil {
+			title = m.cfg.PreviewTitle(it)
+		}
 	}
 	if m.loading {
 		title = m.spinner.View() + " " + title
 	}
 	return title
+}
+
+// previewHeader is the configured sticky label for the selected item, or "" if
+// none is configured or nothing is selected.
+func (m SplitList[T]) previewHeader() string {
+	if m.cfg.PreviewHeader == nil {
+		return ""
+	}
+	if it, ok := m.Selected(); ok {
+		return m.cfg.PreviewHeader(it)
+	}
+	return ""
 }
 
 // previewBodyView is the viewport content plus its scrollbar. The current file
@@ -643,7 +773,9 @@ func (m SplitList[T]) content() string {
 	// Two panels. The preview's border legend earns its place: the spinner (with
 	// the item) while loading; while reading (focused), the current file on the
 	// left and its position (file N/M) on the right; otherwise (unfocused,
-	// surveying) a clean border, since the peek already names the item.
+	// surveying) a clean border, since the peek already names the item — unless a
+	// PreviewHeader is configured, which names the item in both states (it labels
+	// a change the diff alone doesn't, e.g. a body-only test modification).
 	previewTitle, previewRight := "", ""
 	switch {
 	case m.loading:
@@ -653,6 +785,9 @@ func (m SplitList[T]) content() string {
 	case reading:
 		previewTitle = m.currentSection()
 		previewRight = m.sectionProgress()
+	}
+	if h := m.previewHeader(); h != "" && !m.loading {
+		previewTitle = h
 	}
 	navTitle := m.cfg.ListTitle
 	if pos := m.positionText(); pos != "" {
