@@ -11,6 +11,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # Restrict gotreesitter's embedded grammars to the languages rift parses;
+      # keeps the build pure-Go so plain GOOS/GOARCH cross-compilation works.
+      GRAMMAR_TAGS: grammar_subset,grammar_subset_javascript,grammar_subset_typescript,grammar_subset_tsx,grammar_subset_ruby,grammar_subset_python,grammar_subset_rust
     steps:
       - uses: actions/checkout@v4
 
@@ -19,7 +23,7 @@ jobs:
           go-version: "1.25"
 
       - name: Run tests
-        run: go test ./...
+        run: go test -tags "${GRAMMAR_TAGS}" ./...
 
       - name: Build binaries
         run: |
@@ -28,12 +32,12 @@ jobs:
           LDFLAGS="-s -w -X github.com/madhermit/rift/cmd.Version=${VERSION}"
 
           # Linux
-          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/rift-linux-amd64 .
-          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/rift-linux-arm64 .
+          GOOS=linux GOARCH=amd64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-linux-amd64 .
+          GOOS=linux GOARCH=arm64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-linux-arm64 .
 
           # macOS
-          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-amd64 .
-          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-arm64 .
+          GOOS=darwin GOARCH=amd64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-darwin-arm64 .
 
       - name: Extract changelog section
         run: |

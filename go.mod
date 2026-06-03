@@ -9,6 +9,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/go-git/go-git/v6 v6.0.0-20260210102253-e4d10f0e569a
+	github.com/odvcencio/gotreesitter v0.20.0
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.40.0

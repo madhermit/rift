@@ -184,16 +184,32 @@ func ApplyHunk(base string, h Hunk) string {
 // For unstaged diffs: the index version (git show :file).
 // For staged diffs: the HEAD version (git show HEAD:file).
 func BaseContent(repoRoot string, staged bool, file string) (string, error) {
-	ref := ":" + file // index version
+	ref := "" // index version
 	if staged {
-		ref = "HEAD:" + file
+		ref = "HEAD"
 	}
-	cmd := exec.Command("git", "-C", repoRoot, "show", ref)
+	out, err := ShowFile(repoRoot, ref, file)
+	return string(out), err
+}
+
+// ShowFile returns the content of file at a git ref (git show ref:file); an empty
+// ref reads the staged/index version. It runs in repoRoot so linked-worktree
+// layouts resolve.
+func ShowFile(repoRoot, ref, file string) ([]byte, error) {
+	cmd := exec.Command("git", "show", ref+":"+file)
+	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return nil, err // never hand back partial stdout as if it were the file
 	}
-	return string(out), nil
+	return out, nil
+}
+
+// RawRangeDiff returns the unified diff of file between two commits (base..target).
+func RawRangeDiff(repoRoot, base, target, file string) (string, error) {
+	cmd := exec.Command("git", "diff", "--no-color", base, target, "--", file)
+	cmd.Dir = repoRoot
+	return runGitDiff(cmd, "git diff range")
 }
 
 func (h Hunk) Patch(fileHeader string) string {

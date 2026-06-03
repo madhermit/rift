@@ -1,16 +1,22 @@
 [tools]
 go = "1.25"
 
+[env]
+# gotreesitter embeds all 206 grammars by default; restrict the build to the
+# languages `rift review --tests` actually parses so the binary stays small.
+# This keeps the build pure-Go (no CGO) and cross-compilable with plain GOOS/GOARCH.
+GRAMMAR_TAGS = "grammar_subset,grammar_subset_javascript,grammar_subset_typescript,grammar_subset_tsx,grammar_subset_ruby,grammar_subset_python,grammar_subset_rust"
+
 [tasks.build]
 description = "Build rift binary"
 run = """
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
-go build -ldflags "-X github.com/madhermit/rift/cmd.Version=${VERSION}" -o rift .
+go build -tags "${GRAMMAR_TAGS}" -ldflags "-X github.com/madhermit/rift/cmd.Version=${VERSION}" -o rift .
 """
 
 [tasks.test]
 description = "Run tests"
-run = "go test ./..."
+run = 'go test -tags "${GRAMMAR_TAGS}" ./...'
 
 [tasks.fmt]
 description = "Format code"
@@ -18,7 +24,7 @@ run = "go fmt ./..."
 
 [tasks.lint]
 description = "Run linter"
-run = "go vet ./..."
+run = 'go vet -tags "${GRAMMAR_TAGS}" ./...'
 
 [tasks.check]
 description = "Run all checks (fmt, lint, test)"
@@ -28,7 +34,7 @@ depends = ["fmt", "lint", "test"]
 description = "Install rift to ~/.local/bin"
 run = """
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
-go build -ldflags "-X github.com/madhermit/rift/cmd.Version=${VERSION}" -o ~/.local/bin/rift .
+go build -tags "${GRAMMAR_TAGS}" -ldflags "-X github.com/madhermit/rift/cmd.Version=${VERSION}" -o ~/.local/bin/rift .
 """
 
 [tasks.release]
@@ -43,12 +49,12 @@ mkdir -p dist
 echo "Building version: $VERSION"
 
 # Linux
-GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/rift-linux-amd64 .
-GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/rift-linux-arm64 .
+GOOS=linux GOARCH=amd64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-linux-amd64 .
+GOOS=linux GOARCH=arm64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-linux-arm64 .
 
 # macOS
-GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-amd64 .
-GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/rift-darwin-arm64 .
+GOOS=darwin GOARCH=amd64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-darwin-amd64 .
+GOOS=darwin GOARCH=arm64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-darwin-arm64 .
 
 echo "Built binaries in dist/"
 ls -la dist/

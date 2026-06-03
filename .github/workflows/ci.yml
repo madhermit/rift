@@ -9,6 +9,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      GRAMMAR_TAGS: grammar_subset,grammar_subset_javascript,grammar_subset_typescript,grammar_subset_tsx,grammar_subset_ruby,grammar_subset_python,grammar_subset_rust
     steps:
       - uses: actions/checkout@v4
 
@@ -22,10 +24,10 @@ jobs:
           git diff --exit-code
 
       - name: Vet
-        run: go vet ./...
+        run: go vet -tags "${GRAMMAR_TAGS}" ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -tags "${GRAMMAR_TAGS}" ./...
 
       - name: Build
-        run: go build -o rift .
+        run: go build -tags "${GRAMMAR_TAGS}" -o rift .
