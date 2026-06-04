@@ -158,12 +158,17 @@ func DiffTargets(args []string) (base, target string, err error) {
 // go-git can't (go-git#1842). It uses two args (not the `a..b` range, which
 // rejects a tree on either side); for a root commit (base = the empty tree,
 // whose object may not be in the odb) it uses `diff-tree --root` against target.
+//
+// --no-renames keeps a rename as a delete + an add (like statusFiles), so a
+// renamed file in a commit drilldown renders correctly instead of as a whole
+// addition — the new path doesn't exist at the base, so the diff engine would
+// extract a /dev/null old side for it.
 func (r *Repo) DiffBetweenCommits(baseRef, targetRef string) ([]ChangedFile, error) {
 	var args []string
 	if baseRef == EmptyTree {
-		args = []string{"diff-tree", "--root", "--no-commit-id", "--name-status", "-r", targetRef}
+		args = []string{"diff-tree", "--root", "--no-commit-id", "--name-status", "--no-renames", "-r", targetRef}
 	} else {
-		args = []string{"diff", "--name-status", baseRef, targetRef}
+		args = []string{"diff", "--name-status", "--no-renames", baseRef, targetRef}
 	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.root
