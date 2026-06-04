@@ -182,7 +182,12 @@ func nameStatusCode(code string) string {
 func DiffTargets(args []string) (base, target string, err error) {
 	switch len(args) {
 	case 0:
-		return "HEAD", "", nil
+		// No ref: a working-tree diff. Leave the base empty so the staged flag
+		// alone picks the comparison — unstaged is worktree-vs-index, staged is
+		// index-vs-HEAD. Defaulting to "HEAD" would diff the unstaged view against
+		// HEAD instead of the index, rendering a staged-new file as a whole
+		// addition (it's absent from HEAD) rather than just its unstaged delta.
+		return "", "", nil
 	case 1:
 		return args[0], "", nil
 	case 2:

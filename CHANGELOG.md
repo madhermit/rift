@@ -7,6 +7,13 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Fixed
+
+- `rift diff` with no commit argument now diffs the unstaged view against the
+  index (matching `git diff`), not against HEAD. A file staged as new no longer
+  renders as a whole addition in the unstaged view — only its actual unstaged
+  change is shown; the `s` staged view still diffs against HEAD.
+
 ## [0.4.0] - 2026-06-03
 
 ### Added

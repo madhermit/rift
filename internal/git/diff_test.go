@@ -15,7 +15,7 @@ func TestDiffTargets(t *testing.T) {
 		wantTarget string
 		wantErr    bool
 	}{
-		{"zero args defaults to HEAD", []string{}, "HEAD", "", false},
+		{"zero args is a working-tree diff (no base)", []string{}, "", "", false},
 		{"one arg is base", []string{"main"}, "main", "", false},
 		{"two args are base and target", []string{"abc", "def"}, "abc", "def", false},
 		{"three args is error", []string{"a", "b", "c"}, "", "", true},
