@@ -7,6 +7,8 @@ pre-1.0).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-06-04
+
 ### Fixed
 
 - `rift diff` and `rift stage` no longer stall for tens of seconds in a repo with
@@ -145,7 +147,8 @@ tightened around what it does best.
 
 - The `branch` command. rift no longer manages branches or worktrees.
 
-[Unreleased]: https://github.com/madhermit/rift/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/madhermit/rift/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/madhermit/rift/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/madhermit/rift/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/madhermit/rift/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/madhermit/rift/compare/v0.3.0...v0.3.1
