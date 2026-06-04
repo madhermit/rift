@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
@@ -39,19 +38,30 @@ func Paths(files []ChangedFile) []string {
 	return paths
 }
 
+// ChangedFiles lists the working-tree files with a staged change (staged=true)
+// or an unstaged/untracked change (staged=false), derived from `git status`.
 func (r *Repo) ChangedFiles(staged bool) ([]ChangedFile, error) {
-	var files []ChangedFile
-	var err error
-	if r.linkedWorktree {
-		files, err = r.changedFilesShell(staged)
-	} else {
-		files, err = r.changedFilesGoGit(staged)
-		if err != nil {
-			files, err = r.changedFilesShell(staged)
-		}
-	}
+	sf, err := r.statusFiles()
 	if err != nil {
 		return nil, err
+	}
+	var files []ChangedFile
+	for _, f := range sf {
+		var code string
+		if staged {
+			// An untracked file has no staged change; everything else with an
+			// index status (M/A/D/R/C) counts as staged.
+			if f.StagingStatus == "" || f.StagingStatus == "Untracked" {
+				continue
+			}
+			code = f.StagingStatus
+		} else {
+			if f.WorktreeStatus == "" {
+				continue
+			}
+			code = f.WorktreeStatus
+		}
+		files = append(files, ChangedFile{Path: f.Path, Status: code})
 	}
 	r.addStats(files, staged)
 	return files, nil
@@ -60,6 +70,9 @@ func (r *Repo) ChangedFiles(staged bool) ([]ChangedFile, error) {
 // addStats fills in per-file added/deleted line counts from git diff --numstat.
 // Best-effort: stats are a display nicety, so failures leave counts at zero.
 func (r *Repo) addStats(files []ChangedFile, staged bool) {
+	if len(files) == 0 {
+		return // nothing to annotate; skip the git subprocess
+	}
 	args := []string{"diff", "--numstat"}
 	if staged {
 		args = append(args, "--staged")
@@ -93,54 +106,6 @@ func parseNumstat(out string) map[string][2]int {
 	return stats
 }
 
-func (r *Repo) changedFilesGoGit(staged bool) ([]ChangedFile, error) {
-	wt, err := r.repo.Worktree()
-	if err != nil {
-		return nil, err
-	}
-
-	status, err := wt.Status()
-	if err != nil {
-		return nil, err
-	}
-
-	var files []ChangedFile
-	for path, s := range status {
-		var code string
-		if staged {
-			if s.Staging == '?' || s.Staging == ' ' || s.Staging == 0 {
-				continue
-			}
-			code = statusCodeToString(s.Staging)
-		} else {
-			code = statusCodeToString(s.Worktree)
-		}
-		if code == "" {
-			continue
-		}
-		files = append(files, ChangedFile{Path: path, Status: code})
-	}
-
-	return files, nil
-}
-
-// changedFilesShell falls back to git diff when go-git can't compute
-// status correctly (e.g. in linked worktree layouts).
-func (r *Repo) changedFilesShell(staged bool) ([]ChangedFile, error) {
-	args := []string{"diff"}
-	if staged {
-		args = append(args, "--staged")
-	}
-	args = append(args, "--name-status")
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.root
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git diff: %w", err)
-	}
-	return parseNameStatus(string(out)), nil
-}
-
 func parseNameStatus(out string) []ChangedFile {
 	var files []ChangedFile
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -162,21 +127,14 @@ func parseNameStatus(out string) []ChangedFile {
 	return files
 }
 
+// nameStatusCode maps a `git diff --name-status` code to a status word. The code
+// is a single letter, except renames/copies carry a similarity score (R100,
+// C75), so the leading byte is the status — which statusWord already maps.
 func nameStatusCode(code string) string {
-	switch {
-	case strings.HasPrefix(code, "M"):
-		return "Modified"
-	case strings.HasPrefix(code, "A"):
-		return "Added"
-	case strings.HasPrefix(code, "D"):
-		return "Deleted"
-	case strings.HasPrefix(code, "R"):
-		return "Renamed"
-	case strings.HasPrefix(code, "C"):
-		return "Copied"
-	default:
-		return code
+	if code == "" {
+		return ""
 	}
+	return statusWord(code[0])
 }
 
 func DiffTargets(args []string) (base, target string, err error) {
@@ -199,8 +157,9 @@ func DiffTargets(args []string) (base, target string, err error) {
 
 func (r *Repo) DiffBetweenCommits(baseRef, targetRef string) ([]ChangedFile, error) {
 	// go-git can't resolve revisions in a linked worktree's commondir layout, so
-	// shell out there (and as a fallback when the go-git path errors) — the same
-	// pattern ChangedFiles uses.
+	// shell out there (and as a fallback when the go-git path errors). The
+	// working tree walk is the slow case (see statusFiles); a tree-to-tree diff
+	// doesn't touch the worktree, so go-git is fine for the non-worktree path.
 	if r.linkedWorktree {
 		return r.diffBetweenCommitsShell(baseRef, targetRef)
 	}
@@ -313,28 +272,4 @@ func FilterByPaths(files []ChangedFile, paths []string) []ChangedFile {
 		}
 	}
 	return filtered
-}
-
-func statusCodeToString(c gogit.StatusCode) string {
-	switch c {
-	case 'M':
-		return "Modified"
-	case 'A':
-		return "Added"
-	case 'D':
-		return "Deleted"
-	case 'R':
-		return "Renamed"
-	case 'C':
-		return "Copied"
-	case '?':
-		return "Untracked"
-	case ' ':
-		return ""
-	default:
-		if c == 0 {
-			return ""
-		}
-		return string(c)
-	}
 }

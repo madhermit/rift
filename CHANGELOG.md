@@ -7,6 +7,16 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Fixed
+
+- `rift diff` and `rift stage` no longer stall for tens of seconds in a repo with
+  large gitignored subtrees (e.g. `node_modules`, `vendor`). The working-tree
+  file listing now comes from `git status` directly instead of go-git, whose
+  status walk descended into ignored directories instead of pruning them. As a
+  result the listing also honors global / `core.excludesFile` ignore rules (so
+  `.DS_Store` and the like no longer show up) and lists untracked files inside
+  linked worktrees.
+
 ## [0.4.1] - 2026-06-04
 
 ### Fixed

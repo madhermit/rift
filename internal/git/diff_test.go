@@ -3,7 +3,6 @@ package git
 import (
 	"testing"
 
-	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
@@ -35,32 +34,6 @@ func TestDiffTargets(t *testing.T) {
 			}
 			if target != tt.wantTarget {
 				t.Errorf("target = %q, want %q", target, tt.wantTarget)
-			}
-		})
-	}
-}
-
-func TestStatusCodeToString(t *testing.T) {
-	tests := []struct {
-		name string
-		code gogit.StatusCode
-		want string
-	}{
-		{"modified", 'M', "Modified"},
-		{"added", 'A', "Added"},
-		{"deleted", 'D', "Deleted"},
-		{"renamed", 'R', "Renamed"},
-		{"copied", 'C', "Copied"},
-		{"untracked", '?', "Untracked"},
-		{"space", ' ', ""},
-		{"zero value", 0, ""},
-		{"unknown code", 'X', "X"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := statusCodeToString(tt.code); got != tt.want {
-				t.Errorf("statusCodeToString(%q) = %q, want %q", tt.code, got, tt.want)
 			}
 		})
 	}
