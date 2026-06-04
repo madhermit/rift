@@ -6,9 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/go-git/go-git/v6/plumbing"
-	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
 // SortByPath orders changed files by path, for a stable listing (go-git returns
@@ -155,26 +152,13 @@ func DiffTargets(args []string) (base, target string, err error) {
 	}
 }
 
+// DiffBetweenCommits lists the files changed between two refs. It shells out to
+// git: a tree-to-tree diff is fast (it never walks the worktree) and git
+// resolves refs correctly in every layout, including the linked worktrees where
+// go-git can't (go-git#1842). It uses two args (not the `a..b` range, which
+// rejects a tree on either side); for a root commit (base = the empty tree,
+// whose object may not be in the odb) it uses `diff-tree --root` against target.
 func (r *Repo) DiffBetweenCommits(baseRef, targetRef string) ([]ChangedFile, error) {
-	// go-git can't resolve revisions in a linked worktree's commondir layout, so
-	// shell out there (and as a fallback when the go-git path errors). The
-	// working tree walk is the slow case (see statusFiles); a tree-to-tree diff
-	// doesn't touch the worktree, so go-git is fine for the non-worktree path.
-	if r.linkedWorktree {
-		return r.diffBetweenCommitsShell(baseRef, targetRef)
-	}
-	files, err := r.diffBetweenCommitsGoGit(baseRef, targetRef)
-	if err != nil {
-		return r.diffBetweenCommitsShell(baseRef, targetRef)
-	}
-	return files, nil
-}
-
-// diffBetweenCommitsShell lists the files changed between two refs via shelled
-// git. It uses two args (not the `a..b` range, which rejects a tree on either
-// side), and for a root commit (base = the empty tree, whose object may not be
-// in the odb) it uses `diff-tree --root` against the target instead.
-func (r *Repo) diffBetweenCommitsShell(baseRef, targetRef string) ([]ChangedFile, error) {
 	var args []string
 	if baseRef == EmptyTree {
 		args = []string{"diff-tree", "--root", "--no-commit-id", "--name-status", "-r", targetRef}
@@ -188,68 +172,6 @@ func (r *Repo) diffBetweenCommitsShell(baseRef, targetRef string) ([]ChangedFile
 		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return parseNameStatus(string(out)), nil
-}
-
-func (r *Repo) diffBetweenCommitsGoGit(baseRef, targetRef string) ([]ChangedFile, error) {
-	baseCommit, err := r.resolveCommit(baseRef)
-	if err != nil {
-		return nil, fmt.Errorf("resolve base %q: %w", baseRef, err)
-	}
-
-	targetCommit, err := r.resolveCommit(targetRef)
-	if err != nil {
-		return nil, fmt.Errorf("resolve target %q: %w", targetRef, err)
-	}
-
-	baseTree, err := baseCommit.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("get base tree: %w", err)
-	}
-
-	targetTree, err := targetCommit.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("get target tree: %w", err)
-	}
-
-	changes, err := baseTree.Diff(targetTree)
-	if err != nil {
-		return nil, fmt.Errorf("diff trees: %w", err)
-	}
-
-	var files []ChangedFile
-	for _, c := range changes {
-		name := c.To.Name
-		if name == "" {
-			name = c.From.Name
-		}
-		files = append(files, ChangedFile{
-			Path:   name,
-			Status: diffActionString(c),
-		})
-	}
-
-	return files, nil
-}
-
-func (r *Repo) resolveCommit(ref string) (*object.Commit, error) {
-	h, err := r.repo.ResolveRevision(plumbing.Revision(ref))
-	if err != nil {
-		return nil, err
-	}
-	return r.repo.CommitObject(*h)
-}
-
-func diffActionString(c *object.Change) string {
-	from := c.From.Name
-	to := c.To.Name
-	switch {
-	case from == "" && to != "":
-		return "Added"
-	case from != "" && to == "":
-		return "Deleted"
-	default:
-		return "Modified"
-	}
 }
 
 func matchPath(file string, paths []string) bool {

@@ -2,8 +2,6 @@ package git
 
 import (
 	"testing"
-
-	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
 func TestDiffTargets(t *testing.T) {
@@ -34,31 +32,6 @@ func TestDiffTargets(t *testing.T) {
 			}
 			if target != tt.wantTarget {
 				t.Errorf("target = %q, want %q", target, tt.wantTarget)
-			}
-		})
-	}
-}
-
-func TestDiffActionString(t *testing.T) {
-	tests := []struct {
-		name string
-		from string
-		to   string
-		want string
-	}{
-		{"added", "", "newfile.go", "Added"},
-		{"deleted", "oldfile.go", "", "Deleted"},
-		{"modified", "file.go", "file.go", "Modified"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := &object.Change{
-				From: object.ChangeEntry{Name: tt.from},
-				To:   object.ChangeEntry{Name: tt.to},
-			}
-			if got := diffActionString(c); got != tt.want {
-				t.Errorf("diffActionString() = %q, want %q", got, tt.want)
 			}
 		})
 	}
