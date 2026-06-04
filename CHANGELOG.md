@@ -7,6 +7,8 @@ pre-1.0).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-04
+
 ### Fixed
 
 - `rift diff` with no commit argument now diffs the unstaged view against the
@@ -133,7 +135,8 @@ tightened around what it does best.
 
 - The `branch` command. rift no longer manages branches or worktrees.
 
-[Unreleased]: https://github.com/madhermit/rift/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/madhermit/rift/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/madhermit/rift/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/madhermit/rift/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/madhermit/rift/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/madhermit/rift/compare/v0.2.1...v0.3.0
