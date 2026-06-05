@@ -7,6 +7,17 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Added
+
+- Mark changes reviewed in `rift diff`: press `r` to tick off the selected file
+  (a ✓ replaces its status glyph) and `u` to show only the files you haven't
+  reviewed yet — so you can walk a large change file by file and watch the list
+  shrink. A mark is keyed to the file's content, so it resets the moment the file
+  changes (e.g. an agent edits it again) and persists across runs, making it easy
+  to re-review only what's new. `--unreviewed` narrows `--print` / `--json` /
+  `--name-only` to the not-yet-reviewed files for scripting. Working-tree only;
+  marks live in `.git/rift/` per worktree and aren't committed.
+
 ## [0.4.2] - 2026-06-04
 
 ### Fixed

@@ -1,14 +1,31 @@
 package diffui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/review"
 	"github.com/madhermit/rift/internal/tui"
 )
+
+var reviewedGlyph = lipgloss.NewStyle().Foreground(tui.Green)
+
+// reviewMarks is the reviewed-state lookup the row renderer reads: the persisted
+// marks plus each file's current blob hash. Both are mutated in place — Toggle on
+// the store, a fresh hash map after an edit — so the row closure that captures
+// the *reviewMarks always reflects the current state.
+type reviewMarks struct {
+	state  *review.Reviewed
+	hashes map[string]string
+}
+
+func (rm *reviewMarks) reviewed(path string) bool {
+	return rm != nil && rm.state.IsReviewed(path, rm.hashes[path])
+}
 
 type Model struct {
 	repo    *git.Repo
@@ -21,6 +38,10 @@ type Model struct {
 	commitDiff bool
 	display    diff.Display
 	stream     *tui.PreviewStream // active "all changes" stream; nil otherwise
+
+	files          []git.ChangedFile // the full changed set; the list shows a (filtered) view of it
+	marks          *reviewMarks      // nil for a commit diff — historical files don't get reviewed
+	unreviewedOnly bool
 }
 
 // prependAllEntry adds a synthetic "All" row (carrying the totals) that previews
@@ -64,16 +85,27 @@ func pathRow(prefix string, selected bool, path, stat string, w int) string {
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string, lensToggle bool) Model {
 	commitDiff := target != ""
 	engines := tui.NewEngineToggle(engine)
-	branch := repo.CurrentBranch()
 
-	listTitle := "changes"
+	var marks *reviewMarks
 	if !commitDiff {
-		listTitle = tui.ToggleTitle("unstaged", "staged", staged)
+		marks = &reviewMarks{
+			state:  review.LoadReviewed(repo),
+			hashes: review.ContentHashes(repo, files),
+		}
 	}
 
-	hints := [][2]string{
-		{"/", "filter"}, {"⇥", "read"},
+	m := Model{
+		repo:       repo,
+		engines:    engines,
+		staged:     staged,
+		base:       base,
+		target:     target,
+		commitDiff: commitDiff,
+		files:      files,
+		marks:      marks,
 	}
+
+	hints := [][2]string{{"/", "filter"}, {"⇥", "read"}}
 	if lensToggle {
 		hints = append(hints, [2]string{"t", "tests"})
 	}
@@ -85,19 +117,19 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		hints = append(hints, [2]string{"e", "engine"})
 	}
 	if !commitDiff {
-		// In a commit diff the files are historical; editing the working tree copy
-		// would be misleading, so don't offer `o`.
-		hints = append(hints, [2]string{"o", "open"})
+		// In a commit diff the files are historical: editing the working-tree copy
+		// (`o`) or reviewing it would be misleading, so those are working-tree only.
+		hints = append(hints, [2]string{"o", "open"}, [2]string{"r", "review"}, [2]string{"U", "unreviewed"})
 	}
 	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
 	cfg := tui.SplitConfig[git.ChangedFile]{
 		Screen:      "diff",
-		ListTitle:   listTitle,
-		Branch:      branch,
+		ListTitle:   m.listTitle(),
+		Branch:      repo.CurrentBranch(),
 		Context:     tui.ContextLabel(target, engine.Name()),
 		NavFraction: 30,
-		EmptyStatus: "No changes found",
+		EmptyStatus: m.emptyStatus(),
 		Hints:       hints,
 		Match:       func(f git.ChangedFile) string { return f.Path },
 		PreviewTitle: func(f git.ChangedFile) string {
@@ -110,24 +142,66 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		// Staged/display changes clear the cache (SetItems / ClearCacheAndReload).
 		CacheKey: func(f git.ChangedFile) string { return f.Path },
 		Yank:     func(f git.ChangedFile) string { return f.Path },
-		Row: func(f git.ChangedFile, w int, selected bool) string {
-			if f.Path == "" {
-				return rowWithStat(tui.TextStyle(selected).Render("∗ All changes"), tui.DiffStat(f.Added, f.Deleted), w)
-			}
-			prefix := tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status)) + " " + tui.FileIcon(f.Path) + " "
-			return pathRow(prefix, selected, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
-		},
+		Row:      fileRow(marks),
 	}
 
-	return Model{
-		repo:       repo,
-		engines:    engines,
-		staged:     staged,
-		base:       base,
-		target:     target,
-		commitDiff: commitDiff,
-		list:       tui.NewSplitList(cfg, prependAllEntry(files)),
+	m.list = tui.NewSplitList(cfg, m.displayFiles())
+	return m
+}
+
+// fileRow renders a file row: a status glyph (or ✓ when reviewed), file-type
+// icon, path, and +/- stat. The synthetic "All" entry renders its own banner.
+func fileRow(marks *reviewMarks) func(git.ChangedFile, int, bool) string {
+	return func(f git.ChangedFile, w int, selected bool) string {
+		if f.Path == "" {
+			return rowWithStat(tui.TextStyle(selected).Render("∗ All changes"), tui.DiffStat(f.Added, f.Deleted), w)
+		}
+		glyph := tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status))
+		if marks.reviewed(f.Path) {
+			glyph = reviewedGlyph.Render("\uf00c") // Nerd Font check (nf-fa-check)
+		}
+		prefix := glyph + " " + tui.FileIcon(f.Path) + " "
+		return pathRow(prefix, selected, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
 	}
+}
+
+// displayFiles is the list the SplitList shows. In the default view it's every
+// changed file under a synthetic "All" entry. In the unreviewed-only view it's
+// just the not-yet-reviewed files with no "All" row — so as you tick files off,
+// the cursor (reset to the top by the re-filter) lands on the next one to review.
+func (m Model) displayFiles() []git.ChangedFile {
+	if m.unreviewedOnly && m.marks != nil {
+		return m.marks.state.Unreviewed(m.files, m.marks.hashes)
+	}
+	return prependAllEntry(m.files)
+}
+
+// listTitle is the list-pane title: the staged/unstaged toggle (or "changes" for
+// a commit diff), plus the reviewed count — but only once you're actually
+// reviewing (some file marked, or the unreviewed-only filter on), so it doesn't
+// nag "0/N reviewed" at someone who never touches the feature.
+func (m Model) listTitle() string {
+	title := "changes"
+	if !m.commitDiff {
+		title = tui.ToggleTitle("unstaged", "staged", m.staged)
+	}
+	if m.marks == nil {
+		return title
+	}
+	if n, total := m.marks.state.Count(m.marks.hashes), len(m.marks.hashes); total > 0 && (n > 0 || m.unreviewedOnly) {
+		title += fmt.Sprintf(" · %d/%d reviewed", n, total)
+	}
+	if m.unreviewedOnly {
+		title += " · unreviewed"
+	}
+	return title
+}
+
+func (m Model) emptyStatus() string {
+	if m.unreviewedOnly {
+		return "All changes reviewed"
+	}
+	return "No changes found"
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -147,7 +221,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list, m.stream, cmd = tui.AdvanceStream(m.list, m.stream, msg)
 		return m, cmd
 	case tui.EditorClosedMsg:
-		return m.reloadFresh() // the file may have changed
+		// The file may have changed, which can flip its reviewed state.
+		if m.marks != nil {
+			m.marks.hashes = review.ContentHashes(m.repo, m.files)
+			m.list = m.list.SetListTitle(m.listTitle())
+		}
+		return m.reloadFresh()
 	case tea.KeyPressMsg:
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
@@ -170,10 +249,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				line := diff.FirstHunkLine(m.repo.Root(), m.staged, sel.Path)
 				return m, tui.OpenInEditor(m.repo.Root(), sel.Path, line)
 			}
+		case "r":
+			// `r` and `U` are not viewport/list scroll keys, so when reviewing is
+			// off (a commit drilldown) they fall through and do nothing rather than
+			// shadowing a binding. (space/u stay as the viewport's page-scroll keys.)
+			if m.marks != nil {
+				return m.toggleReviewed()
+			}
+		case "U":
+			if m.marks != nil {
+				return m.toggleUnreviewedOnly()
+			}
 		}
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+// toggleReviewed flips the selected file's reviewed mark. In the unreviewed-only
+// view the file then drops out of the list, advancing to the next one.
+func (m Model) toggleReviewed() (tea.Model, tea.Cmd) {
+	sel, ok := m.list.Selected()
+	if m.marks == nil || !ok || sel.Path == "" {
+		return m, nil
+	}
+	m.marks.state.Toggle(sel.Path, m.marks.hashes[sel.Path])
+	m.list = m.list.SetListTitle(m.listTitle())
+	if m.unreviewedOnly {
+		var cmd tea.Cmd
+		m.list, cmd = m.list.SetItems(m.displayFiles())
+		return m, cmd
+	}
+	return m, nil
+}
+
+// toggleUnreviewedOnly switches between showing all changed files and only the
+// ones not yet reviewed.
+func (m Model) toggleUnreviewedOnly() (tea.Model, tea.Cmd) {
+	if m.marks == nil {
+		return m, nil
+	}
+	m.unreviewedOnly = !m.unreviewedOnly
+	m.list = m.list.SetListTitle(m.listTitle()).SetEmptyStatus(m.emptyStatus())
+	var cmd tea.Cmd
+	m.list, cmd = m.list.SetItems(m.displayFiles())
 	return m, cmd
 }
 

@@ -25,6 +25,7 @@ func init() {
 	diffCmd.Flags().Bool("staged", false, "Show staged changes")
 	diffCmd.Flags().Bool("name-only", false, "Only show changed file names")
 	diffCmd.Flags().Bool("tests", false, "Show the test cases the diff touches instead of files")
+	diffCmd.Flags().Bool("unreviewed", false, "Only show files not yet marked reviewed")
 	rootCmd.AddCommand(diffCmd)
 }
 
@@ -71,6 +72,13 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 	files = git.FilterByPaths(files, pathArgs)
 
+	// --unreviewed narrows the non-interactive output to files not yet marked
+	// reviewed (a working-tree concept). The interactive view keeps the full set
+	// and toggles the same filter live with `u`.
+	if unrev, _ := cmd.Flags().GetBool("unreviewed"); unrev && target == "" && mode != output.Interactive {
+		files = filterUnreviewed(repo, files)
+	}
+
 	if nameOnly {
 		return printFileNames(files)
 	}
@@ -105,6 +113,11 @@ func listChangedFiles(repo *git.Repo, staged bool, base, target string) ([]git.C
 	}
 	git.SortByPath(files)
 	return files, nil
+}
+
+// filterUnreviewed drops files whose current content is marked reviewed.
+func filterUnreviewed(repo *git.Repo, files []git.ChangedFile) []git.ChangedFile {
+	return review.LoadReviewed(repo).Unreviewed(files, review.ContentHashes(repo, files))
 }
 
 func printFileNames(files []git.ChangedFile) error {

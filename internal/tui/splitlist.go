@@ -268,6 +268,12 @@ func (m SplitList[T]) SetListTitle(title string) SplitList[T] {
 	return m
 }
 
+// SetEmptyStatus updates the footer message shown when there are no items.
+func (m SplitList[T]) SetEmptyStatus(s string) SplitList[T] {
+	m.cfg.EmptyStatus = s
+	return m
+}
+
 // SetContext updates the header right-context (e.g. the active diff engine).
 func (m SplitList[T]) SetContext(ctx string) SplitList[T] {
 	m.cfg.Context = ctx
