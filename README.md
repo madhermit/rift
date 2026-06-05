@@ -50,6 +50,12 @@ Add `--tests` to `rift diff` or `rift log` to read a change by the *tests* it to
 
 ![rift diff --tests — the tests a change added, renamed, or modified](docs/images/tests.gif)
 
+### Review tracking
+
+In `rift diff`, press `r` to mark the selected file **reviewed** (a `✓` replaces its status glyph) and `U` to show only the files you haven't reviewed yet — so you can walk a large change file by file and watch the list shrink as you tick each one off. A mark is keyed to the file's content, so it **resets the moment the file changes** (e.g. an agent edits it again) and re-applies on revert, making it easy to re-review only what's new. Marks persist per worktree (in `.git/rift/`, uncommitted); `--unreviewed` narrows `--print` / `--json` / `--name-only` to the not-yet-reviewed files.
+
+![rift diff — marking changes reviewed and filtering to what's left](docs/images/reviewed.gif)
+
 ### Interactive staging
 
 `rift stage` replaces `git add -p` with a two-panel TUI: a file list with structural diff preview and hunk-level staging, the active hunk clearly marked in the gutter.
