@@ -7,10 +7,12 @@ pre-1.0).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-08
+
 ### Added
 
 - Mark changes reviewed in `rift diff`: press `r` to tick off the selected file
-  (a ✓ replaces its status glyph) and `u` to show only the files you haven't
+  (a ✓ replaces its status glyph) and `U` to show only the files you haven't
   reviewed yet — so you can walk a large change file by file and watch the list
   shrink. A mark is keyed to the file's content, so it resets the moment the file
   changes (e.g. an agent edits it again) and persists across runs, making it easy
@@ -158,7 +160,8 @@ tightened around what it does best.
 
 - The `branch` command. rift no longer manages branches or worktrees.
 
-[Unreleased]: https://github.com/madhermit/rift/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/madhermit/rift/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/madhermit/rift/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/madhermit/rift/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/madhermit/rift/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/madhermit/rift/compare/v0.3.1...v0.4.0
