@@ -3,6 +3,7 @@ package diff
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -11,11 +12,36 @@ type fallbackEngine struct{}
 
 func (f *fallbackEngine) Name() string { return "git-diff" }
 
+// Diff shells `git diff` for one file. An untracked file yields no output there
+// (git diff only covers tracked content), so an empty worktree-scope result is
+// re-checked: if the file is untracked, it's diffed against the null device
+// instead so its content renders as a new-file diff — matching the difftastic
+// engine, which reaches the same result via its failed `git show :file`.
 func (f *fallbackEngine) Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
 	args := buildGitDiffArgs(opts, file, true)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot
-	return runGitDiff(cmd, "git diff")
+	out, err := runGitDiff(cmd, "git diff")
+	if err != nil || strings.TrimSpace(out) != "" {
+		return out, err
+	}
+	worktreeScope := !opts.Staged && opts.Base == "" && opts.Target == ""
+	if !worktreeScope || !isUntracked(ctx, repoRoot, file) {
+		return out, nil
+	}
+	args = append(buildGitDiffArgs(opts, "", true), "--no-index", "--", os.DevNull, file)
+	cmd = exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoRoot
+	return runGitDiff(cmd, "git diff untracked")
+}
+
+// isUntracked reports whether file is absent from the index (`ls-files
+// --error-unmatch` exits non-zero for it). Only consulted when a worktree diff
+// came back empty, to tell "unchanged" from "untracked".
+func isUntracked(ctx context.Context, repoRoot, file string) bool {
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--error-unmatch", "--", file)
+	cmd.Dir = repoRoot
+	return cmd.Run() != nil
 }
 
 func (f *fallbackEngine) DiffHunks(_ context.Context, hunks []Hunk, _, _ string, color bool, _ int) []string {

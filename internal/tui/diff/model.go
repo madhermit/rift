@@ -83,7 +83,7 @@ func pathRow(prefix string, selected bool, path, stat string, w int) string {
 	return rowWithStat(prefix+tui.RenderPath(path, avail, selected), stat, w)
 }
 
-func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string, lensToggle bool, paths []string) Model {
+func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string, lensToggle bool, paths []string, unreviewed bool) Model {
 	commitDiff := target != ""
 	engines := tui.NewEngineToggle(engine)
 
@@ -105,6 +105,9 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		files:      files,
 		paths:      paths,
 		marks:      marks,
+		// --unreviewed opens with the same filter the `U` key toggles live; a
+		// commit diff has no review state, so the flag is meaningless there.
+		unreviewedOnly: unreviewed && !commitDiff,
 	}
 
 	hints := [][2]string{{"/", "filter"}, {"⇥", "read"}}

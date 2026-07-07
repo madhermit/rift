@@ -29,16 +29,17 @@ type Model struct {
 	scope  review.DiffScope
 	files  []git.ChangedFile
 
-	filesLens tui.PreviewChild // built lazily / at New; nil until first shown
-	testsLens tui.PreviewChild
-	showTests bool
-	gen       int
-	width     int
-	height    int
+	filesLens  tui.PreviewChild // built lazily / at New; nil until first shown
+	testsLens  tui.PreviewChild
+	showTests  bool
+	unreviewed bool // open the file lens with the unreviewed-only filter on
+	gen        int
+	width      int
+	height     int
 }
 
-func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope review.DiffScope, showTests bool) Model {
-	m := Model{repo: repo, engine: engine, scope: scope, files: files, showTests: showTests}
+func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope review.DiffScope, showTests, unreviewed bool) Model {
+	m := Model{repo: repo, engine: engine, scope: scope, files: files, showTests: showTests, unreviewed: unreviewed}
 	if showTests {
 		m.testsLens = m.buildTests() // sync at startup is fine
 	} else {
@@ -48,7 +49,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope revi
 }
 
 func (m Model) buildFiles() tui.PreviewChild {
-	return diffui.New(m.repo, m.engine, m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true, m.scope.Paths)
+	return diffui.New(m.repo, m.engine, m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true, m.scope.Paths, m.unreviewed)
 }
 
 func (m Model) buildTests() tui.PreviewChild {

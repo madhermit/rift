@@ -1,8 +1,13 @@
 package diff
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -115,5 +120,48 @@ func TestNewEngine(t *testing.T) {
 	name := engine.Name()
 	if name != "difftastic" && name != "git-diff" {
 		t.Errorf("NewEngine().Name() = %q, want \"difftastic\" or \"git-diff\"", name)
+	}
+}
+
+// TestFallbackEngineUntracked covers the plain engine's untracked-file path: an
+// untracked file yields no `git diff` output, so it must render against the null
+// device as a new-file diff — while an unchanged tracked file stays empty.
+func TestFallbackEngineUntracked(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("config", "user.email", "t@t.co")
+	run("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("same\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "tracked.txt")
+	run("commit", "-qm", "c1")
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &fallbackEngine{}
+	out, err := e.Diff(context.Background(), dir, "new.txt", DiffOpts{})
+	if err != nil {
+		t.Fatalf("untracked diff: %v", err)
+	}
+	if !strings.Contains(out, "+hello") {
+		t.Errorf("untracked file should render as a new-file diff, got %q", out)
+	}
+
+	out, err = e.Diff(context.Background(), dir, "tracked.txt", DiffOpts{})
+	if err != nil {
+		t.Fatalf("tracked diff: %v", err)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("unchanged tracked file should stay empty, got %q", out)
 	}
 }

@@ -84,8 +84,11 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	// reviewed (a working-tree concept). --name-only prints a plain listing even
 	// on a TTY, so gate on "emitting a listing" (non-interactive mode or
 	// --name-only) to keep the piped and on-TTY file sets identical. The
-	// interactive view keeps the full set and toggles the same filter live with `U`.
-	if unrev, _ := cmd.Flags().GetBool("unreviewed"); unrev && target == "" && (mode != output.Interactive || nameOnly) {
+	// interactive view instead keeps the full set and opens with the same live
+	// filter the `U` key toggles, so it can be switched off without restarting.
+	unrev, _ := cmd.Flags().GetBool("unreviewed")
+	unrev = unrev && target == ""
+	if unrev && (mode != output.Interactive || nameOnly) {
 		files = filterUnreviewed(repo, files)
 	}
 
@@ -99,7 +102,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	case output.Print:
 		return printDiffs(engine, repo, files, staged, base, target)
 	default:
-		m := lensui.New(repo, engine, files, scope, tests)
+		m := lensui.New(repo, engine, files, scope, tests, unrev)
 		_, err := tea.NewProgram(m).Run()
 		return err
 	}

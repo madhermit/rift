@@ -22,12 +22,12 @@ func (stubEngine) DiffHunks(context.Context, []diff.Hunk, string, string, bool, 
 // changes" row is shown over zero files, so the empty status becomes reachable.
 func TestDisplayFilesEmpty(t *testing.T) {
 	// A commit diff (target set) skips reviewed marks, so it needs no repo.
-	m := New(nil, stubEngine{}, nil, false, "base", "target", false, nil)
+	m := New(nil, stubEngine{}, nil, false, "base", "target", false, nil, false)
 	if got := m.displayFiles(); got != nil {
 		t.Errorf("empty changeset should display no rows, got %v", got)
 	}
 	// With files present, the synthetic All row leads the list.
-	m = New(nil, stubEngine{}, []git.ChangedFile{{Path: "a.go"}}, false, "base", "target", false, nil)
+	m = New(nil, stubEngine{}, []git.ChangedFile{{Path: "a.go"}}, false, "base", "target", false, nil, false)
 	got := m.displayFiles()
 	if len(got) != 2 || got[0].Path != "" || got[0].Status != "All" {
 		t.Errorf("non-empty changeset should prepend the All row, got %v", got)

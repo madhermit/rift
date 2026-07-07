@@ -292,7 +292,7 @@ func commitFiles(repo *git.Repo, hash string) (base string, files []git.ChangedF
 // and the hidden list preview shouldn't keep difftastic busy.
 func (m Model) drillInto(commit git.CommitInfo) (tea.Model, tea.Cmd) {
 	base, files, err := commitFiles(m.repo, commit.Hash)
-	dv := diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash, false, nil)
+	dv := diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash, false, nil, false)
 	if err != nil {
 		// Surface the load failure instead of an indistinguishable "No changes found".
 		dv = dv.SetEmptyStatus(fmt.Sprintf("could not load commit diff: %v", err))

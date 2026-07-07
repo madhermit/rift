@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -232,7 +233,7 @@ func (r *Repo) isParentless(ref string) (bool, error) {
 // absent. The hash is object-format dependent (differs under SHA-256), so it must
 // come from git rather than a hardcoded constant.
 func (r *Repo) emptyTreeHash() (string, error) {
-	out, err := r.runGit("hash-object", "-w", "-t", "tree", "/dev/null")
+	out, err := r.runGit("hash-object", "-w", "-t", "tree", os.DevNull)
 	if err != nil {
 		return "", err
 	}

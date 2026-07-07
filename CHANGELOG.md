@@ -7,6 +7,85 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Added
+
+- Releases now publish a `SHA256SUMS` file, and `install.sh` verifies the
+  downloaded binary against it (degrading with a warning for older releases
+  without one). A third-party license bundle is attached to releases as well.
+- `install.sh` now points at shell completion (`rift completion bash|zsh|fish`),
+  and the README documents completion, `rift log --all`, `-- <path>` scoping on
+  `diff`/`log`, and `rift version --json`.
+
+### Changed
+
+- `rift stash` now asks for an inline y/n confirmation before `p` (pop) and `x`
+  (drop), and action keys only fire from the list pane. `rift log` likewise
+  confirms `c` (cherry-pick) and `r` (revert) before running them.
+- `rift diff --staged` now errors when combined with a commit argument instead of
+  rendering a file list and diffs that disagree about the base.
+- `rift log` now errors when given more than one commit ref instead of silently
+  logging only the first.
+- The editor for `o` is now resolved from `$VISUAL` before `$EDITOR` (the
+  git/POSIX convention), and blank or whitespace-only values fall through to the
+  next choice instead of crashing the TUI.
+- difftastic is now installed from a pinned, checksum-verified release (was
+  `latest`, unverified), written atomically, validated before use, and a failed
+  download is remembered for an hour instead of stalling every command retrying.
+
+### Fixed
+
+- `rift diff <ref>` now lists the files that differ between the working tree and
+  the ref — committed changes since the ref were previously invisible while each
+  file's preview still diffed against it.
+- `rift log --all` now works in bare-repo linked-worktree layouts (it previously
+  printed nothing there), lists commits in commit-time order under `-n`, and
+  includes tag-only and detached-HEAD commits.
+- Non-ASCII and other quotable file paths are no longer dropped or shown
+  C-quoted in diffs, hunk staging, the tests lens, and `--json` output, and they
+  get accurate line stats.
+- Untracked files now render in `rift diff --print` and in TUI previews on the
+  plain git-diff engine (they were listed but showed no content).
+- Deleted tracked files now render as a deletion diff in the TUI instead of
+  "diff unavailable".
+- Commit-range diffs (`rift diff A B`) now report real added/deleted line counts
+  in `--json` and list rows instead of zeros.
+- `rift diff --unreviewed` now applies interactively too (it opens the TUI with
+  the unreviewed-only filter on), and `--name-only --unreviewed` filters
+  identically on a TTY and piped.
+- `rift diff --tests` no longer crashes on a bodyless Go test declaration, no
+  longer lists test-shaped functions from production (non-test) files, surfaces
+  tests weakened by deletion-only edits, no longer floods with false "added"
+  tests when a test file is renamed, and shows nested `t.Run` subtests under
+  their full path.
+- Empty repos, non-repos, and bare git dirs now get clear errors ("no commits
+  yet", "not a git repository…", "bare repository — run from a worktree"), and
+  shelled-git failures include git's actual message instead of a bare exit
+  status.
+- Reviewed marks are written atomically and merged across concurrent rift panes
+  instead of last-write-wins; a corrupt marks file is preserved as `.corrupt`
+  rather than silently reset.
+- In `rift stage`, a slow diff render can no longer land on the wrong file and
+  stage a mismatched hunk; hunks stay in file order after staging (they no
+  longer regroup by state); and renders are cached, so navigating and filtering
+  no longer re-run difftastic on every keystroke.
+- Switching panes with `⇥` no longer blanks the preview, restarts its diff, or
+  loses the scroll position; large streamed previews no longer re-wrap the whole
+  buffer on every chunk (progressively slower keystrokes on big changesets); and
+  navigating to an already-cached item now cancels the superseded stream instead
+  of letting it run difftastic to completion in the background.
+- An empty changeset now shows "No changes found" instead of a blank "All
+  changes" row; a menu filter with no matches says "no matches" instead of
+  "1/0"; a failed commit-diff load in the log drilldown surfaces its error; and
+  editing a file from `rift diff` refreshes the file list (a reverted file no
+  longer lingers with stale stats).
+- Fresh `go install` builds now report their module version from build info
+  instead of "dev".
+
+### Removed
+
+- The unimplemented `--format` flag (it was advertised on every command and
+  silently ignored). `--print` and `--json` are unchanged.
+
 ## [0.5.0] - 2026-06-08
 
 ### Added
