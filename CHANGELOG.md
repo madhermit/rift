@@ -28,6 +28,10 @@ pre-1.0).
   `esc back` hint in the footer.
 - The tests lens shows a "collecting tests…" note while it parses a large diff
   instead of appearing to ignore the keypress.
+- `rift stage`'s file list supports the vim jump keys (`gg`/`G`,
+  `ctrl+d`/`ctrl+u`, `ctrl+f`/`ctrl+b`) like every other list pane, and
+  `ctrl+f`/`ctrl+b` now page through list panes (and the menu), not just the
+  preview. The README gains a keybinding reference table.
 - Releases now publish a `SHA256SUMS` file, and `install.sh` verifies the
   downloaded binary against it (degrading with a warning for older releases
   without one). A third-party license bundle is attached to releases as well.
@@ -47,6 +51,10 @@ pre-1.0).
   matches, instead of resetting to the top on every keystroke.
 - `rift log` ignores `c`/`r` while the preview pane is focused (matching
   stash's action keys), so reading a diff can't trigger a cherry-pick prompt.
+- `rift stage` hunk navigation is now `{`/`}` — the same key that steps
+  sections on every other screen; the extra `n`/`p` aliases were removed so `p`
+  unambiguously means pop (stash). The menu's help overlay now documents its
+  actual keys, including that `esc` quits the launchpad.
 - `rift stash` now asks for an inline y/n confirmation before `p` (pop) and `x`
   (drop), and action keys only fire from the list pane. `rift log` likewise
   confirms `c` (cherry-pick) and `r` (revert) before running them.
