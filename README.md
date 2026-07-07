@@ -146,7 +146,13 @@ The `menu` launchpad is a plain list: `⏎` selects, `/` filters, and `esc`/`q` 
 
 ## Installation
 
-The install script downloads the right prebuilt binary for your platform and verifies its checksum against the release's `SHA256SUMS`:
+On macOS or Linux with [Homebrew](https://brew.sh):
+
+```bash
+brew install madhermit/tap/rift
+```
+
+Or the install script, which downloads the right prebuilt binary for your platform and verifies its checksum against the release's `SHA256SUMS`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/madhermit/rift/main/install.sh | bash
