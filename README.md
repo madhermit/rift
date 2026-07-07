@@ -2,9 +2,9 @@
 
 Syntax-aware, worktree-aware, composable fuzzy git tool.
 
-rift wraps the git workflows where UX is the bottleneck — staging, diffing, log browsing, stashing — with structural understanding via [difftastic](https://difftastic.wilfred.me.uk/) and composable output that works for both humans and scripts.
+Most of a developer's time with code is no longer spent writing it — it's spent reviewing, parsing, and grokking changes that someone, or something, else wrote. rift is a git tool built for that shift.
 
-It's built for *reading* changes as much as making them: diffs understand your code's syntax instead of its lines, files can be ticked off as reviewed and re-surface only when they change again, and the `--tests` lens reads a change by the tests it touches — so a quietly deleted assertion in a large (or agent-written) diff has nowhere to hide.
+It wraps the git workflows where UX is the bottleneck — diffing, staging, log browsing, stashing — with structural understanding via [difftastic](https://difftastic.wilfred.me.uk/) and composable output that works for both humans and scripts. And it treats review as a first-class workflow: mark files reviewed and have them re-surface only when their content changes again, and read a change by the tests it touches with the `--tests` lens — so a quietly deleted assertion in an agent-written diff has nowhere to hide.
 
 ```
 rift              # contextual launchpad
@@ -28,6 +28,8 @@ rift is **worktree-aware** — every command reads correctly inside bare-repo an
 [lazygit](https://github.com/jesseduffield/lazygit) is the gold standard for git TUIs, but it's a resident app you live inside, with no composable output and line-based diffs.
 
 rift occupies the space between them: **transient** (invoke, act, return to shell), **structural** (diffs understand your code's syntax), and **composable** (every command has `--print` and `--json` modes).
+
+The bet behind it: as agents write more of the code, the scarce human activity becomes *reading* it — so a git tool should be built for review first, and none of the above are.
 
 ## Key Features
 
