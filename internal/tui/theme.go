@@ -345,9 +345,9 @@ var (
 		{"{/}", "prev / next section"},
 		{"ctrl+d/u", "scroll half-page"},
 		{"ctrl+f/b", "scroll page"},
-		{"esc", "back"},
+		{"esc", "leave mode"},
 	}
-	BasicHelpKeys = [][2]string{{"esc", "back"}}
+	BasicHelpKeys = [][2]string{{"esc", "leave mode"}}
 )
 
 // HelpView renders a keybinding overlay: header + a panel listing the screen's

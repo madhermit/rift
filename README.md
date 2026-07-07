@@ -103,7 +103,7 @@ Run `rift completion --help` for per-shell install instructions.
 
 ### Shared TUI
 
-Every screen behaves the same: type `/` to fuzzy-filter, `⇥` to switch panes, vim keys (`j`/`k`, `gg`/`G`, `ctrl-d`/`u`) to move and scroll, `J`/`K` (or `]`/`[`) to step to the next/previous item while reading, `\` to toggle the diff layout, `e` to switch diff engines, `y` to yank the selection, `o` to open a file in `$EDITOR` at the change, `?` for the keybinding overlay, and `esc` to leave the current mode (filter, help, or a drilldown). `esc` never quits a work screen — use `q` or `ctrl-c`.
+Every screen behaves the same: type `/` to fuzzy-filter, `⇥` to switch panes, vim keys (`j`/`k`, `gg`/`G`, `ctrl-d`/`u`) to move and scroll, `J`/`K` (or `]`/`[`) to step to the next/previous item while reading, `\` to toggle the diff layout (stage's per-hunk view has a fixed layout), `e` to switch diff engines, `y` to yank the selection, `o` to open a file in `$EDITOR` at the change, `?` for the keybinding overlay, and `esc` to leave the current mode (filter, help, or a drilldown). `esc` never quits a work screen — use `q` or `ctrl-c`.
 
 ### Environment
 

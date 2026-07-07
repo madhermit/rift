@@ -9,6 +9,25 @@ pre-1.0).
 
 ### Added
 
+- Adaptive light/dark theme: rift now asks the terminal for its background color
+  and picks a readable palette (previously the hardcoded dark palette was
+  near-invisible on light terminals). `RIFT_THEME=light|dark` forces a palette;
+  the default without an answer stays dark.
+- `RIFT_ICONS=ascii` (or `none`) suppresses Nerd Font file icons for terminals
+  without a patched font; the icon column drops out cleanly. The reviewed marker
+  is now a standard `✓` in any font.
+- Yank (`y`) falls back to an OSC 52 escape when no system clipboard is
+  available, so copying works over SSH and in headless sessions.
+- `rift stage` gains `y` (yank path), `e` (engine toggle), and `J`/`K` (or
+  `]`/`[`) to step files while the diff pane is focused — matching the other
+  screens.
+- `gg`/`G` and `ctrl+d`/`ctrl+u` now also move the selection when the list pane
+  is focused (previously they only scrolled the preview).
+- Drilldowns now show where you are: a log drilldown is titled
+  `log ❯ <hash>` (and `log ❯ <hash> ❯ tests` for the tests lens), with an
+  `esc back` hint in the footer.
+- The tests lens shows a "collecting tests…" note while it parses a large diff
+  instead of appearing to ignore the keypress.
 - Releases now publish a `SHA256SUMS` file, and `install.sh` verifies the
   downloaded binary against it (degrading with a warning for older releases
   without one). A third-party license bundle is attached to releases as well.
@@ -18,6 +37,16 @@ pre-1.0).
 
 ### Changed
 
+- `esc` now consistently leaves the current mode (filter, help, confirmation,
+  drilldown) and never quits a work screen — `rift stage` previously quit on
+  esc. Quitting is `q` or `ctrl+c` everywhere.
+- The `rift` launchpad menu is no longer one-shot: quitting a screen you opened
+  from the menu returns to the menu. Screens that ran a git write (stash
+  apply/pop/drop, cherry-pick/revert) still exit so git's output stays visible.
+- Typing in the fuzzy filter keeps your selection when the selected item still
+  matches, instead of resetting to the top on every keystroke.
+- `rift log` ignores `c`/`r` while the preview pane is focused (matching
+  stash's action keys), so reading a diff can't trigger a cherry-pick prompt.
 - `rift stash` now asks for an inline y/n confirmation before `p` (pop) and `x`
   (drop), and action keys only fire from the list pane. `rift log` likewise
   confirms `c` (cherry-pick) and `r` (revert) before running them.
