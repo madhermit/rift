@@ -149,6 +149,23 @@ func TestLog_BadRef(t *testing.T) {
 	}
 }
 
+func TestLog_NoCommits(t *testing.T) {
+	dir := t.TempDir()
+	r, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	repo := &Repo{repo: r, root: dir}
+
+	_, err = repo.Log("HEAD", 0, nil)
+	if err == nil {
+		t.Fatal("expected an error for a repo with no commits, got nil")
+	}
+	if err.Error() != "no commits yet" {
+		t.Errorf("error = %q, want %q", err.Error(), "no commits yet")
+	}
+}
+
 func TestLogAll(t *testing.T) {
 	repo := setupTestRepo(t)
 

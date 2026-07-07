@@ -2,7 +2,6 @@ package git
 
 import (
 	"fmt"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,21 +65,26 @@ func (r *Repo) ChangedFiles(staged bool) ([]ChangedFile, error) {
 
 // addStats fills in per-file added/deleted line counts from git diff --numstat.
 // Best-effort: stats are a display nicety, so failures leave counts at zero.
+// --no-renames matches statusFiles (a rename is a delete + an add on the real
+// paths) so both paths agree, and -z keeps non-ASCII paths verbatim instead of
+// C-quoted — otherwise the quoted key never matches a file's plain path.
 func (r *Repo) addStats(files []ChangedFile, staged bool) {
 	if len(files) == 0 {
 		return // nothing to annotate; skip the git subprocess
 	}
-	args := []string{"diff", "--numstat"}
+	args := []string{"diff", "--numstat", "--no-renames", "-z"}
 	if staged {
 		args = append(args, "--staged")
 	}
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.root
-	out, err := cmd.Output()
+	out, err := r.runGit(args...)
 	if err != nil {
 		return
 	}
-	stats := parseNumstat(string(out))
+	applyNumstat(files, parseNumstatZ(out))
+}
+
+// applyNumstat copies added/deleted counts onto files matched by path.
+func applyNumstat(files []ChangedFile, stats map[string][2]int) {
 	for i := range files {
 		if s, ok := stats[files[i].Path]; ok {
 			files[i].Added, files[i].Deleted = s[0], s[1]
@@ -88,11 +92,16 @@ func (r *Repo) addStats(files []ChangedFile, staged bool) {
 	}
 }
 
-// parseNumstat parses "added\tdeleted\tpath" lines. Binary files report "-".
-func parseNumstat(out string) map[string][2]int {
+// parseNumstatZ parses `git diff --numstat -z --no-renames` output: NUL-
+// terminated "added\tdeleted\tpath" records. Binary files report "-" for the
+// counts, which Atoi maps to 0. -z keeps the path verbatim (no C-quoting).
+func parseNumstatZ(out string) map[string][2]int {
 	stats := make(map[string][2]int)
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		parts := strings.SplitN(line, "\t", 3)
+	for _, rec := range strings.Split(out, "\x00") {
+		if rec == "" {
+			continue
+		}
+		parts := strings.SplitN(rec, "\t", 3)
 		if len(parts) != 3 {
 			continue
 		}
@@ -103,22 +112,21 @@ func parseNumstat(out string) map[string][2]int {
 	return stats
 }
 
-func parseNameStatus(out string) []ChangedFile {
+// parseNameStatusZ parses `git diff --name-status -z --no-renames` (and the
+// equivalent diff-tree) output: NUL-separated fields alternating STATUS, PATH.
+// With renames disabled there are no three-field rename records, so every entry
+// is a clean pair and non-ASCII paths come through verbatim (no C-quoting).
+func parseNameStatusZ(out string) []ChangedFile {
+	fields := strings.Split(out, "\x00")
 	var files []ChangedFile
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line == "" {
-			continue
-		}
-		// A rename/copy row has three tab fields ("R100\told\tnew"); the new path
-		// is last. A plain change has two ("M\tpath"). Take the final field either
-		// way so a renamed path isn't returned as the literal "old\tnew".
-		parts := strings.Split(line, "\t")
-		if len(parts) < 2 {
+	for i := 0; i+1 < len(fields); i += 2 {
+		status, path := fields[i], fields[i+1]
+		if status == "" || path == "" {
 			continue
 		}
 		files = append(files, ChangedFile{
-			Path:   parts[len(parts)-1],
-			Status: nameStatusCode(parts[0]),
+			Path:   path,
+			Status: nameStatusCode(status),
 		})
 	}
 	return files
@@ -152,31 +160,94 @@ func DiffTargets(args []string) (base, target string, err error) {
 	}
 }
 
-// DiffBetweenCommits lists the files changed between two refs. It shells out to
-// git: a tree-to-tree diff is fast (it never walks the worktree) and git
-// resolves refs correctly in every layout, including the linked worktrees where
-// go-git can't (go-git#1842). It uses two args (not the `a..b` range, which
-// rejects a tree on either side); for a root commit (base = the empty tree,
-// whose object may not be in the odb) it uses `diff-tree --root` against target.
+// DiffBetweenCommits lists the files changed between two refs, with per-file
+// line stats. It shells out to git: a tree-to-tree diff is fast (it never walks
+// the worktree) and git resolves refs correctly in every layout, including the
+// linked worktrees where go-git can't (go-git#1842). It uses two args (not the
+// `a..b` range, which rejects a tree on either side).
+//
+// EmptyTree as the base means "diff target's whole content against nothing". For
+// a parentless (root) commit that's `diff-tree --root`; git synthesizes the empty
+// tree internally, so the object needn't be in the odb. For a non-root target,
+// `diff-tree --root` would wrongly diff against the parent, so we diff against the
+// real empty-tree object (resolved from git, since its hash is object-format
+// dependent) instead.
 //
 // --no-renames keeps a rename as a delete + an add (like statusFiles), so a
 // renamed file in a commit drilldown renders correctly instead of as a whole
 // addition — the new path doesn't exist at the base, so the diff engine would
 // extract a /dev/null old side for it.
 func (r *Repo) DiffBetweenCommits(baseRef, targetRef string) ([]ChangedFile, error) {
-	var args []string
+	base, useRoot := baseRef, false
 	if baseRef == EmptyTree {
-		args = []string{"diff-tree", "--root", "--no-commit-id", "--name-status", "--no-renames", "-r", targetRef}
-	} else {
-		args = []string{"diff", "--name-status", "--no-renames", baseRef, targetRef}
+		parentless, err := r.isParentless(targetRef)
+		if err != nil {
+			return nil, err
+		}
+		if parentless {
+			useRoot = true
+		} else if base, err = r.emptyTreeHash(); err != nil {
+			return nil, err
+		}
 	}
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.root
-	out, err := cmd.Output()
+	return changedFilesWithStats(func(format string) (string, error) {
+		if useRoot {
+			return r.runGit("diff-tree", "--root", "--no-commit-id", format, "--no-renames", "-z", "-r", targetRef)
+		}
+		return r.runGit("diff", format, "--no-renames", "-z", base, targetRef)
+	})
+}
+
+// changedFilesWithStats runs the same NUL-separated diff twice — once for
+// --name-status (path + change kind), once for --numstat (line counts) — and
+// merges them into ChangedFiles. run selects the revisions; only the format flag
+// differs between the two calls.
+func changedFilesWithStats(run func(format string) (string, error)) ([]ChangedFile, error) {
+	nameOut, err := run("--name-status")
 	if err != nil {
-		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return nil, err
 	}
-	return parseNameStatus(string(out)), nil
+	files := parseNameStatusZ(nameOut)
+
+	numOut, err := run("--numstat")
+	if err != nil {
+		return nil, err
+	}
+	applyNumstat(files, parseNumstatZ(numOut))
+	return files, nil
+}
+
+// isParentless reports whether ref has no parent commit (a root commit). git
+// rev-list --parents -n 1 prints "<hash> <parent>..."; a lone hash means no
+// parent.
+func (r *Repo) isParentless(ref string) (bool, error) {
+	out, err := r.runGit("rev-list", "--parents", "-n", "1", ref)
+	if err != nil {
+		return false, err
+	}
+	return len(strings.Fields(out)) <= 1, nil
+}
+
+// emptyTreeHash returns this repo's empty-tree object hash, writing the object if
+// absent. The hash is object-format dependent (differs under SHA-256), so it must
+// come from git rather than a hardcoded constant.
+func (r *Repo) emptyTreeHash() (string, error) {
+	out, err := r.runGit("hash-object", "-w", "-t", "tree", "/dev/null")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// DiffAgainstRef lists the files that differ between the working tree and baseRef
+// (like `git diff <ref>`), with per-file line stats. This is the single-ref diff
+// scope: it surfaces both committed and uncommitted changes since baseRef, so the
+// listing matches the per-file preview, which also diffs the working tree against
+// baseRef. Untracked files are excluded, matching `git diff <ref>` semantics.
+func (r *Repo) DiffAgainstRef(baseRef string) ([]ChangedFile, error) {
+	return changedFilesWithStats(func(format string) (string, error) {
+		return r.runGit("diff", format, "--no-renames", "-z", baseRef)
+	})
 }
 
 func matchPath(file string, paths []string) bool {

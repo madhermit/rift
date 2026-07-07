@@ -1,7 +1,7 @@
 package git
 
 import (
-	"fmt"
+	"errors"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -40,12 +40,13 @@ func (r *Repo) Log(ref string, maxCount int, paths []string) ([]CommitInfo, erro
 	return commits, nil
 }
 
+// LogAll lists commits across all refs. It always shells out to `git log --all`:
+// go-git returns zero refs in bare-repo linked-worktree layouts (go-git#1842)
+// without erroring, so a go-git path would silently show nothing there; git also
+// handles the commit-time ordering, --max-count, tag-only and detached-HEAD
+// commits that a per-ref walk misses.
 func (r *Repo) LogAll(maxCount int, paths []string) ([]CommitInfo, error) {
-	commits, err := r.logAllGoGit(maxCount, paths)
-	if err != nil {
-		return logShell(r.root, "", maxCount, true, paths)
-	}
-	return commits, nil
+	return logShell(r.root, "", maxCount, true, paths)
 }
 
 func (r *Repo) logGoGit(from plumbing.Hash, maxCount int, paths []string) ([]CommitInfo, error) {
@@ -77,54 +78,6 @@ func (r *Repo) logGoGit(from plumbing.Hash, maxCount int, paths []string) ([]Com
 	return commits, nil
 }
 
-func (r *Repo) logAllGoGit(maxCount int, paths []string) ([]CommitInfo, error) {
-	refs, err := r.repo.References()
-	if err != nil {
-		return nil, err
-	}
-	defer refs.Close()
-
-	seen := map[plumbing.Hash]bool{}
-	commits := []CommitInfo{}
-
-	err = refs.ForEach(func(ref *plumbing.Reference) error {
-		if maxCount > 0 && len(commits) >= maxCount {
-			return storer.ErrStop
-		}
-		if !ref.Name().IsBranch() && !ref.Name().IsRemote() {
-			return nil
-		}
-		opts := &gogit.LogOptions{
-			From:  ref.Hash(),
-			Order: gogit.LogOrderCommitterTime,
-		}
-		if len(paths) > 0 {
-			opts.PathFilter = func(file string) bool { return matchPath(file, paths) }
-		}
-		iter, err := r.repo.Log(opts)
-		if err != nil {
-			return nil
-		}
-		defer iter.Close()
-
-		return iter.ForEach(func(c *object.Commit) error {
-			if maxCount > 0 && len(commits) >= maxCount {
-				return storer.ErrStop
-			}
-			if seen[c.Hash] {
-				return nil
-			}
-			seen[c.Hash] = true
-			commits = append(commits, commitToInfo(c))
-			return nil
-		})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return commits, nil
-}
-
 // logShell falls back to shelling out to git log when go-git can't handle the
 // request: bare-repo worktree layouts, or commit ranges (a..b) that go-git
 // can't resolve. dir is the repo root the command runs in.
@@ -149,9 +102,30 @@ func logShell(dir, ref string, maxCount int, all bool, paths []string) ([]Commit
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git log: %w", err)
+		if isUnbornHead(ref, err) {
+			return nil, errors.New("no commits yet")
+		}
+		return nil, gitErr("git log", err)
 	}
 	return parseGitLogOutput(string(out), fieldSep, recordSep), nil
+}
+
+// isUnbornHead reports whether a `git log` failure is the empty-repo case: HEAD
+// points at a branch with no commits yet. The default log shells `git log HEAD`,
+// which fails as an ambiguous 'HEAD' rather than the bare "no commits yet", so we
+// accept both — but only for the default HEAD scope, so an explicit bad ref keeps
+// surfacing git's real "unknown revision" error.
+func isUnbornHead(ref string, err error) bool {
+	if ref != "" && ref != "HEAD" {
+		return false
+	}
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		return false
+	}
+	msg := string(ee.Stderr)
+	return strings.Contains(msg, "does not have any commits yet") ||
+		strings.Contains(msg, "ambiguous argument 'HEAD'")
 }
 
 func parseGitLogOutput(out, fieldSep, recordSep string) []CommitInfo {
@@ -183,13 +157,6 @@ func parseGitLogOutput(out, fieldSep, recordSep string) []CommitInfo {
 func formatShellDate(s string) string {
 	if len(s) >= 16 {
 		return s[:16]
-	}
-	return s
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
 	}
 	return s
 }

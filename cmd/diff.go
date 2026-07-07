@@ -53,6 +53,14 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// --staged compares the index against HEAD; a commit argument names a
+	// different base entirely. The file list and the per-file diffs would then
+	// disagree (the list honors the ref, each diff honors --staged), so reject
+	// the combination rather than render mismatched content.
+	if staged && base != "" {
+		return fmt.Errorf("--staged cannot be combined with a commit argument")
+	}
+
 	// Committed() keys on Target, so a working-tree scope ignores Base and a
 	// committed range ignores Staged — one literal covers both.
 	scope := review.DiffScope{Staged: staged, Base: base, Target: target, Paths: pathArgs}
@@ -72,10 +80,12 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 	files = git.FilterByPaths(files, pathArgs)
 
-	// --unreviewed narrows the non-interactive output to files not yet marked
-	// reviewed (a working-tree concept). The interactive view keeps the full set
-	// and toggles the same filter live with `u`.
-	if unrev, _ := cmd.Flags().GetBool("unreviewed"); unrev && target == "" && mode != output.Interactive {
+	// --unreviewed narrows any non-interactive listing to files not yet marked
+	// reviewed (a working-tree concept). --name-only prints a plain listing even
+	// on a TTY, so gate on "emitting a listing" (non-interactive mode or
+	// --name-only) to keep the piped and on-TTY file sets identical. The
+	// interactive view keeps the full set and toggles the same filter live with `U`.
+	if unrev, _ := cmd.Flags().GetBool("unreviewed"); unrev && target == "" && (mode != output.Interactive || nameOnly) {
 		files = filterUnreviewed(repo, files)
 	}
 
@@ -100,9 +110,16 @@ func listChangedFiles(repo *git.Repo, staged bool, base, target string) ([]git.C
 		files []git.ChangedFile
 		err   error
 	)
-	if target != "" {
+	switch {
+	case target != "":
+		// Committed range: base..target, tree to tree.
 		files, err = repo.DiffBetweenCommits(base, target)
-	} else {
+	case base != "":
+		// Single ref: working tree vs base, so committed changes since the ref
+		// show up too (not just the worktree-vs-HEAD delta), matching the
+		// per-file preview which also diffs against base.
+		files, err = repo.DiffAgainstRef(base)
+	default:
 		files, err = repo.ChangedFiles(staged)
 	}
 	if err != nil {
@@ -131,12 +148,7 @@ func printFileNames(files []git.ChangedFile) error {
 func printDiffs(engine diff.Engine, repo *git.Repo, files []git.ChangedFile, staged bool, base, target string) error {
 	ctx := context.Background()
 	for _, f := range files {
-		out, err := engine.Diff(ctx, repo.Root(), f.Path, diff.DiffOpts{
-			Staged: staged,
-			Base:   base,
-			Target: target,
-			Color:  false,
-		})
+		out, err := fileDiff(ctx, engine, repo, f, staged, base, target)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: diff failed for %s: %v\n", f.Path, err)
 			continue
@@ -146,4 +158,19 @@ func printDiffs(engine diff.Engine, repo *git.Repo, files []git.ChangedFile, sta
 		}
 	}
 	return nil
+}
+
+// fileDiff renders one file's diff for --print. An untracked file has no tracked
+// counterpart, so `git diff -- file` yields nothing; diff it against /dev/null
+// instead so its content shows (the same route internal/tui/stage takes).
+func fileDiff(ctx context.Context, engine diff.Engine, repo *git.Repo, f git.ChangedFile, staged bool, base, target string) (string, error) {
+	if f.Status == "Untracked" {
+		return diff.RawNewFileDiff(repo.Root(), f.Path)
+	}
+	return engine.Diff(ctx, repo.Root(), f.Path, diff.DiffOpts{
+		Staged: staged,
+		Base:   base,
+		Target: target,
+		Color:  false,
+	})
 }

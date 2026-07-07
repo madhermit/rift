@@ -1,8 +1,6 @@
 package git
 
 import (
-	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -15,16 +13,15 @@ type StashEntry struct {
 }
 
 func (r *Repo) ListStashes() ([]StashEntry, error) {
-	cmd := exec.Command("git", "-C", r.root, "stash", "list", "--format=%gd%x00%gs%x00%ci")
-	out, err := cmd.Output()
+	// `git stash list` exits 0 with empty output when there are no stashes, so a
+	// non-zero status is a real failure — surface its stderr rather than masking
+	// it as "no stashes".
+	out, err := r.runGit("stash", "list", "--format=%gd%x00%gs%x00%ci")
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return []StashEntry{}, nil
-		}
-		return nil, fmt.Errorf("git stash list: %w", err)
+		return nil, err
 	}
 
-	text := strings.TrimSpace(string(out))
+	text := strings.TrimSpace(out)
 	if text == "" {
 		return []StashEntry{}, nil
 	}

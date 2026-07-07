@@ -1,8 +1,6 @@
 package git
 
 import (
-	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 )
@@ -35,13 +33,11 @@ func (r *Repo) StatusFiles() ([]StatusFile, error) {
 // what the old go-git path produced (go-git does no rename detection) and keeping
 // every record to a single "XY PATH" shape — no trailing original-path field.
 func (r *Repo) statusFiles() ([]StatusFile, error) {
-	cmd := exec.Command("git", "status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")
-	cmd.Dir = r.root
-	out, err := cmd.Output()
+	out, err := r.runGit("status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")
 	if err != nil {
-		return nil, fmt.Errorf("git status: %w", err)
+		return nil, err
 	}
-	return parseStatusZ(string(out)), nil
+	return parseStatusZ(out), nil
 }
 
 // parseStatusZ parses `git status --porcelain -z --no-renames`: each NUL-

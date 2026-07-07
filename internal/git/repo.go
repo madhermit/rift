@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -18,15 +19,62 @@ func OpenRepo() (*Repo, error) {
 		DetectDotGit: true,
 	})
 	if err != nil {
+		if errors.Is(err, gogit.ErrRepositoryNotExists) {
+			// go-git can't find a worktree here. Running inside a bare git dir
+			// (e.g. a `.bare` layout) surfaces the same error, so ask git to
+			// disambiguate rather than repeat go-git's misleading message.
+			if runningInBareRepo() {
+				return nil, errors.New("bare repository — run from a worktree")
+			}
+			return nil, errors.New("not a git repository (or any parent directory)")
+		}
 		return nil, fmt.Errorf("open repo: %w", err)
 	}
 
 	wt, err := r.Worktree()
 	if err != nil {
+		if errors.Is(err, gogit.ErrIsBareRepository) {
+			return nil, errors.New("bare repository — run from a worktree")
+		}
 		return nil, fmt.Errorf("get worktree: %w", err)
 	}
 
 	return &Repo{repo: r, root: wt.Filesystem.Root()}, nil
+}
+
+// runningInBareRepo reports whether the current directory sits inside a bare git
+// directory, so OpenRepo can give a "run from a worktree" hint instead of a flat
+// "not a git repository".
+func runningInBareRepo() bool {
+	out, err := exec.Command("git", "rev-parse", "--is-bare-repository").Output()
+	return err == nil && strings.TrimSpace(string(out)) == "true"
+}
+
+// runGit runs `git <args>` in the repo root and returns stdout, wrapping any
+// failure with the command's stderr (git's actual fatal message) via gitErr.
+// The reads that use it (status, name-status, numstat, rev-parse, stash list)
+// exit 0 whether or not there are changes, so a non-zero status is a real error.
+func (r *Repo) runGit(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.root
+	out, err := cmd.Output()
+	if err != nil {
+		return "", gitErr("git "+strings.Join(args, " "), err)
+	}
+	return string(out), nil
+}
+
+// gitErr wraps a shelled-git failure with the command's stderr. cmd.Output()
+// captures stderr into ExitError.Stderr, so an opaque "exit status 128" carries
+// git's actual fatal message (e.g. a bad revision or wrong work tree).
+func gitErr(label string, err error) error {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+			return fmt.Errorf("%s: %w: %s", label, err, msg)
+		}
+	}
+	return fmt.Errorf("%s: %w", label, err)
 }
 
 func (r *Repo) Root() string {

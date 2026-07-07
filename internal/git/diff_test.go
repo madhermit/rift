@@ -1,8 +1,23 @@
 package git
 
 import (
+	"strings"
 	"testing"
 )
+
+// TestShellReadSurfacesStderr checks that a failed shelled read carries git's
+// stderr (via gitErr) instead of a bare "exit status 128".
+func TestShellReadSurfacesStderr(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	_, err := repo.DiffAgainstRef("definitely-not-a-ref")
+	if err == nil {
+		t.Fatal("expected an error for a bad ref, got nil")
+	}
+	if !strings.Contains(err.Error(), "definitely-not-a-ref") {
+		t.Errorf("error %q does not surface git's stderr (missing the bad ref)", err)
+	}
+}
 
 func TestDiffTargets(t *testing.T) {
 	tests := []struct {
@@ -32,27 +47,6 @@ func TestDiffTargets(t *testing.T) {
 			}
 			if target != tt.wantTarget {
 				t.Errorf("target = %q, want %q", target, tt.wantTarget)
-			}
-		})
-	}
-}
-
-func TestFirstLine(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"single line", "hello", "hello"},
-		{"multi-line", "first\nsecond\nthird", "first"},
-		{"empty string", "", ""},
-		{"trailing newline", "hello\n", "hello"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := firstLine(tt.input); got != tt.want {
-				t.Errorf("firstLine(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -114,7 +108,7 @@ func TestDiffBetweenCommits(t *testing.T) {
 	baseHash := head.Hash().String()
 
 	writeFile(t, repo.root, "added.go", "package main\n")
-	writeFile(t, repo.root, "README.md", "# changed\n")
+	writeFile(t, repo.root, "README.md", "# changed\n") // was "# test repo\n"
 	if _, err := wt.Add("added.go"); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
@@ -131,25 +125,118 @@ func TestDiffBetweenCommits(t *testing.T) {
 		t.Fatalf("expected 2 changed files, got %d: %v", len(files), files)
 	}
 
-	byPath := map[string]string{}
+	byPath := map[string]ChangedFile{}
 	for _, f := range files {
-		byPath[f.Path] = f.Status
+		byPath[f.Path] = f
 	}
-	if byPath["added.go"] != "Added" {
-		t.Errorf("added.go status = %q, want %q", byPath["added.go"], "Added")
+	if got := byPath["added.go"]; got.Status != "Added" || got.Added != 1 || got.Deleted != 0 {
+		t.Errorf("added.go = %+v, want Added +1 -0", got)
 	}
-	if byPath["README.md"] != "Modified" {
-		t.Errorf("README.md status = %q, want %q", byPath["README.md"], "Modified")
+	// README.md: one line replaced by another = +1/-1.
+	if got := byPath["README.md"]; got.Status != "Modified" || got.Added != 1 || got.Deleted != 1 {
+		t.Errorf("README.md = %+v, want Modified +1 -1", got)
 	}
 }
 
-func TestParseNameStatus(t *testing.T) {
-	out := "M\tinternal/diff/diff.go\nA\tinternal/tui/stream.go\nR100\tinternal/old/path.go\tinternal/new/path.go\n"
-	got := parseNameStatus(out)
+// TestDiffBetweenCommits_EmptyTree covers the EmptyTree base: a root commit (via
+// diff-tree --root) and a non-root target (which must diff against the empty tree,
+// not the parent — so every file in the target shows as a full addition).
+func TestDiffBetweenCommits_EmptyTree(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	wt, err := repo.repo.Worktree()
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+	rootHash, err := repo.repo.Head()
+	if err != nil {
+		t.Fatalf("get head: %v", err)
+	}
+
+	writeFile(t, repo.root, "second.go", "package main\n")
+	if _, err := wt.Add("second.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	secondHash := testCommit(t, wt, "second commit")
+
+	t.Run("root commit lists its files as additions", func(t *testing.T) {
+		files, err := repo.DiffBetweenCommits(EmptyTree, rootHash.Hash().String())
+		if err != nil {
+			t.Fatalf("DiffBetweenCommits() error = %v", err)
+		}
+		if len(files) != 1 || files[0].Path != "README.md" || files[0].Status != "Added" {
+			t.Fatalf("root diff = %+v, want [README.md Added]", files)
+		}
+	})
+
+	t.Run("non-root target diffs against empty tree, not parent", func(t *testing.T) {
+		files, err := repo.DiffBetweenCommits(EmptyTree, secondHash.String())
+		if err != nil {
+			t.Fatalf("DiffBetweenCommits() error = %v", err)
+		}
+		byPath := map[string]string{}
+		for _, f := range files {
+			byPath[f.Path] = f.Status
+		}
+		// Against the parent it would be just second.go; against the empty tree
+		// the whole tree (README.md + second.go) is an addition.
+		if byPath["README.md"] != "Added" || byPath["second.go"] != "Added" {
+			t.Errorf("empty-tree diff = %+v, want README.md and second.go both Added", byPath)
+		}
+	})
+}
+
+// TestDiffAgainstRef covers the single-ref scope: the working tree compared to a
+// ref, surfacing both committed and uncommitted changes since it, with stats.
+// Non-ASCII and spaced paths must come through verbatim (the -z path).
+func TestDiffAgainstRef(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	wt, err := repo.repo.Worktree()
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+	base, err := repo.repo.Head()
+	if err != nil {
+		t.Fatalf("get head: %v", err)
+	}
+
+	// A committed change since base (invisible to a worktree-vs-HEAD listing).
+	writeFile(t, repo.root, "héllo.txt", "committed\n")
+	if _, err := wt.Add("héllo.txt"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	testCommit(t, wt, "add héllo")
+	// An uncommitted change on top.
+	writeFile(t, repo.root, "sp ace.txt", "unstaged\n")
+	if _, err := wt.Add("sp ace.txt"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+
+	files, err := repo.DiffAgainstRef(base.Hash().String())
+	if err != nil {
+		t.Fatalf("DiffAgainstRef() error = %v", err)
+	}
+	byPath := map[string]ChangedFile{}
+	for _, f := range files {
+		byPath[f.Path] = f
+	}
+	if got := byPath["héllo.txt"]; got.Status != "Added" || got.Added != 1 {
+		t.Errorf("héllo.txt = %+v, want Added +1 (committed change since ref)", got)
+	}
+	if got := byPath["sp ace.txt"]; got.Status != "Added" || got.Added != 1 {
+		t.Errorf("sp ace.txt = %+v, want Added +1 (uncommitted change)", got)
+	}
+}
+
+func TestParseNameStatusZ(t *testing.T) {
+	// STATUS\0PATH pairs, non-ASCII and spaced paths verbatim (no C-quoting).
+	out := "M\x00internal/diff/diff.go\x00A\x00héllo.txt\x00D\x00sp ace.txt\x00"
+	got := parseNameStatusZ(out)
 	want := []ChangedFile{
 		{Path: "internal/diff/diff.go", Status: "Modified"},
-		{Path: "internal/tui/stream.go", Status: "Added"},
-		{Path: "internal/new/path.go", Status: "Renamed"}, // new path, not the literal "old\tnew"
+		{Path: "héllo.txt", Status: "Added"},
+		{Path: "sp ace.txt", Status: "Deleted"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d files, want %d: %+v", len(got), len(want), got)
@@ -157,6 +244,25 @@ func TestParseNameStatus(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("file %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseNumstatZ(t *testing.T) {
+	// added\tdeleted\tpath records; binary reports "-" (→ 0); path verbatim.
+	out := "3\t1\tinternal/diff/diff.go\x00-\t-\timage.png\x0010\t0\tsp ace.txt\x00"
+	got := parseNumstatZ(out)
+	want := map[string][2]int{
+		"internal/diff/diff.go": {3, 1},
+		"image.png":             {0, 0}, // binary
+		"sp ace.txt":            {10, 0},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d: %+v", len(got), len(want), got)
+	}
+	for path, w := range want {
+		if got[path] != w {
+			t.Errorf("%q = %v, want %v", path, got[path], w)
 		}
 	}
 }

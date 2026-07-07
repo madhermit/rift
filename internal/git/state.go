@@ -1,7 +1,6 @@
 package git
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,11 +11,11 @@ import (
 // honoring linked-worktree layouts where the gitdir lives elsewhere. It does not
 // create anything — callers MkdirAll the parent before writing.
 func (r *Repo) GitPath(rel string) (string, error) {
-	out, err := exec.Command("git", "-C", r.root, "rev-parse", "--git-path", rel).Output()
+	out, err := r.runGit("rev-parse", "--git-path", rel)
 	if err != nil {
-		return "", fmt.Errorf("git rev-parse --git-path %s: %w", rel, err)
+		return "", err
 	}
-	p := strings.TrimSpace(string(out))
+	p := strings.TrimSpace(out)
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(r.root, p)
 	}

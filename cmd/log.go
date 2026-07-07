@@ -35,6 +35,12 @@ func runLog(cmd *cobra.Command, args []string) error {
 	all, _ := cmd.Flags().GetBool("all")
 	refArgs, pathArgs := splitAtDash(cmd, args)
 
+	// A single optional ref scopes the log; a second ref would be silently
+	// dropped, so reject it (mirrors DiffTargets rejecting a third ref).
+	if len(refArgs) > 1 {
+		return fmt.Errorf("too many arguments: expected at most 1 commit ref")
+	}
+
 	repo, err := git.OpenRepo()
 	if err != nil {
 		return err
