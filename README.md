@@ -103,7 +103,14 @@ Run `rift completion --help` for per-shell install instructions.
 
 ### Shared TUI
 
-Every screen behaves the same: type `/` to fuzzy-filter, `⇥` to switch panes, vim keys (`j`/`k`, `gg`/`G`, `ctrl-d`/`u`) to scroll, `\` to toggle the diff layout, `y` to yank the selection, `o` to open a file in `$EDITOR` at the change, `?` for the keybinding overlay, and `esc` to step back.
+Every screen behaves the same: type `/` to fuzzy-filter, `⇥` to switch panes, vim keys (`j`/`k`, `gg`/`G`, `ctrl-d`/`u`) to move and scroll, `J`/`K` (or `]`/`[`) to step to the next/previous item while reading, `\` to toggle the diff layout, `e` to switch diff engines, `y` to yank the selection, `o` to open a file in `$EDITOR` at the change, `?` for the keybinding overlay, and `esc` to leave the current mode (filter, help, or a drilldown). `esc` never quits a work screen — use `q` or `ctrl-c`.
+
+### Environment
+
+- `RIFT_THEME=light|dark` — force the color palette instead of detecting the terminal's background. Unset, rift asks the terminal and falls back to the dark palette when there's no reply.
+- `RIFT_ICONS=ascii` (or `none`) — suppress the Nerd Font file-type icons for terminals without a patched font; the icon column drops out cleanly.
+- `NO_COLOR` — disable all ANSI color.
+- `VISUAL` / `EDITOR` — the editor `o` opens (falling back to `vi`).
 
 ## Installation
 

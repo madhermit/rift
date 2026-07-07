@@ -64,6 +64,36 @@ func (v *VimNav) HandleKey(vp *viewport.Model, msg tea.KeyPressMsg) bool {
 	return false
 }
 
+// HandleListKey processes the vim jump keys (gg, G, ctrl+d/u) for a windowed
+// LIST selection rather than a scrolling viewport: gg/G jump to the first/last
+// item and ctrl+d/u by half the visible window. It returns the new selection
+// index and whether the key was consumed. It shares pendingG with HandleKey —
+// only one of the list/preview panes is focused at a time, so a pending 'g'
+// can't straddle both.
+func (v *VimNav) HandleListKey(msg tea.KeyPressMsg, selected, total, window int) (int, bool) {
+	if v.pendingG {
+		v.pendingG = false
+		if msg.String() == "g" {
+			return 0, true // gg → first item
+		}
+	}
+	if window < 1 {
+		window = 1
+	}
+	switch msg.String() {
+	case "g":
+		v.pendingG = true
+		return selected, true
+	case "G":
+		return clampIndex(total-1, total), true
+	case "ctrl+d":
+		return clampIndex(selected+window/2, total), true
+	case "ctrl+u":
+		return clampIndex(selected-window/2, total), true
+	}
+	return selected, false
+}
+
 // SetContent replaces the viewport content (a hardwrapped string) and records
 // file-section boundaries, returning the displayed (banner-stripped) lines so the
 // caller can locate text within them (e.g. to anchor-scroll); the line indices

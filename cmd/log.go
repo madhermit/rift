@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/output"
+	"github.com/madhermit/rift/internal/tui"
 	logui "github.com/madhermit/rift/internal/tui/log"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +30,15 @@ func init() {
 }
 
 func runLog(cmd *cobra.Command, args []string) error {
+	_, err := runLogAction(cmd, args)
+	return err
+}
+
+// runLogAction runs the log command and reports whether it performed a git write
+// (cherry-pick/revert after the TUI exits). The menu loop uses that flag to
+// decide between re-entering the menu (nothing ran) and exiting so git's output
+// — e.g. a conflict message — stays on the terminal.
+func runLogAction(cmd *cobra.Command, args []string) (actionRan bool, err error) {
 	mode := output.Detect(cmd)
 	maxCount, _ := cmd.Flags().GetInt("max-count")
 	all, _ := cmd.Flags().GetBool("all")
@@ -38,12 +47,12 @@ func runLog(cmd *cobra.Command, args []string) error {
 	// A single optional ref scopes the log; a second ref would be silently
 	// dropped, so reject it (mirrors DiffTargets rejecting a third ref).
 	if len(refArgs) > 1 {
-		return fmt.Errorf("too many arguments: expected at most 1 commit ref")
+		return false, fmt.Errorf("too many arguments: expected at most 1 commit ref")
 	}
 
 	repo, err := git.OpenRepo()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	var commits []git.CommitInfo
@@ -57,40 +66,43 @@ func runLog(cmd *cobra.Command, args []string) error {
 		commits, err = repo.Log(ref, maxCount, pathArgs)
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	switch mode {
 	case output.JSON:
-		return output.WriteJSON(os.Stdout, commits)
+		return false, output.WriteJSON(os.Stdout, commits)
 	case output.Print:
 		lines := make([]string, len(commits))
 		for i, c := range commits {
 			lines[i] = fmt.Sprintf("%s %s", c.Hash, c.Message)
 		}
-		return output.WritePlain(os.Stdout, lines)
+		return false, output.WritePlain(os.Stdout, lines)
 	default:
 		engine := diff.NewEngine()
 		tests, _ := cmd.Flags().GetBool("tests")
 		m := logui.New(repo, engine, commits, tests)
-		result, err := tea.NewProgram(m).Run()
+		result, err := tui.NewProgram(m).Run()
 		if err != nil {
-			return err
+			return false, err
 		}
 		final, ok := result.(logui.Model)
 		if !ok {
-			return nil
+			return false, nil
 		}
 		hash := final.SelectedHash()
 		if hash == "" {
-			return nil
+			return false, nil
 		}
+		var verb string
 		switch final.Action() {
 		case logui.CherryPick:
-			return runGit("cherry-pick", hash)
+			verb = "cherry-pick"
 		case logui.Revert:
-			return runGit("revert", hash)
+			verb = "revert"
+		default:
+			return false, nil
 		}
-		return nil
+		return true, runGit(verb, hash)
 	}
 }

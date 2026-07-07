@@ -1,11 +1,59 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 )
+
+func sameColor(a, b color.Color) bool {
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+	return ar == br && ag == bg && ab == bb && aa == ba
+}
+
+// TestApplyTheme verifies the adaptive palette resolves to its dark members by
+// default and to its light members after ApplyTheme(false), which is all that a
+// terminal's background reply flips.
+func TestApplyTheme(t *testing.T) {
+	defer ApplyTheme(true) // restore the dark default for the rest of the suite
+
+	ApplyTheme(true)
+	if !sameColor(Text, lipgloss.Color("252")) || !sameColor(Bright, lipgloss.Color("15")) {
+		t.Error("dark palette: Text/Bright should resolve to their dark members")
+	}
+
+	ApplyTheme(false)
+	if !sameColor(Text, lipgloss.Color("235")) || !sameColor(Bright, lipgloss.Color("16")) {
+		t.Error("light palette: Text/Bright should resolve to their light members")
+	}
+	if sameColor(Text, lipgloss.Color("252")) {
+		t.Error("light palette should not resolve to the dark Text value")
+	}
+}
+
+// TestThemeOverride covers RIFT_THEME parsing: light/dark force a palette, an
+// unset or unknown value defers to detection.
+func TestThemeOverride(t *testing.T) {
+	tests := []struct {
+		env              string
+		wantDark, wantOK bool
+	}{
+		{"light", false, true},
+		{"dark", true, true},
+		{"", false, false},
+		{"bogus", false, false},
+	}
+	for _, tt := range tests {
+		t.Setenv("RIFT_THEME", tt.env)
+		dark, ok := themeOverride()
+		if dark != tt.wantDark || ok != tt.wantOK {
+			t.Errorf("themeOverride(%q) = %v, %v; want %v, %v", tt.env, dark, ok, tt.wantDark, tt.wantOK)
+		}
+	}
+}
 
 func TestPanelDimensions(t *testing.T) {
 	const w, h = 30, 8

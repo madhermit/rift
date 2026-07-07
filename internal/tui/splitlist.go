@@ -10,7 +10,6 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -217,12 +216,9 @@ func (m SplitList[T]) yank() (SplitList[T], tea.Cmd) {
 	if val == "" {
 		return m, nil
 	}
-	if err := clipboard.WriteAll(val); err != nil {
-		m.flash = "clipboard unavailable"
-	} else {
-		m.flash = "copied " + val
-	}
-	return m, nil
+	var cmd tea.Cmd
+	m.flash, cmd = YankToClipboard(val)
+	return m, cmd
 }
 
 // ClearCacheAndReload drops all cached previews and reloads the current
@@ -325,6 +321,24 @@ func (m SplitList[T]) SetPrompt(prompt string) SplitList[T] {
 	return m
 }
 
+// SetFlash sets (or clears, when empty) the transient footer message. Parents
+// use it for an out-of-band status (e.g. "collecting tests…") that should sit
+// below the filter/prompt in footer precedence and clear on the next navigation.
+func (m SplitList[T]) SetFlash(flash string) SplitList[T] {
+	m.flash = flash
+	return m
+}
+
+// WithBreadcrumb overrides the header screen label (e.g. "log ❯ a1b2c3d") and
+// appends an "esc back" hint, marking this list as an embedded/drilled view whose
+// way back should be discoverable. Parents call it after New instead of widening
+// New's parameter list.
+func (m SplitList[T]) WithBreadcrumb(screen string) SplitList[T] {
+	m.cfg.Screen = screen
+	m.cfg.Hints = append(append([][2]string{}, m.cfg.Hints...), [2]string{"esc", "back"})
+	return m
+}
+
 // Reading reports whether the preview pane is focused (vs the list pane). Parents
 // gate list-pane-only actions on it (e.g. stash apply/pop/drop).
 func (m SplitList[T]) Reading() bool { return m.active == splitPreviewPane }
@@ -397,6 +411,19 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 
 	if m.active == splitPreviewPane && !m.filtering && m.vim.HandleKey(&m.viewport, msg) {
 		return m, nil
+	}
+
+	// List pane: the same vim jump keys move the selection (gg/G to the ends,
+	// ctrl+d/u by half the visible window) instead of scrolling the preview.
+	if m.active == splitListPane && !m.filtering {
+		_, navH := m.stackLayout()
+		if next, ok := m.vim.HandleListKey(msg, m.selected, len(m.filtered), navH-2); ok {
+			if next == m.selected {
+				return m, nil // consumed with no move (e.g. a pending 'g')
+			}
+			m.selected = next
+			return m.requestPreview()
+		}
 	}
 
 	if msg.String() == "esc" {
@@ -507,10 +534,21 @@ func (m SplitList[T]) stepList(delta int) (SplitList[T], tea.Cmd) {
 }
 
 func (m SplitList[T]) applyFilter() (SplitList[T], tea.Cmd) {
+	// Keep the selection on the same item when it survives the new filter (matched
+	// by the same identity key SetItemsSelecting uses); reset to the top otherwise.
+	prevKey := m.SelectedKey()
 	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
 	m.selected = 0
+	if prevKey != "" && m.cfg.Match != nil {
+		for i, it := range m.filtered {
+			if m.cfg.Match(it) == prevKey {
+				m.selected = i
+				break
+			}
+		}
+	}
 	// The strip height tracks the item count, so the viewport must resize when the
-	// filter changes; and the selection reset means a fresh preview is always due.
+	// filter changes; the preview reloads for whatever selection we landed on.
 	m.resizeViewport()
 	return m.requestPreview()
 }

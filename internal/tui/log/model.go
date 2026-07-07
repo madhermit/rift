@@ -60,7 +60,9 @@ func (a Action) verb() string {
 // with the action on "y".
 func (m Model) startAction(action Action) (tea.Model, tea.Cmd) {
 	commit, ok := m.list.Selected()
-	if !ok {
+	// Cherry-pick / revert fire only from the list pane, not while reading the
+	// preview — matching stash's action gate.
+	if !ok || m.list.Reading() {
 		return m, nil
 	}
 	m.action = action
@@ -127,7 +129,7 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo, tests boo
 	return Model{repo: repo, engines: engines, tests: tests, list: tui.NewSplitList(cfg, commits)}
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m Model) Init() tea.Cmd { return tui.ThemeInit() }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The drilled diff view runs its own SplitList with an independent preview
@@ -188,7 +190,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// drilldown. A collection error surfaces as an empty drilldown, matching
 		// the file drilldown's handling.
 		m.collecting = false
-		m.drilled = reviewui.New(m.repo, m.engines.Engine(), msg.specs, msg.scope, false)
+		m.drilled = reviewui.New(m.repo, m.engines.Engine(), msg.specs, msg.scope, false).
+			SetBreadcrumb(tui.Breadcrumb("log", msg.scope.Target, "tests"))
 		m.drilling = true
 		var cmd tea.Cmd
 		m, cmd = m.sendDrilled(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -212,8 +215,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Collecting a commit's tests parses every changed file and
 					// shells git per file; run it off the event loop, then open.
 					// `collecting` keeps the list from streaming or re-entering
-					// until the specs land.
+					// until the specs land, and a footer note shows it's running.
 					m.collecting = true
+					m.list = m.list.SetFlash("collecting tests…")
 					return m, m.collectTests(c)
 				}
 				return m.drillInto(c)
@@ -292,7 +296,8 @@ func commitFiles(repo *git.Repo, hash string) (base string, files []git.ChangedF
 // and the hidden list preview shouldn't keep difftastic busy.
 func (m Model) drillInto(commit git.CommitInfo) (tea.Model, tea.Cmd) {
 	base, files, err := commitFiles(m.repo, commit.Hash)
-	dv := diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash, false, nil, false)
+	dv := diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash, false, nil, false).
+		SetBreadcrumb(tui.Breadcrumb("log", commit.Hash))
 	if err != nil {
 		// Surface the load failure instead of an indistinguishable "No changes found".
 		dv = dv.SetEmptyStatus(fmt.Sprintf("could not load commit diff: %v", err))
@@ -400,7 +405,9 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 		b.WriteString("\n")
 		for _, f := range files {
 			status := git.StatusChar(f.Status)
-			fileIcon := tui.FileIcon(f.Path)
+			// IconField carries its own trailing space (empty when icons are off), so
+			// the column drops out cleanly under RIFT_ICONS=ascii|none.
+			iconField := tui.IconField(f.Path)
 			// Reserve room for the "  <status> <icon> " prefix; fall back to the
 			// full path when the width isn't known yet (unsized preview).
 			pathWidth := width - 6
@@ -411,10 +418,10 @@ func commitHeader(commit git.CommitInfo, files []git.ChangedFile, color bool, wi
 			if color {
 				status = tui.StatusStyle(f.Status).Render(status)
 			} else {
-				fileIcon = ansi.Strip(fileIcon)
+				iconField = ansi.Strip(iconField)
 				path = ansi.Strip(path)
 			}
-			fmt.Fprintf(&b, "  %s %s %s\n", status, fileIcon, path)
+			fmt.Fprintf(&b, "  %s %s%s\n", status, iconField, path)
 		}
 	}
 

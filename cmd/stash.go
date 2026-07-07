@@ -5,10 +5,10 @@ import (
 	"os"
 	"os/exec"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/output"
+	"github.com/madhermit/rift/internal/tui"
 	stashui "github.com/madhermit/rift/internal/tui/stash"
 	"github.com/spf13/cobra"
 )
@@ -25,55 +25,69 @@ func init() {
 }
 
 func runStash(cmd *cobra.Command, args []string) error {
+	_, err := runStashAction(cmd, args)
+	return err
+}
+
+// runStashAction runs the stash command and reports whether it performed a git
+// write (apply/pop/drop after the TUI exits). The menu loop uses that flag to
+// decide between re-entering the menu (nothing ran) and exiting so git's output
+// — e.g. a merge-conflict message — stays on the terminal.
+func runStashAction(cmd *cobra.Command, args []string) (actionRan bool, err error) {
 	mode := output.Detect(cmd)
 
 	repo, err := git.OpenRepo()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	stashes, err := repo.ListStashes()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	switch mode {
 	case output.JSON:
-		return output.WriteJSON(os.Stdout, stashes)
+		return false, output.WriteJSON(os.Stdout, stashes)
 	case output.Print:
 		lines := make([]string, len(stashes))
 		for i, s := range stashes {
 			lines[i] = fmt.Sprintf("stash@{%d} %s", s.Index, s.Message)
 		}
-		return output.WritePlain(os.Stdout, lines)
+		return false, output.WritePlain(os.Stdout, lines)
 	default:
 		if len(stashes) == 0 {
 			fmt.Println("No stashes found.")
-			return nil
+			return false, nil
 		}
 
 		engine := diff.NewEngine()
 		m := stashui.New(repo, engine, stashes)
-		result, err := tea.NewProgram(m).Run()
+		result, err := tui.NewProgram(m).Run()
 		if err != nil {
-			return err
+			return false, err
 		}
 
-		if final, ok := result.(stashui.Model); ok {
-			idx := final.SelectedIndex()
-			if idx < 0 {
-				return nil
-			}
-			switch final.Action() {
-			case stashui.Apply:
-				return gitStashAction("apply", idx)
-			case stashui.Pop:
-				return gitStashAction("pop", idx)
-			case stashui.Drop:
-				return gitStashAction("drop", idx)
-			}
+		final, ok := result.(stashui.Model)
+		if !ok {
+			return false, nil
 		}
-		return nil
+		idx := final.SelectedIndex()
+		if idx < 0 {
+			return false, nil
+		}
+		var verb string
+		switch final.Action() {
+		case stashui.Apply:
+			verb = "apply"
+		case stashui.Pop:
+			verb = "pop"
+		case stashui.Drop:
+			verb = "drop"
+		default:
+			return false, nil
+		}
+		return true, gitStashAction(verb, idx)
 	}
 }
 

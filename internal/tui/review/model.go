@@ -186,6 +186,20 @@ func (m Model) View() tea.View { return m.list.TeaView() }
 func (m Model) Filtering() bool   { return m.list.Filtering() }
 func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
 
+// SetBreadcrumb marks this view as an embedded drilldown: it sets the header
+// breadcrumb (e.g. "log ❯ a1b2c3d ❯ tests") and adds an "esc back" footer hint.
+func (m Model) SetBreadcrumb(screen string) Model {
+	m.list = m.list.WithBreadcrumb(screen)
+	return m
+}
+
+// SetFlash sets the embedded list's transient footer message (see
+// SplitList.SetFlash), used to surface "collecting tests…" during a re-collect.
+func (m Model) SetFlash(s string) Model {
+	m.list = m.list.SetFlash(s)
+	return m
+}
+
 // CancelPreview stops this model's in-flight diff stream — used by the lens
 // wrapper before hiding it, so a backgrounded difftastic run doesn't linger.
 func (m Model) CancelPreview() tea.Model {

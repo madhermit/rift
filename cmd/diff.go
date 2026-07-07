@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/output"
 	"github.com/madhermit/rift/internal/review"
+	"github.com/madhermit/rift/internal/tui"
 	lensui "github.com/madhermit/rift/internal/tui/lens"
 	"github.com/spf13/cobra"
 )
@@ -103,7 +103,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return printDiffs(engine, repo, files, staged, base, target)
 	default:
 		m := lensui.New(repo, engine, files, scope, tests, unrev)
-		_, err := tea.NewProgram(m).Run()
+		_, err := tui.NewProgram(m).Run()
 		return err
 	}
 }

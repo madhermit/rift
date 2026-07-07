@@ -1,10 +1,24 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
+	"sync"
 
 	"charm.land/lipgloss/v2"
 )
+
+// iconsEnabled reports whether Nerd Font file icons are drawn. Set
+// RIFT_ICONS=ascii (or =none) on a terminal without a patched font to suppress
+// them. Read once — it's read-only config, not per-render state.
+var iconsEnabled = sync.OnceValue(func() bool {
+	switch os.Getenv("RIFT_ICONS") {
+	case "ascii", "none":
+		return false
+	default:
+		return true
+	}
+})
 
 // fileType is a glyph plus the ANSI-256 color index it renders in, so files can
 // be scanned by language/role at a glance.
@@ -80,8 +94,13 @@ var nameFileTypes = map[string]fileType{
 }
 
 // FileIcon returns the colored glyph for a path, chosen by filename first then
-// extension, falling back to a dim generic document icon.
+// extension, falling back to a dim generic document icon. It returns "" when
+// file icons are disabled (RIFT_ICONS=ascii|none), so callers drop the icon
+// column rather than render a tofu box on an unpatched font.
 func FileIcon(path string) string {
+	if !iconsEnabled() {
+		return ""
+	}
 	ft, ok := nameFileTypes[filepath.Base(path)]
 	if !ok {
 		ft, ok = extFileTypes[filepath.Ext(path)]
@@ -90,4 +109,14 @@ func FileIcon(path string) string {
 		ft = fileType{genericGlyph, "245"} // Subtle
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(ft.color)).Render(ft.icon)
+}
+
+// IconField returns the file icon followed by a separating space, or "" when
+// icons are disabled — so a caller can splice it into a row and have the icon
+// column drop out cleanly (no stray gap) under RIFT_ICONS=ascii|none.
+func IconField(path string) string {
+	if icon := FileIcon(path); icon != "" {
+		return icon + " "
+	}
+	return ""
 }

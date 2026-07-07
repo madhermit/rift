@@ -57,7 +57,7 @@ func (m Model) buildTests() tui.PreviewChild {
 	return reviewui.New(m.repo, m.engine, specs, m.scope, true)
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m Model) Init() tea.Cmd { return tui.ThemeInit() }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -71,6 +71,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // a superseded tests build (toggled again before it landed)
 		}
 		m.testsLens = reviewui.New(m.repo, m.engine, msg.specs, m.scope, true)
+		m = m.clearCollecting() // the specs landed; drop the "collecting…" note
 		return m.show(true)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -115,11 +116,40 @@ func (m Model) toggle() (tea.Model, tea.Cmd) {
 	if m.testsLens == nil {
 		// First switch to tests: parse off the event loop, staying on the file
 		// view until the specs land. The gen bump invalidates any prior pending
-		// build and the file lens's in-flight stream messages.
+		// build and the file lens's in-flight stream messages. A footer note tells
+		// the user the collect is running.
 		m.gen++
+		m = m.noteCollecting()
 		return m, m.collectTests(m.gen)
 	}
 	return m.show(true)
+}
+
+// noteCollecting shows a "collecting tests…" footer indicator on whichever lens
+// stays visible while review.Collect runs off the event loop. It goes through
+// the flash mechanism, which sits below the filter/confirm footer and clears on
+// the next navigation, so it never fights those.
+func (m Model) noteCollecting() Model {
+	p := m.shownPtr()
+	switch lens := (*p).(type) {
+	case diffui.Model:
+		*p = lens.SetFlash("collecting tests…")
+	case reviewui.Model:
+		*p = lens.SetFlash("collecting tests…")
+	}
+	return m
+}
+
+// clearCollecting drops the "collecting…" note once the specs land; only the
+// lens that was visible during the collect holds it.
+func (m Model) clearCollecting() Model {
+	if d, ok := m.filesLens.(diffui.Model); ok {
+		m.filesLens = d.SetFlash("")
+	}
+	if r, ok := m.testsLens.(reviewui.Model); ok {
+		m.testsLens = r.SetFlash("")
+	}
+	return m
 }
 
 // toggleStaged flips the staged side for both lenses, keeping them in sync: the
@@ -132,7 +162,9 @@ func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	m.gen++
 	m.files = worktreeFiles(m.repo, m.scope.Staged, m.scope.Paths)
 	if m.showTests {
-		// Keep showing the now-stale tests until the re-collect lands.
+		// Keep showing the now-stale tests until the re-collect lands, with a footer
+		// note that the collect is running.
+		m = m.noteCollecting()
 		m.filesLens = nil
 		return m, m.collectTests(m.gen)
 	}

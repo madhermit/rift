@@ -227,6 +227,55 @@ func TestWidthInCacheKey(t *testing.T) {
 	}
 }
 
+// TestFilterKeepsSelection verifies re-filtering keeps the cursor on the same
+// item when it survives the new filter, and falls back to the top otherwise.
+func TestFilterKeepsSelection(t *testing.T) {
+	m := NewSplitList(testCfg(), []string{"alpha", "alpaca", "beta"})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}) // select alpaca
+	if m.SelectedKey() != "alpaca" {
+		t.Fatalf("setup: selected %q, want alpaca", m.SelectedKey())
+	}
+
+	// "alp" keeps both alpha and alpaca; the selection must stay on alpaca.
+	m, _ = m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	for _, r := range "alp" {
+		m, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if m.SelectedKey() != "alpaca" {
+		t.Errorf("filter should keep selection on alpaca, got %q", m.SelectedKey())
+	}
+
+	// Narrowing to "alpha" drops alpaca, so the selection resets to the survivor.
+	for _, r := range "ha" {
+		m, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if m.SelectedKey() != "alpha" {
+		t.Errorf("when the selection doesn't survive, reset to the first item; got %q", m.SelectedKey())
+	}
+}
+
+// TestListPaneVimJumps covers gg/G and ctrl+d moving the LIST selection while the
+// list pane is focused (as opposed to scrolling the preview).
+func TestListPaneVimJumps(t *testing.T) {
+	m := NewSplitList(testCfg(), []string{"a", "b", "c", "d", "e"})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	if m.selected != 4 {
+		t.Errorf("G should select the last item, got %d", m.selected)
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.selected != 0 {
+		t.Errorf("gg should select the first item, got %d", m.selected)
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if m.selected == 0 {
+		t.Error("ctrl+d should move the selection down by half a window")
+	}
+}
+
 // TestNewGutter covers the preview anchor's parse of difftastic's new-side line
 // gutter in both layouts: inline (new number left-indented past the margin) and
 // side-by-side (new number in a right gutter). The anchor must read the NEW

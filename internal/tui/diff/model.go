@@ -163,9 +163,9 @@ func fileRow(marks *reviewMarks) func(git.ChangedFile, int, bool) string {
 		}
 		glyph := tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status))
 		if marks.reviewed(f.Path) {
-			glyph = reviewedGlyph.Render("\uf00c") // Nerd Font check (nf-fa-check)
+			glyph = reviewedGlyph.Render("\u2713") // standard check (U+2713), font-independent
 		}
-		prefix := glyph + " " + tui.FileIcon(f.Path) + " "
+		prefix := glyph + " " + tui.IconField(f.Path)
 		return pathRow(prefix, selected, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
 	}
 }
@@ -188,6 +188,21 @@ func (m Model) displayFiles() []git.ChangedFile {
 // commit whose diff failed to load, distinct from "No changes found").
 func (m Model) SetEmptyStatus(s string) Model {
 	m.list = m.list.SetEmptyStatus(s)
+	return m
+}
+
+// SetBreadcrumb marks this view as an embedded drilldown: it sets the header
+// breadcrumb (e.g. "log ❯ a1b2c3d") and adds an "esc back" footer hint. Used by
+// the log drilldown so the header names its origin and the way back shows.
+func (m Model) SetBreadcrumb(screen string) Model {
+	m.list = m.list.WithBreadcrumb(screen)
+	return m
+}
+
+// SetFlash sets the embedded list's transient footer message (see
+// SplitList.SetFlash); the lens uses it to show "collecting tests…".
+func (m Model) SetFlash(s string) Model {
+	m.list = m.list.SetFlash(s)
 	return m
 }
 

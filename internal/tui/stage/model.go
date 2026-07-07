@@ -33,9 +33,10 @@ type displayHunk struct {
 }
 
 type Model struct {
-	repo   *git.Repo
-	engine diff.Engine
-	branch string
+	repo    *git.Repo
+	engines tui.EngineToggle
+	branch  string
+	hints   [][2]string // footer keybinding hints (engine hint only when toggleable)
 
 	files         []git.StatusFile
 	filteredFiles []git.StatusFile
@@ -59,26 +60,38 @@ type Model struct {
 	diffErr  error
 	vim      tui.VimNav
 	showHelp bool
+	flash    string // transient footer message (e.g. "copied …"), cleared on nav
 
 	width  int
 	height int
 	ready  bool
 }
 
-var stageHints = [][2]string{
-	{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-	{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"o", "open"}, {"?", "help"}, {"q", "quit"},
+// stageHints builds the footer hints for a model; the engine hint appears only
+// when a second engine is available to toggle to.
+func stageHints(engines tui.EngineToggle) [][2]string {
+	hints := [][2]string{
+		{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
+		{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"o", "open"}, {"y", "yank"},
+	}
+	if engines.CanToggle() {
+		hints = append(hints, [2]string{"e", "engine"})
+	}
+	return append(hints, [2]string{"?", "help"}, [2]string{"q", "quit"})
 }
 
 // stageNavKeys is the navigation reference for the stage help overlay. Stage is
 // not a SplitList, so it lists its own keys (incl. alternates) rather than the
-// SplitList PreviewHelpKeys, which advertises keys stage doesn't implement.
+// SplitList PreviewHelpKeys, which advertises keys stage doesn't implement. esc
+// leaves the current mode (filter / help) and otherwise does nothing — it never
+// quits (that's q / ctrl+c), matching the diff/log/stash screens.
 var stageNavKeys = [][2]string{
 	{"j/k  ↑↓", "move / scroll"},
+	{"J/K  ⇧↑↓  ]/[", "next / prev file"},
 	{"{/}  n/p", "prev / next hunk"},
 	{"ctrl+d/u", "scroll half-page"},
 	{"ctrl+f/b", "scroll page"},
-	{"esc", "back"},
+	{"esc", "leave mode"},
 }
 
 type hunkDiffsMsg struct {
@@ -103,10 +116,12 @@ func (m Model) layout() tui.SplitLayout {
 }
 
 func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
+	engines := tui.NewEngineToggle(engine)
 	return Model{
 		repo:          repo,
-		engine:        engine,
+		engines:       engines,
 		branch:        repo.CurrentBranch(),
+		hints:         stageHints(engines),
 		files:         files,
 		filteredFiles: files,
 		hunkCache:     map[string][]displayHunk{},
@@ -116,7 +131,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tui.ThemeInit()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -203,7 +218,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.applyFilter()
 			return m, nil
 		}
-		return m, tea.Quit
+		// esc leaves the current mode (help handled above, filter handled here); at
+		// the root there's nowhere to go, so do nothing. Quitting is q / ctrl+c —
+		// matching the diff/log/stash screens.
+		return m, nil
 	}
 
 	if m.filtering {
@@ -240,12 +258,28 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.navigate(-1)
 	case "down", "j":
 		return m.navigate(1)
+	case "J", "shift+down", "]":
+		// Step the file selection even while the diff pane is focused, mirroring the
+		// SplitList screens' step-while-reading.
+		return m.moveSelection(1)
+	case "K", "shift+up", "[":
+		return m.moveSelection(-1)
 	case "q":
 		return m, tea.Quit
 	case "/":
 		m.filtering = true
 		m.filter.Focus()
 		return m, nil
+	case "y":
+		return m.yank()
+	case "e":
+		if !m.engines.CanToggle() {
+			break // only one engine available; nothing to toggle
+		}
+		m.engines = m.engines.Toggle()
+		m.hunkCache = map[string][]displayHunk{} // the engine changes the rendering
+		cmd := m.requestDiff()
+		return m, cmd
 	case "s":
 		return m.stageOrUnstage(true)
 	case "u":
@@ -273,11 +307,23 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// yank copies the selected file's path to the clipboard and flashes a
+// confirmation (tui.YankToClipboard adds the OSC 52 fallback for headless/SSH).
+func (m Model) yank() (tea.Model, tea.Cmd) {
+	if len(m.filteredFiles) == 0 {
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.flash, cmd = tui.YankToClipboard(m.filteredFiles[m.selectedIdx].Path)
+	return m, cmd
+}
+
 func (m Model) navigateHunk(delta int) (tea.Model, tea.Cmd) {
 	n := len(m.displayHunks)
 	if n == 0 {
 		return m, nil
 	}
+	m.flash = "" // a transient message doesn't survive navigation
 	m.hunkIdx += delta
 	if m.hunkIdx < 0 {
 		m.hunkIdx = 0
@@ -397,15 +443,28 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.filter, cmd = m.filter.Update(msg)
-	m.applyFilter()
-	m.selectedIdx = 0
+	m.applyFilter() // keeps the selection on the current file when it survives
 	dcmd := m.requestDiff()
 	return m, tea.Batch(cmd, dcmd)
 }
 
 func (m *Model) applyFilter() {
+	var prevPath string
+	if m.selectedIdx < len(m.filteredFiles) {
+		prevPath = m.filteredFiles[m.selectedIdx].Path
+	}
 	m.filteredFiles = tui.FuzzyFilter(m.files, m.filter.Value(), func(f git.StatusFile) string { return f.Path })
+	// Keep the selection on the same file when it survives the new filter; reset to
+	// the top otherwise.
 	m.selectedIdx = 0
+	if prevPath != "" {
+		for i, f := range m.filteredFiles {
+			if f.Path == prevPath {
+				m.selectedIdx = i
+				break
+			}
+		}
+	}
 }
 
 func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
@@ -446,6 +505,7 @@ func (m *Model) invalidatePath(path string) {
 // previously-selected file can't land over the current one.
 func (m *Model) requestDiff() tea.Cmd {
 	m.diffReqID++
+	m.flash = "" // a new selection / reload clears any transient message
 	if len(m.filteredFiles) == 0 {
 		m.setHunks(nil)
 		return nil
@@ -479,7 +539,7 @@ func (m Model) loadSelectedDiff(reqID int) tea.Cmd {
 		return nil
 	}
 	f := m.filteredFiles[m.selectedIdx]
-	engine := m.engine
+	engine := m.engines.Engine()
 	repoRoot := m.repo.Root()
 	width := m.viewport.Width()
 	return func() tea.Msg {
@@ -629,7 +689,7 @@ func (m Model) View() tea.View {
 	l := m.layout()
 
 	if m.showHelp {
-		v := tea.NewView(tui.HelpView("stage", tui.HeaderContext(m.branch, m.engine.Name()), stageHints, stageNavKeys, m.width, l.ContentHeight))
+		v := tea.NewView(tui.HelpView("stage", tui.HeaderContext(m.branch, m.engines.Name()), m.hints, stageNavKeys, m.width, l.ContentHeight))
 		v.AltScreen = true
 		return v
 	}
@@ -649,9 +709,16 @@ func (m Model) View() tea.View {
 		status := formatStatusShort(f)
 		var line string
 		if collapsed {
-			line = status + " " + tui.FileIcon(f.Path)
+			line = status
+			if ic := tui.FileIcon(f.Path); ic != "" {
+				line += " " + ic
+			}
 		} else {
-			line = status + " " + tui.FileIcon(f.Path) + " " + tui.RenderPath(f.Path, l.ListWidth-9, selected)
+			// IconField is "" (and drops the column) when icons are disabled; the
+			// path width tracks its actual width so the layout stays aligned.
+			iconField := tui.IconField(f.Path)
+			pathW := l.ListWidth - 7 - lipgloss.Width(iconField)
+			line = status + " " + iconField + tui.RenderPath(f.Path, pathW, selected)
 		}
 		list.WriteString(tui.Marker(selected) + line + "\n")
 	}
@@ -668,7 +735,7 @@ func (m Model) View() tea.View {
 	diffPanel := tui.Panel(diffTitle, "", m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane, diffBar)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
-	header := tui.Header("stage", tui.HeaderContext(m.branch, m.engine.Name()), m.width)
+	header := tui.Header("stage", tui.HeaderContext(m.branch, m.engines.Name()), m.width)
 
 	var footer string
 	switch {
@@ -676,12 +743,14 @@ func (m Model) View() tea.View {
 		footer = tui.FooterContent(m.width, m.filter.View())
 	case m.diffErr != nil:
 		footer = tui.Footer(m.width, fmt.Sprintf("Error: %v", m.diffErr), nil)
+	case m.flash != "":
+		footer = tui.Footer(m.width, m.flash, m.hints)
 	default:
 		status := "No changes found"
 		if len(m.filteredFiles) > 0 {
 			status = fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filteredFiles))
 		}
-		footer = tui.Footer(m.width, status, stageHints)
+		footer = tui.Footer(m.width, status, m.hints)
 	}
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))

@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/exec"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/output"
+	"github.com/madhermit/rift/internal/tui"
 	"github.com/madhermit/rift/internal/tui/menu"
 	"github.com/spf13/cobra"
 )
@@ -46,23 +46,62 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
 
-	m := menu.New()
-	p := tea.NewProgram(m)
-	result, err := p.Run()
-	if err != nil {
-		return err
-	}
-
-	if final, ok := result.(menu.Model); ok {
-		selected := final.Selected()
+	// The menu is a launchpad: after a chosen screen exits cleanly, return to the
+	// menu instead of quitting rift. Quitting the menu itself (empty selection)
+	// exits, an error breaks out, and a screen that ran a git write exits too so
+	// git's output (e.g. a conflict message) stays on the terminal.
+	for {
+		selected, err := runMenu()
+		if err != nil {
+			return err
+		}
+		var actionRan bool
 		if selected != "" {
-			sub, _, err := rootCmd.Find([]string{selected})
-			if err != nil {
-				return fmt.Errorf("command %q not found: %w", selected, err)
+			if actionRan, err = runMenuSelection(selected); err != nil {
+				return err
 			}
-			return sub.RunE(sub, nil)
+		}
+		if menuLoopExits(selected, actionRan) {
+			return nil
 		}
 	}
+}
 
-	return nil
+// menuLoopExits reports whether runRoot should stop after a menu selection: it
+// stops when the user quit the menu (empty selection) or the chosen screen ran a
+// git write (whose output must stay visible); otherwise it re-displays the menu.
+func menuLoopExits(selected string, actionRan bool) bool {
+	return selected == "" || actionRan
+}
+
+// runMenu shows the launchpad and returns the chosen command name, or "" when
+// the user quit the menu.
+func runMenu() (string, error) {
+	result, err := tui.NewProgram(menu.New()).Run()
+	if err != nil {
+		return "", err
+	}
+	if final, ok := result.(menu.Model); ok {
+		return final.Selected(), nil
+	}
+	return "", nil
+}
+
+// runMenuSelection runs the command the menu chose, reporting whether it
+// performed a git write — the stash/log actions run after their TUI exits, so
+// the loop must not re-enter the menu over git's output. diff and stage never
+// write, so their RunE result carries no action.
+func runMenuSelection(name string) (actionRan bool, err error) {
+	sub, _, err := rootCmd.Find([]string{name})
+	if err != nil {
+		return false, fmt.Errorf("command %q not found: %w", name, err)
+	}
+	switch name {
+	case "stash":
+		return runStashAction(sub, nil)
+	case "log":
+		return runLogAction(sub, nil)
+	default:
+		return false, sub.RunE(sub, nil)
+	}
 }

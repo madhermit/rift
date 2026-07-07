@@ -28,6 +28,7 @@ type Model struct {
 	filter    textinput.Model
 	filtering bool
 	showHelp  bool
+	vim       tui.VimNav // gg/G/ctrl+d/u jumps over the command list
 
 	width  int
 	height int
@@ -58,7 +59,7 @@ func New() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tui.ThemeInit()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -98,6 +99,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.filtering {
 		return m.handleFilterKey(msg)
+	}
+
+	// gg/G and ctrl+d/u jump the selection (menu has no preview pane, so the vim
+	// keys move the list directly).
+	if next, ok := m.vim.HandleListKey(msg, m.selectedIdx, len(m.filtered), len(m.filtered)); ok {
+		m.selectedIdx = next
+		return m, nil
 	}
 
 	switch msg.String() {
@@ -142,8 +150,21 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyFilter() {
+	var prevName string
+	if m.selectedIdx < len(m.filtered) {
+		prevName = m.filtered[m.selectedIdx].Name
+	}
 	m.filtered = tui.FuzzyFilter(m.commands, m.filter.Value(), func(c Command) string { return c.Name })
+	// Keep the selection on the same command when it survives the new filter.
 	m.selectedIdx = 0
+	if prevName != "" {
+		for i, c := range m.filtered {
+			if c.Name == prevName {
+				m.selectedIdx = i
+				break
+			}
+		}
+	}
 }
 
 func (m *Model) moveSelection(delta int) {

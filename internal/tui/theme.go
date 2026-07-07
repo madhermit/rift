@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"image/color"
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -58,15 +60,47 @@ func RenderPath(path string, width int, selected bool) string {
 	return dirStyle.Render(dir) + baseStyle.Render(base)
 }
 
+// lightBackground selects the light palette when true; the zero value (dark) is
+// the default, so rift stays dark until detection or RIFT_THEME says otherwise.
+// It is written only by ApplyTheme — from the single-threaded Update loop or at
+// program start — and read (atomically) while rendering, so the one write can't
+// race the many render-time reads.
+var lightBackground atomic.Bool
+
+// adaptiveColor resolves to its light or dark member at render time (lipgloss
+// calls RGBA when it draws), so one ApplyTheme flip re-themes every style that
+// captured it — no per-style rebuild, and it works across packages since the
+// exported palette colors below are the shared instances every screen uses.
+type adaptiveColor struct{ dark, light color.Color }
+
+func (c adaptiveColor) RGBA() (r, g, b, a uint32) {
+	if lightBackground.Load() {
+		return c.light.RGBA()
+	}
+	return c.dark.RGBA()
+}
+
+// adaptive pairs a dark and a light ANSI-256 value into a background-aware color.
+func adaptive(dark, light string) color.Color {
+	return adaptiveColor{dark: lipgloss.Color(dark), light: lipgloss.Color(light)}
+}
+
+// ApplyTheme selects the light or dark palette. Called once per program from
+// ThemeInit (a RIFT_THEME override) or from themeFilter on the terminal's
+// BackgroundColorMsg — both on the Update goroutine. Only the palette selector
+// flips; the styles that captured the palette colors are untouched.
+func ApplyTheme(dark bool) { lightBackground.Store(!dark) }
+
 // Palette — a blue accent over a neutral gray scale, shared by every screen so
-// the chrome stays consistent. Kept on ANSI 256 indices for broad terminal
-// support.
+// the chrome stays consistent. The gray ramp and the accent flip between light
+// and dark terminals (see adaptiveColor); the semantic hues stay on ANSI base
+// indices so the terminal's own light/dark theme keeps them legible.
 var (
-	Accent = lipgloss.Color("39")  // primary highlight (blue)
-	Text   = lipgloss.Color("252") // primary foreground
-	Subtle = lipgloss.Color("245") // secondary foreground
-	Faint  = lipgloss.Color("238") // borders, rules, dim chrome
-	Bright = lipgloss.Color("15")  // selected foreground
+	Accent = adaptive("39", "26")   // primary highlight (blue)
+	Text   = adaptive("252", "235") // primary foreground
+	Subtle = adaptive("245", "240") // secondary foreground
+	Faint  = adaptive("238", "250") // borders, rules, dim chrome
+	Bright = adaptive("15", "16")   // selected foreground
 
 	Green   = lipgloss.Color("2") // added / staged
 	Red     = lipgloss.Color("1") // deleted / unstaged

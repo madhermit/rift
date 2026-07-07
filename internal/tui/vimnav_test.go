@@ -111,6 +111,31 @@ func TestVimNav_HandleKey(t *testing.T) {
 	})
 }
 
+func TestVimNav_HandleListKey(t *testing.T) {
+	key := func(s string) tea.KeyPressMsg { return tea.KeyPressMsg{Code: rune(s[0]), Text: s} }
+	var v VimNav
+
+	// G jumps to the last index.
+	if got, ok := v.HandleListKey(key("G"), 0, 5, 3); !ok || got != 4 {
+		t.Errorf("G = %d,%v; want 4,true", got, ok)
+	}
+	// gg: the first g arms, the second jumps to 0.
+	if got, ok := v.HandleListKey(key("g"), 4, 5, 3); !ok || got != 4 {
+		t.Errorf("first g = %d,%v; want 4,true (armed, no move)", got, ok)
+	}
+	if got, ok := v.HandleListKey(key("g"), 4, 5, 3); !ok || got != 0 {
+		t.Errorf("second g = %d,%v; want 0,true", got, ok)
+	}
+	// ctrl+d steps down by half the window.
+	if got, ok := v.HandleListKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}, 0, 10, 6); !ok || got != 3 {
+		t.Errorf("ctrl+d = %d,%v; want 3,true", got, ok)
+	}
+	// An unrelated key is not consumed.
+	if _, ok := v.HandleListKey(key("x"), 0, 5, 3); ok {
+		t.Error("x should not be handled")
+	}
+}
+
 func TestVimNav_SetContent(t *testing.T) {
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	var v VimNav

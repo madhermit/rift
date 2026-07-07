@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/tui"
 )
 
 func newTestModel() Model {
@@ -14,6 +15,7 @@ func newTestModel() Model {
 	m.viewport = viewport.New()
 	m.viewport.SetWidth(40)
 	m.viewport.SetHeight(10)
+	m.filter = tui.NewFilterInput()
 	return m
 }
 
@@ -39,6 +41,61 @@ func TestStaleHunkDiffsDropped(t *testing.T) {
 	m, _ = m.Update(hunkDiffsMsg{reqID: 3, path: "b.go", width: 40, hunks: stale})
 	if sm = m.(Model); len(sm.displayHunks) != 1 || sm.displayHunks[0].rendered != "HELLO" {
 		t.Error("stale-token result should be dropped, keeping the current hunks")
+	}
+}
+
+// TestEscLeavesModeNeverQuits verifies stage's esc matches the SplitList screens:
+// it exits filter mode, closes the help overlay, and no-ops at the root — never
+// quitting (that's q / ctrl+c).
+func TestEscLeavesModeNeverQuits(t *testing.T) {
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+
+	// At the root, esc does nothing and, crucially, does not quit (nil command).
+	root := newTestModel()
+	root.ready = true
+	if _, cmd := root.Update(esc); cmd != nil {
+		t.Error("esc at the root should be a no-op, not quit")
+	}
+
+	// esc exits filter mode.
+	filtering := newTestModel()
+	filtering.filtering = true
+	filtering.filter.Focus()
+	if m, _ := filtering.Update(esc); m.(Model).filtering {
+		t.Error("esc should exit filter mode")
+	}
+
+	// esc closes the help overlay.
+	helping := newTestModel()
+	helping.showHelp = true
+	if m, _ := helping.Update(esc); m.(Model).showHelp {
+		t.Error("esc should close the help overlay")
+	}
+}
+
+// TestFilterKeepsSelection verifies stage keeps the selection on the same file
+// when it survives the new filter, and resets to the top otherwise.
+func TestFilterKeepsSelection(t *testing.T) {
+	files := []git.StatusFile{{Path: "alpha.go"}, {Path: "alpaca.go"}, {Path: "beta.go"}}
+
+	kept := newTestModel()
+	kept.files = files
+	kept.filteredFiles = files
+	kept.selectedIdx = 1 // alpaca.go
+	kept.filter.SetValue("alp")
+	kept.applyFilter()
+	if got := kept.filteredFiles[kept.selectedIdx].Path; got != "alpaca.go" {
+		t.Errorf("filter should keep selection on alpaca.go, got %q", got)
+	}
+
+	reset := newTestModel()
+	reset.files = files
+	reset.filteredFiles = files
+	reset.selectedIdx = 1 // alpaca.go
+	reset.filter.SetValue("beta")
+	reset.applyFilter()
+	if got := reset.filteredFiles[reset.selectedIdx].Path; got != "beta.go" {
+		t.Errorf("when the selection doesn't survive, reset to the first survivor; got %q", got)
 	}
 }
 
