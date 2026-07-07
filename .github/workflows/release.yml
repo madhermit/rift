@@ -74,3 +74,62 @@ jobs:
           files: dist/*
           body_path: release-notes.md
           generate_release_notes: true
+
+      - name: Bump Homebrew formula
+        # Regenerates madhermit/homebrew-tap's Formula/rift.rb wholesale from
+        # this release's checksums (the tap file is generated output — edit this
+        # template, not the tap). Needs a TAP_PUSH_TOKEN secret: a fine-grained
+        # PAT with contents:write on madhermit/homebrew-tap. Skips quietly when
+        # the secret is absent so a missing token never blocks a release.
+        env:
+          TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
+        run: |
+          if [ -z "$TAP_PUSH_TOKEN" ]; then
+            echo "TAP_PUSH_TOKEN not set; skipping Homebrew bump"
+            exit 0
+          fi
+          VERSION=${GITHUB_REF#refs/tags/}
+          NUM=${VERSION#v}
+          sum() { awk -v f="$1" '$2 == f {print $1}' dist/SHA256SUMS; }
+          git clone --depth 1 "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/madhermit/homebrew-tap.git" tap
+          cat > tap/Formula/rift.rb <<EOF
+          class Rift < Formula
+            desc "Syntax-aware git TUI: structural diffs, hunk staging, and a --tests lens"
+            homepage "https://github.com/madhermit/rift"
+            version "${NUM}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/madhermit/rift/releases/download/${VERSION}/rift-darwin-arm64"
+                sha256 "$(sum rift-darwin-arm64)"
+              else
+                url "https://github.com/madhermit/rift/releases/download/${VERSION}/rift-darwin-amd64"
+                sha256 "$(sum rift-darwin-amd64)"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/madhermit/rift/releases/download/${VERSION}/rift-linux-arm64"
+                sha256 "$(sum rift-linux-arm64)"
+              else
+                url "https://github.com/madhermit/rift/releases/download/${VERSION}/rift-linux-amd64"
+                sha256 "$(sum rift-linux-amd64)"
+              end
+            end
+
+            def install
+              bin.install Dir["rift-*"].first => "rift"
+              generate_completions_from_executable(bin/"rift", "completion")
+            end
+
+            test do
+              assert_match "rift version v#{version}", shell_output("#{bin}/rift version")
+            end
+          end
+          EOF
+          cd tap
+          git -c user.name=madhermit -c user.email=1425712+madhermit@users.noreply.github.com \
+            commit -am "rift ${NUM}"
+          git push origin HEAD
