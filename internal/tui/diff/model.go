@@ -40,6 +40,7 @@ type Model struct {
 	stream     *tui.PreviewStream // active "all changes" stream; nil otherwise
 
 	files          []git.ChangedFile // the full changed set; the list shows a (filtered) view of it
+	paths          []string          // pathspec scope (from `-- path...`), re-applied on reload
 	marks          *reviewMarks      // nil for a commit diff — historical files don't get reviewed
 	unreviewedOnly bool
 }
@@ -82,7 +83,7 @@ func pathRow(prefix string, selected bool, path, stat string, w int) string {
 	return rowWithStat(prefix+tui.RenderPath(path, avail, selected), stat, w)
 }
 
-func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string, lensToggle bool) Model {
+func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged bool, base, target string, lensToggle bool, paths []string) Model {
 	commitDiff := target != ""
 	engines := tui.NewEngineToggle(engine)
 
@@ -102,6 +103,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		target:     target,
 		commitDiff: commitDiff,
 		files:      files,
+		paths:      paths,
 		marks:      marks,
 	}
 
@@ -173,7 +175,17 @@ func (m Model) displayFiles() []git.ChangedFile {
 	if m.unreviewedOnly && m.marks != nil {
 		return m.marks.state.Unreviewed(m.files, m.marks.hashes)
 	}
+	if len(m.files) == 0 {
+		return nil // no synthetic "All changes" row over an empty set — show the status
+	}
 	return prependAllEntry(m.files)
+}
+
+// SetEmptyStatus overrides the footer text shown when the list is empty (e.g. a
+// commit whose diff failed to load, distinct from "No changes found").
+func (m Model) SetEmptyStatus(s string) Model {
+	m.list = m.list.SetEmptyStatus(s)
+	return m
 }
 
 // listTitle is the list-pane title: the staged/unstaged toggle (or "changes" for
@@ -211,6 +223,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SelectionChangedMsg:
 		m.stream.Cancel()
 		m.stream = nil
+		if msg.CacheHit {
+			return m, nil // preview served from cache; no new load
+		}
 		return m, m.previewCmd(msg.ReqID)
 	case tui.StreamReadyMsg:
 		var cmd tea.Cmd
@@ -221,12 +236,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list, m.stream, cmd = tui.AdvanceStream(m.list, m.stream, msg)
 		return m, cmd
 	case tui.EditorClosedMsg:
-		// The file may have changed, which can flip its reviewed state.
-		if m.marks != nil {
-			m.marks.hashes = review.ContentHashes(m.repo, m.files)
-			m.list = m.list.SetListTitle(m.listTitle())
-		}
-		return m.reloadFresh()
+		// The edit may have changed the file's diff (even reverting it entirely), and
+		// can flip its reviewed state — so reload the file list (recomputing hashes),
+		// preserving the selection, rather than leaving stale rows and +/- stats.
+		return m.reloadFiles()
 	case tea.KeyPressMsg:
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
@@ -302,6 +315,30 @@ func (m Model) toggleUnreviewedOnly() (tea.Model, tea.Cmd) {
 func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.list, cmd = m.list.ClearCacheAndReload()
+	return m, cmd
+}
+
+// reloadFiles re-reads the changed-file list for the working-tree scope (staged
+// side and pathspec), refreshes reviewed hashes, and repopulates the list while
+// keeping the selection on the same file when it survives. A commit diff shows a
+// fixed historical set, so it only reloads the current preview.
+func (m Model) reloadFiles() (tea.Model, tea.Cmd) {
+	if m.commitDiff {
+		return m.reloadFresh()
+	}
+	files, err := m.repo.ChangedFiles(m.staged)
+	if err != nil {
+		return m, nil
+	}
+	git.SortByPath(files)
+	m.files = git.FilterByPaths(files, m.paths)
+	if m.marks != nil {
+		m.marks.hashes = review.ContentHashes(m.repo, m.files)
+	}
+	prevKey := m.list.SelectedKey()
+	m.list = m.list.SetListTitle(m.listTitle())
+	var cmd tea.Cmd
+	m.list, cmd = m.list.SetItemsSelecting(m.displayFiles(), prevKey)
 	return m, cmd
 }
 

@@ -15,23 +15,30 @@ import (
 // exits, so the screen can refresh (the file may have changed).
 type EditorClosedMsg struct{ Err error }
 
-// OpenInEditor suspends the TUI, opens path in $EDITOR (falling back to $VISUAL,
+// OpenInEditor suspends the TUI, opens path in $VISUAL (falling back to $EDITOR,
 // then vi) with the working directory set to dir, and resumes on exit. When line
 // > 0 the editor is asked to open at that line.
 func OpenInEditor(dir, path string, line int) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = os.Getenv("VISUAL")
-	}
-	if editor == "" {
-		editor = "vi"
-	}
-	// EDITOR may carry flags (e.g. "code --wait"); the first field is the binary.
-	fields := strings.Fields(editor)
+	// resolveEditor guarantees a non-blank value, so strings.Fields is non-empty.
+	fields := strings.Fields(resolveEditor(os.Getenv("VISUAL"), os.Getenv("EDITOR")))
+	// The editor may carry flags (e.g. "code --wait"); the first field is the binary.
 	args := append(fields[1:len(fields):len(fields)], editorArgs(fields[0], path, line)...)
 	c := exec.Command(fields[0], args...)
 	c.Dir = dir
 	return tea.ExecProcess(c, func(err error) tea.Msg { return EditorClosedMsg{Err: err} })
+}
+
+// resolveEditor picks the editor command from VISUAL, then EDITOR (the git/POSIX
+// convention for interactive editors), treating a blank or whitespace-only value
+// as unset, and falls back to vi. Never returns a blank string, so callers can
+// safely take the first whitespace-split field as the binary.
+func resolveEditor(visual, editor string) string {
+	for _, v := range []string{visual, editor} {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return "vi"
 }
 
 // editorArgs builds the editor argument list, adding a line-jump in the syntax

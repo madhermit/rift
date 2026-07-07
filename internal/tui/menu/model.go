@@ -13,7 +13,6 @@ import (
 type Command struct {
 	Name        string
 	Description string
-	Available   bool
 }
 
 type SelectedMsg struct {
@@ -45,10 +44,10 @@ func (m Model) Selected() string {
 
 func New() Model {
 	commands := []Command{
-		{Name: "diff", Description: "Browse changes with syntax-aware diffs", Available: true},
-		{Name: "log", Description: "Interactive commit log browser", Available: true},
-		{Name: "stash", Description: "Stash manager with preview", Available: true},
-		{Name: "stage", Description: "Interactive hunk staging", Available: true},
+		{Name: "diff", Description: "Browse changes with syntax-aware diffs"},
+		{Name: "log", Description: "Interactive commit log browser"},
+		{Name: "stash", Description: "Stash manager with preview"},
+		{Name: "stage", Description: "Interactive hunk staging"},
 	}
 
 	return Model{
@@ -105,9 +104,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if len(m.filtered) > 0 {
 			cmd := m.filtered[m.selectedIdx]
-			if !cmd.Available {
-				return m, nil
-			}
 			return m, func() tea.Msg {
 				return SelectedMsg{Command: cmd.Name}
 			}
@@ -179,18 +175,11 @@ func (m Model) View() tea.View {
 	for i, cmd := range m.filtered {
 		selected := i == m.selectedIdx
 		nameStyle := tui.NormalTextStyle
-		switch {
-		case !cmd.Available:
-			nameStyle = dimStyle
-		case selected:
+		if selected {
 			nameStyle = tui.SelectedTextStyle
 		}
-		desc := cmd.Description
-		if !cmd.Available {
-			desc += " (soon)"
-		}
 		row := tui.Marker(selected) + nameStyle.Render(fmt.Sprintf("%-9s", cmd.Name)) +
-			"  " + dimStyle.Render(desc)
+			"  " + dimStyle.Render(cmd.Description)
 		items.WriteString(row + "\n")
 	}
 
@@ -200,9 +189,12 @@ func (m Model) View() tea.View {
 	header := tui.Header("", "a composable fuzzy git tool", m.width)
 
 	var footer string
-	if m.filtering {
+	switch {
+	case m.filtering:
 		footer = tui.FooterContent(m.width, m.filter.View())
-	} else {
+	case len(m.filtered) == 0:
+		footer = tui.Footer(m.width, "no matches", menuHints)
+	default:
 		footer = tui.Footer(m.width, fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filtered)), menuHints)
 	}
 

@@ -14,6 +14,7 @@ import (
 type VimNav struct {
 	pendingG bool
 	sections []section // file boundaries within the displayed content
+	lines    []string  // finalized display lines (banners stripped), the render source
 }
 
 // section is a file boundary in the preview: the displayed line where the file
@@ -63,28 +64,57 @@ func (v *VimNav) HandleKey(vp *viewport.Model, msg tea.KeyPressMsg) bool {
 	return false
 }
 
-// SetContent updates the viewport content and records file-section boundaries.
-// SectionBanner lines mark file boundaries but are NOT displayed: the pane's own
-// difftastic/git header is the visible boundary while scrolling, and the
-// section's path is surfaced in the panel legend instead (see
-// SplitList.currentSection). Each banner is stripped from the shown content and
-// recorded as the section starting at the next displayed line.
-// SetContent updates the viewport, records section boundaries, and returns the
-// displayed (banner-stripped) lines so the caller can locate text within them
-// (e.g. to anchor-scroll); the line indices line up with viewport offsets.
+// SetContent replaces the viewport content (a hardwrapped string) and records
+// file-section boundaries, returning the displayed (banner-stripped) lines so the
+// caller can locate text within them (e.g. to anchor-scroll); the line indices
+// line up with viewport offsets. SectionBanner lines mark file boundaries but are
+// NOT displayed: the pane's own difftastic/git header is the visible boundary
+// while scrolling, and the section's path is surfaced in the panel legend instead
+// (see SplitList.currentSection). Each banner is stripped from the shown content
+// and recorded as the section starting at the next displayed line.
 func (v *VimNav) SetContent(vp *viewport.Model, content string) []string {
-	raw := strings.Split(content, "\n")
-	display := make([]string, 0, len(raw))
 	v.sections = nil
-	for _, line := range raw {
+	v.lines = nil
+	if content != "" {
+		v.appendLines(strings.Split(content, "\n"))
+	}
+	vp.SetContent(strings.Join(v.lines, "\n"))
+	return v.lines
+}
+
+// AppendContent finalizes an already-hardwrapped block of streamed content into
+// the display, extracting any section banners. It does not touch the viewport —
+// RenderStreaming redraws once the chunk's trailing line is also known. Used by
+// SplitList.appendPreview so each chunk is wrapped once rather than re-wrapping
+// the whole buffer.
+func (v *VimNav) AppendContent(wrapped string) {
+	v.appendLines(strings.Split(wrapped, "\n"))
+}
+
+// RenderStreaming redraws the viewport from the finalized display lines plus the
+// still-growing (already-wrapped) trailing line, and returns the finalized lines.
+// The trailing line is shown but not section-scanned or finalized, so the drawn
+// content matches a full re-wrap of the same buffer.
+func (v *VimNav) RenderStreaming(vp *viewport.Model, tail string) []string {
+	content := tail // nothing finalized yet: the buffer is a single partial line
+	if len(v.lines) > 0 {
+		// The terminated lines, then the current (maybe empty) trailing one.
+		content = strings.Join(v.lines, "\n") + "\n" + tail
+	}
+	vp.SetContent(content)
+	return v.lines
+}
+
+// appendLines files each already-wrapped line into the display: a section banner
+// records a boundary (and is not shown), anything else becomes a display line.
+func (v *VimNav) appendLines(wrapped []string) {
+	for _, line := range wrapped {
 		if label, ok := bannerLabel(line); ok {
-			v.sections = append(v.sections, section{offset: len(display), label: label})
+			v.sections = append(v.sections, section{offset: len(v.lines), label: label})
 			continue
 		}
-		display = append(display, line)
+		v.lines = append(v.lines, line)
 	}
-	vp.SetContent(strings.Join(display, "\n"))
-	return display
 }
 
 // bannerLabel returns the file path from a SectionBanner line ("── path ──────").

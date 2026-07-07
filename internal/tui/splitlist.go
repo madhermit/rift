@@ -14,13 +14,18 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// SelectionChangedMsg is emitted by a SplitList when the selected item changes
-// and its preview is not already cached. The parent loads a preview and feeds
-// the result back as a PreviewMsg carrying the same ReqID. Routing preview
-// loading through the parent lets previews depend on parent state (e.g. staged
-// vs unstaged). ReqID lets the component discard results from superseded
-// requests during fast navigation.
-type SelectionChangedMsg struct{ ReqID int }
+// SelectionChangedMsg is emitted by a SplitList on every selection change so the
+// parent can cancel any in-flight preview stream for the previous item. When the
+// new item's preview is not cached (CacheHit false) the parent loads it and feeds
+// the result back as a PreviewMsg carrying the same ReqID; when it is cached
+// (CacheHit true) the SplitList has already shown it, so the parent only cancels
+// its stream and starts no new load. Routing preview loading through the parent
+// lets previews depend on parent state (e.g. staged vs unstaged). ReqID lets the
+// component discard results from superseded requests during fast navigation.
+type SelectionChangedMsg struct {
+	ReqID    int
+	CacheHit bool
+}
 
 // PreviewMsg carries loaded preview content into a SplitList's preview pane. The
 // parent echoes the ReqID from the SelectionChangedMsg it is answering. When
@@ -98,6 +103,7 @@ type SplitList[T any] struct {
 	viewport viewport.Model
 	vim      VimNav
 	preview  string
+	rawTail  string // raw text of the not-yet-terminated final streamed line
 	prevErr  error
 	anchored bool // the preview has been scrolled to the selection's PreviewLine
 
@@ -105,6 +111,7 @@ type SplitList[T any] struct {
 	loading  bool   // a preview is being loaded for the current selection
 	showHelp bool   // the keybinding overlay is open
 	flash    string // transient footer message (e.g. "copied …"), cleared on nav
+	prompt   string // when set, replaces the footer (e.g. an inline y/n confirmation)
 
 	cache map[string]string // rendered previews, keyed by cfg.CacheKey
 	reqID int               // increments per preview request; stale results are dropped
@@ -149,10 +156,14 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	m.prevErr = nil    // a new selection clears any previous load error
 	m.flash = ""       // and any transient message (e.g. "copied …")
 	m.anchored = false // a new selection re-anchors its preview
+	reqID := m.reqID
+	// Every selection change signals the parent so it cancels the previous item's
+	// stream; CacheHit tells it the content is already shown, so start no new load.
+	cacheHit := func() tea.Msg { return SelectionChangedMsg{ReqID: reqID, CacheHit: true} }
 	it, ok := m.Selected()
 	if !ok {
 		m.clearPreview()
-		return m, nil
+		return m, cacheHit
 	}
 	if key := m.cacheKey(it); key != "" {
 		if cached, hit := m.cache[key]; hit {
@@ -161,14 +172,13 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 			lines := m.setPreviewContent()
 			m.viewport.GotoTop()
 			m.applyAnchor(lines)
-			return m, nil
+			return m, cacheHit
 		}
 	}
 	m.preview = ""
 	m.setPreviewContent()
 	m.viewport.GotoTop() // so a progressive stream's first chunk paints at the top
 
-	reqID := m.reqID
 	emit := func() tea.Msg { return SelectionChangedMsg{ReqID: reqID} }
 	if m.loading {
 		return m, emit
@@ -284,9 +294,48 @@ func (m SplitList[T]) SetContext(ctx string) SplitList[T] {
 // fresh preview. The cache is cleared because the item set (and the state it
 // reflects, e.g. staged vs unstaged) has changed.
 func (m SplitList[T]) SetItems(items []T) (SplitList[T], tea.Cmd) {
+	return m.SetItemsSelecting(items, "")
+}
+
+// SetItemsSelecting is SetItems that keeps the selection on the item whose Match
+// value equals key (when it survives the new set/filter), instead of resetting to
+// the top. Used to preserve the user's position across a file-list reload.
+func (m SplitList[T]) SetItemsSelecting(items []T, key string) (SplitList[T], tea.Cmd) {
 	m.items = items
 	m.cache = map[string]string{}
-	return m.applyFilter()
+	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
+	m.selected = 0
+	if key != "" && m.cfg.Match != nil {
+		for i, it := range m.filtered {
+			if m.cfg.Match(it) == key {
+				m.selected = i
+				break
+			}
+		}
+	}
+	m.resizeViewport()
+	return m.requestPreview()
+}
+
+// SetPrompt sets (or clears, when empty) an inline footer prompt that overrides
+// the normal footer — parents use it to show a y/n confirmation while gating a
+// destructive action.
+func (m SplitList[T]) SetPrompt(prompt string) SplitList[T] {
+	m.prompt = prompt
+	return m
+}
+
+// Reading reports whether the preview pane is focused (vs the list pane). Parents
+// gate list-pane-only actions on it (e.g. stash apply/pop/drop).
+func (m SplitList[T]) Reading() bool { return m.active == splitPreviewPane }
+
+// SelectedKey returns the Match value of the current selection, or "" when the
+// list is empty. Parents capture it before a reload to restore the selection.
+func (m SplitList[T]) SelectedKey() string {
+	if it, ok := m.Selected(); ok && m.cfg.Match != nil {
+		return m.cfg.Match(it)
+	}
+	return ""
 }
 
 func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
@@ -310,8 +359,7 @@ func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
 			// Streamed chunks are never cached individually (the parent caches the
 			// whole result on completion) and never reset scroll — the first chunk
 			// appends onto the empty, top-scrolled pane requestPreview left behind.
-			m.preview += msg.Content
-			m.applyAnchor(m.setPreviewContent()) // anchor once its line streams in
+			m.applyAnchor(m.appendPreview(msg.Content)) // anchor once its line streams in
 			return m, nil
 		}
 		m.preview = msg.Content
@@ -461,9 +509,10 @@ func (m SplitList[T]) stepList(delta int) (SplitList[T], tea.Cmd) {
 func (m SplitList[T]) applyFilter() (SplitList[T], tea.Cmd) {
 	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
 	m.selected = 0
-	// relayout (not just requestPreview): the strip height tracks the item count,
-	// so the preview viewport must resize when the filter changes.
-	return m.relayout()
+	// The strip height tracks the item count, so the viewport must resize when the
+	// filter changes; and the selection reset means a fresh preview is always due.
+	m.resizeViewport()
+	return m.requestPreview()
 }
 
 // panelMin is the minimum outer height of a panel (a 2-row border around at least
@@ -506,22 +555,78 @@ func (m SplitList[T]) stackLayout() (previewH, navH int) {
 	return contentH - navH, navH
 }
 
-func (m SplitList[T]) relayout() (SplitList[T], tea.Cmd) {
+// resizeViewport sizes the preview viewport to the current layout and reports
+// whether its width changed. Width is part of the preview cache key (difftastic
+// bakes the layout into its output), so a width change is the only resize that
+// invalidates the current render; a height/focus change keeps it.
+func (m *SplitList[T]) resizeViewport() bool {
 	previewH, _ := m.stackLayout()
-	m.viewport.SetWidth(maxInt(1, m.width-2))
+	newWidth := maxInt(1, m.width-2)
+	changed := newWidth != m.viewport.Width()
+	m.viewport.SetWidth(newWidth)
 	m.viewport.SetHeight(maxInt(1, previewH-2))
-	return m.requestPreview()
+	return changed
 }
 
-// setPreviewContent renders the current preview into the viewport and returns the
-// displayed (banner-stripped) lines, which applyAnchor consumes — the two always
-// run back to back, so the lines never need to be stashed on the struct.
+// relayout resizes the preview to the current layout. It reloads the preview only
+// when the pane width changed (the width-keyed cache is then stale); on a pure
+// focus or height change it keeps the current content and scroll — the viewport
+// clamps its own YOffset — and leaves any in-flight stream running.
+func (m SplitList[T]) relayout() (SplitList[T], tea.Cmd) {
+	if m.resizeViewport() {
+		return m.requestPreview()
+	}
+	return m, nil
+}
+
+// setPreviewContent renders the whole current preview into the viewport and
+// returns the displayed (banner-stripped) lines, which applyAnchor consumes — the
+// two always run back to back, so the lines never need to be stashed on the
+// struct. This is the full-render path (a new selection, a cache hit, a resize);
+// it re-hardwraps the entire buffer, so streaming uses appendPreview instead.
 func (m *SplitList[T]) setPreviewContent() []string {
+	m.rawTail = ""
 	content := m.preview
 	if w := m.viewport.Width(); w > 0 && content != "" {
 		content = ansi.Hardwrap(content, w, true)
 	}
 	return m.vim.SetContent(&m.viewport, content)
+}
+
+// appendPreview grows a streamed preview by one chunk without re-hardwrapping the
+// whole buffer: only the newly completed lines are hardwrapped and appended to
+// the cached display slice (updating vim section offsets incrementally). An
+// unterminated trailing line is held in rawTail and re-wrapped once the rest of
+// it arrives with the next chunk, so a line split across chunks still wraps as a
+// single line. The result equals a full re-wrap of the accumulated buffer (which
+// is what gets cached on completion). Returns the display lines for anchoring.
+func (m *SplitList[T]) appendPreview(chunk string) []string {
+	m.preview += chunk // raw accumulation, cached verbatim once the stream completes
+	w := m.viewport.Width()
+	if w <= 0 {
+		return m.setPreviewContent() // no width yet: fall back to a full render
+	}
+	complete, tail := splitLastLine(m.rawTail + chunk)
+	m.rawTail = tail
+	if complete != "" {
+		// complete ends in "\n"; drop it so the wrap doesn't yield a phantom line,
+		// then hardwrap the block (line-independent, so this matches a full re-wrap)
+		// and finalize the resulting lines into the section-tracked display slice.
+		m.vim.AppendContent(ansi.Hardwrap(strings.TrimSuffix(complete, "\n"), w, true))
+	}
+	// The still-growing final line (the segment after the last newline) is shown as
+	// the trailing display row so a full re-wrap of the same buffer looks the same;
+	// it is not finalized (or section-scanned) until a later chunk terminates it.
+	return m.vim.RenderStreaming(&m.viewport, ansi.Hardwrap(m.rawTail, w, true))
+}
+
+// splitLastLine splits s into the portion through its final newline (complete,
+// empty when s has none) and the remaining unterminated tail after it.
+func splitLastLine(s string) (complete, tail string) {
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		return s[:i+1], s[i+1:]
+	}
+	return "", s
 }
 
 // applyAnchor scrolls the preview to the selection's PreviewLine the first time
@@ -691,11 +796,14 @@ func (m SplitList[T]) previewBodyView() (string, Scrollbar) {
 	return m.viewport.View(), ScrollbarFor(&m.viewport)
 }
 
-// footerView renders the bottom bar: the filter prompt while filtering, an error
-// or flash message when present, otherwise the position (and scroll % while the
-// preview is focused) followed by the keybinding hints.
+// footerView renders the bottom bar: a parent-set prompt (e.g. an inline y/n
+// confirmation) takes precedence, then the filter prompt while filtering, an
+// error or flash message when present, otherwise the position (and scroll % while
+// the preview is focused) followed by the keybinding hints.
 func (m SplitList[T]) footerView() string {
 	switch {
+	case m.prompt != "":
+		return Footer(m.width, m.prompt, nil)
 	case m.filtering:
 		return FooterContent(m.width, m.filter.View())
 	case m.prevErr != nil:

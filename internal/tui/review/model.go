@@ -139,6 +139,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SelectionChangedMsg:
 		m.stream.Cancel()
 		m.stream = nil
+		if msg.CacheHit {
+			return m, nil // preview served from cache; no new load
+		}
 		return m, m.previewCmd(msg.ReqID)
 	case tui.StreamReadyMsg:
 		var cmd tea.Cmd

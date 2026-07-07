@@ -62,6 +62,56 @@ func TestPreviewCachingAndStaleness(t *testing.T) {
 	}
 }
 
+func chunkBytes(s string, n int) []string {
+	if n < 1 {
+		n = 1
+	}
+	size := (len(s) + n - 1) / n
+	var chunks []string
+	for i := 0; i < len(s); i += size {
+		end := min(i+size, len(s))
+		chunks = append(chunks, s[i:end])
+	}
+	return chunks
+}
+
+// TestStreamedAppendMatchesFullRewrap guards the incremental streamed-append path
+// (which hardwraps only each chunk) against a full re-wrap of the whole buffer.
+// The content has section banners, long lines that wrap at the pane width, and
+// wide runes, and is fed in many small chunks so a wrapped line straddles chunk
+// boundaries — exactly the case a naive per-chunk wrap gets wrong.
+func TestStreamedAppendMatchesFullRewrap(t *testing.T) {
+	banner := func(p string) string { return SectionBanner(p, 38) + "\n" }
+	long := strings.Repeat("abcd ", 20) // wraps several times at width 38
+	wide := strings.Repeat("你好世界", 6)   // wide runes, wraps
+	raw := banner("pkg/file/one.go") + long + "\n" +
+		banner("pkg/file/two.go") + wide + "\n" +
+		"a short trailing line\n"
+
+	// Streamed: feed the content in many awkward chunks via Append messages.
+	ms := NewSplitList(testCfg(), []string{"item"})
+	ms, _ = ms.Update(tea.WindowSizeMsg{Width: 40, Height: 60})
+	for _, c := range chunkBytes(raw, 13) {
+		ms, _ = ms.Update(PreviewMsg{Content: c, ReqID: ms.reqID, Append: true})
+	}
+
+	// Full: one non-append message carrying the whole content.
+	mf := NewSplitList(testCfg(), []string{"item"})
+	mf, _ = mf.Update(tea.WindowSizeMsg{Width: 40, Height: 60})
+	mf, _ = mf.Update(PreviewMsg{Content: raw, ReqID: mf.reqID})
+
+	if got, want := plainView(ms), plainView(mf); got != want {
+		t.Errorf("streamed append != full rewrap\n--- streamed ---\n%s\n--- full ---\n%s", got, want)
+	}
+	// The banners must be extracted as sections in both, not shown as body lines.
+	if len(ms.vim.sections) != 2 {
+		t.Errorf("streamed: got %d sections, want 2", len(ms.vim.sections))
+	}
+	if got := ms.currentSection(); got != "pkg/file/one.go" {
+		t.Errorf("streamed: currentSection at top = %q, want pkg/file/one.go", got)
+	}
+}
+
 func lineIndex(v, sub string) int {
 	for i, line := range strings.Split(v, "\n") {
 		if strings.Contains(line, sub) {

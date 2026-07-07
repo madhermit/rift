@@ -3,6 +3,7 @@ package stageui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -41,18 +42,23 @@ type Model struct {
 	selectedIdx   int
 	activePane    pane
 
-	displayHunks []displayHunk // combined staged + unstaged hunks
+	displayHunks []displayHunk // combined staged + unstaged hunks, in file order
 	hunkOffsets  []int         // viewport line offset where each hunk starts
 	hunkIdx      int           // selected hunk index
+
+	// hunkCache memoizes rendered hunk sets by path+width so navigation and filter
+	// keystrokes don't re-run the whole difftastic pipeline. Invalidated per path on
+	// stage/unstage and editor close, and wholesale on a width change.
+	hunkCache map[string][]displayHunk
+	diffReqID int // increments per diff load; stale hunkDiffsMsg results are dropped
 
 	viewport  viewport.Model
 	filter    textinput.Model
 	filtering bool
 
-	diffErr        error
-	vim            tui.VimNav
-	skipDiffReload bool // after hunk stage/unstage, only reload file list
-	showHelp       bool
+	diffErr  error
+	vim      tui.VimNav
+	showHelp bool
 
 	width  int
 	height int
@@ -76,6 +82,9 @@ var stageNavKeys = [][2]string{
 }
 
 type hunkDiffsMsg struct {
+	reqID int    // request token; a result whose token is stale is dropped
+	path  string // file the hunks belong to (for the cache key)
+	width int    // viewport width the hunks were rendered at (for the cache key)
 	hunks []displayHunk
 }
 
@@ -85,9 +94,8 @@ type filesLoadedMsg struct {
 }
 
 type stageResultMsg struct {
-	err     error
-	hunkIdx int  // which hunk was staged/unstaged (-1 for file-level)
-	staged  bool // true if staged, false if unstaged
+	err  error
+	path string // file whose staged/unstaged split changed (to invalidate its cache)
 }
 
 func (m Model) layout() tui.SplitLayout {
@@ -101,6 +109,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
 		branch:        repo.CurrentBranch(),
 		files:         files,
 		filteredFiles: files,
+		hunkCache:     map[string][]displayHunk{},
 		viewport:      viewport.New(),
 		filter:        tui.NewFilterInput(),
 	}
@@ -115,24 +124,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tui.EditorClosedMsg:
-		return m, m.reloadFiles() // the file may have changed
+		// The edit changed the file's diff, so drop its cached hunks before reloading.
+		if m.selectedIdx < len(m.filteredFiles) {
+			m.invalidatePath(m.filteredFiles[m.selectedIdx].Path)
+		}
+		return m, m.reloadFiles()
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
 		return m.applyLayout()
 	case hunkDiffsMsg:
-		m.diffErr = nil
-		m.displayHunks = msg.hunks
-		if m.hunkIdx >= len(m.displayHunks) {
-			m.hunkIdx = max(0, len(m.displayHunks)-1)
+		if msg.reqID != m.diffReqID {
+			return m, nil // superseded by a newer selection/layout
 		}
-		m.renderHunks()
-		if m.hunkIdx < len(m.hunkOffsets) {
-			m.viewport.SetYOffset(m.hunkOffsets[m.hunkIdx])
-		} else {
-			m.viewport.GotoTop()
-		}
+		m.hunkCache[hunkCacheKey(msg.path, msg.width)] = msg.hunks
+		m.setHunks(msg.hunks)
 		return m, nil
 	case filesLoadedMsg:
 		if msg.err != nil {
@@ -146,29 +153,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.files = msg.files
 		m.applyFilter()
 		m.selectedIdx = findFileIndex(m.filteredFiles, selectedPath)
-		if m.skipDiffReload {
-			m.skipDiffReload = false
-			return m, nil
-		}
-		if len(m.filteredFiles) > 0 {
-			return m, m.loadSelectedDiff()
-		}
-		m.diffErr = nil
-		m.displayHunks = nil
-		m.viewport.SetContent("")
-		return m, nil
+		cmd := m.requestDiff()
+		return m, cmd
 	case stageResultMsg:
 		if msg.err != nil {
 			m.diffErr = msg.err
 			return m, nil
 		}
-		if msg.hunkIdx >= 0 && msg.hunkIdx < len(m.displayHunks) {
-			// Hunk-level: toggle in-place, skip diff reload
-			m.displayHunks[msg.hunkIdx].staged = msg.staged
-			m.renderHunks()
-			m.skipDiffReload = true
-		}
-		// File-level (hunkIdx == -1): full reload
+		// The file's staged/unstaged hunk split changed: drop its cache and reload the
+		// file list, which re-runs the (now fresh) diff so hunk patches stay valid.
+		m.invalidatePath(msg.path)
 		return m, m.reloadFiles()
 	}
 
@@ -311,8 +305,7 @@ func (m Model) stageOrUnstage(stage bool) (tea.Model, tea.Cmd) {
 			return m, nil // already in desired state
 		}
 		patch := dh.hunk.Patch(dh.fd.Header)
-		repo := m.repo
-		idx := m.hunkIdx
+		repo, path := m.repo, f.Path
 		return m, func() tea.Msg {
 			var err error
 			if stage {
@@ -321,9 +314,9 @@ func (m Model) stageOrUnstage(stage bool) (tea.Model, tea.Cmd) {
 				err = repo.UnstageHunk(patch)
 			}
 			if err != nil {
-				return stageResultMsg{err: err, hunkIdx: -1}
+				return stageResultMsg{err: err}
 			}
-			return stageResultMsg{hunkIdx: idx, staged: stage}
+			return stageResultMsg{path: path}
 		}
 	}
 
@@ -331,8 +324,7 @@ func (m Model) stageOrUnstage(stage bool) (tea.Model, tea.Cmd) {
 	if !stage && (f.StagingStatus == "" || f.StagingStatus == "Untracked") {
 		return m, nil
 	}
-	repo := m.repo
-	path := f.Path
+	repo, path := m.repo, f.Path
 	return m, func() tea.Msg {
 		var err error
 		if stage {
@@ -341,9 +333,9 @@ func (m Model) stageOrUnstage(stage bool) (tea.Model, tea.Cmd) {
 			err = repo.Unstage(path)
 		}
 		if err != nil {
-			return stageResultMsg{err: err, hunkIdx: -1}
+			return stageResultMsg{err: err}
 		}
-		return stageResultMsg{hunkIdx: -1, staged: stage}
+		return stageResultMsg{path: path}
 	}
 }
 
@@ -358,9 +350,9 @@ func (m Model) stageAll() (tea.Model, tea.Cmd) {
 	repo := m.repo
 	return m, func() tea.Msg {
 		if err := repo.Stage(paths...); err != nil {
-			return stageResultMsg{err: err, hunkIdx: -1}
+			return stageResultMsg{err: err}
 		}
-		return stageResultMsg{hunkIdx: -1, staged: true}
+		return stageResultMsg{} // empty path: every file changed, invalidate all
 	}
 }
 
@@ -377,13 +369,16 @@ func (m Model) reloadFiles() tea.Cmd {
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
 	l := m.layout()
-	m.viewport.SetWidth(l.DiffWidth)
-	m.viewport.SetHeight(l.ContentHeight - 2)
-	m.renderHunks()
-	if len(m.filteredFiles) > 0 {
-		return m, m.loadSelectedDiff()
+	if l.DiffWidth != m.viewport.Width() {
+		m.hunkCache = map[string][]displayHunk{} // width-keyed renders are now stale
 	}
-	return m, nil
+	// Clamp to >=1 so a very short/narrow terminal doesn't hand the viewport a
+	// negative size.
+	m.viewport.SetWidth(max(1, l.DiffWidth))
+	m.viewport.SetHeight(max(1, l.ContentHeight-2))
+	m.renderHunks() // re-render current hunks at the new size until the reload lands
+	cmd := m.requestDiff()
+	return m, cmd
 }
 
 func (m Model) navigate(delta int) (tea.Model, tea.Cmd) {
@@ -404,12 +399,8 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.filter, cmd = m.filter.Update(msg)
 	m.applyFilter()
 	m.selectedIdx = 0
-
-	if len(m.filteredFiles) > 0 {
-		return m, tea.Batch(cmd, m.loadSelectedDiff())
-	}
-	m.viewport.SetContent("")
-	return m, cmd
+	dcmd := m.requestDiff()
+	return m, tea.Batch(cmd, dcmd)
 }
 
 func (m *Model) applyFilter() {
@@ -429,10 +420,61 @@ func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 		m.selectedIdx = len(m.filteredFiles) - 1
 	}
 	m.hunkIdx = 0 // reset hunk selection on file change
-	return m, m.loadSelectedDiff()
+	cmd := m.requestDiff()
+	return m, cmd
 }
 
-func (m Model) loadSelectedDiff() tea.Cmd {
+// hunkCacheKey identifies a file's rendered hunk set. Width is part of the key
+// because difftastic bakes the pane width into its output.
+func hunkCacheKey(path string, width int) string {
+	return fmt.Sprintf("%s\x00%d", path, width)
+}
+
+// invalidatePath drops a file's cached hunks (all files' when path is ""), so its
+// next load re-renders. Called when a stage/unstage or edit changes the file.
+func (m *Model) invalidatePath(path string) {
+	if path == "" {
+		m.hunkCache = map[string][]displayHunk{}
+		return
+	}
+	delete(m.hunkCache, hunkCacheKey(path, m.viewport.Width()))
+}
+
+// requestDiff shows the selected file's hunks: instantly from the width-keyed
+// cache when present, otherwise via an async load tagged with a fresh request
+// token. The token is always bumped (even on a cache hit) so a slow load for a
+// previously-selected file can't land over the current one.
+func (m *Model) requestDiff() tea.Cmd {
+	m.diffReqID++
+	if len(m.filteredFiles) == 0 {
+		m.setHunks(nil)
+		return nil
+	}
+	f := m.filteredFiles[m.selectedIdx]
+	if hunks, ok := m.hunkCache[hunkCacheKey(f.Path, m.viewport.Width())]; ok {
+		m.setHunks(hunks)
+		return nil
+	}
+	return m.loadSelectedDiff(m.diffReqID)
+}
+
+// setHunks installs a rendered hunk set and positions the viewport on the
+// selected hunk (or the top when there is none).
+func (m *Model) setHunks(hunks []displayHunk) {
+	m.diffErr = nil
+	m.displayHunks = hunks
+	if m.hunkIdx >= len(m.displayHunks) {
+		m.hunkIdx = max(0, len(m.displayHunks)-1)
+	}
+	m.renderHunks()
+	if m.hunkIdx < len(m.hunkOffsets) {
+		m.viewport.SetYOffset(m.hunkOffsets[m.hunkIdx])
+	} else {
+		m.viewport.GotoTop()
+	}
+}
+
+func (m Model) loadSelectedDiff(reqID int) tea.Cmd {
 	if len(m.filteredFiles) == 0 {
 		return nil
 	}
@@ -468,7 +510,13 @@ func (m Model) loadSelectedDiff() tea.Cmd {
 			}
 		}
 
-		return hunkDiffsMsg{hunks: result}
+		// Order by new-side position so staged and unstaged hunks interleave in file
+		// order rather than grouping by state — staging one then doesn't jump its row.
+		sort.SliceStable(result, func(i, j int) bool {
+			return result[i].hunk.NewStart < result[j].hunk.NewStart
+		})
+
+		return hunkDiffsMsg{reqID: reqID, path: f.Path, width: width, hunks: result}
 	}
 }
 

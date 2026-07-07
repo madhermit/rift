@@ -48,7 +48,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope revi
 }
 
 func (m Model) buildFiles() tui.PreviewChild {
-	return diffui.New(m.repo, m.engine, m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true)
+	return diffui.New(m.repo, m.engine, m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true, m.scope.Paths)
 }
 
 func (m Model) buildTests() tui.PreviewChild {
@@ -129,7 +129,7 @@ func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	m = m.cancelShown()
 	m.scope.Staged = !m.scope.Staged
 	m.gen++
-	m.files = worktreeFiles(m.repo, m.scope.Staged)
+	m.files = worktreeFiles(m.repo, m.scope.Staged, m.scope.Paths)
 	if m.showTests {
 		// Keep showing the now-stale tests until the re-collect lands.
 		m.filesLens = nil
@@ -175,14 +175,15 @@ func (m Model) collectTests(gen int) tea.Cmd {
 }
 
 // worktreeFiles lists the changed files for a working-tree staged toggle, sorted
-// like the diff command's own listing.
-func worktreeFiles(repo *git.Repo, staged bool) []git.ChangedFile {
+// and pathspec-filtered like the diff command's own listing — so the file lens
+// keeps the `-- path` scope that the tests lens (via review.Collect) already does.
+func worktreeFiles(repo *git.Repo, staged bool, paths []string) []git.ChangedFile {
 	files, err := repo.ChangedFiles(staged)
 	if err != nil {
 		return nil
 	}
 	git.SortByPath(files)
-	return files
+	return git.FilterByPaths(files, paths)
 }
 
 // lensCollectedMsg delivers the parsed tests for the first switch to the tests

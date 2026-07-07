@@ -30,6 +30,7 @@ type Model struct {
 	list    tui.SplitList[git.CommitInfo]
 	display diff.Display
 	action  Action
+	confirm tui.Confirm        // pending y/n gate for cherry-pick / revert
 	stream  *tui.PreviewStream // active commit-diff stream; nil otherwise
 
 	drilled    tui.PreviewChild // per-commit view (file diff, or tests) when drilling
@@ -43,6 +44,43 @@ type Model struct {
 // Action reports the git operation chosen for the selected commit (NoAction if
 // the user just quit).
 func (m Model) Action() Action { return m.action }
+
+func (a Action) verb() string {
+	switch a {
+	case CherryPick:
+		return "cherry-pick"
+	case Revert:
+		return "revert"
+	}
+	return ""
+}
+
+// startAction arms cherry-pick / revert on the selected commit behind an inline
+// y/n confirmation (both rewrite history / the working tree). resolveConfirm quits
+// with the action on "y".
+func (m Model) startAction(action Action) (tea.Model, tea.Cmd) {
+	commit, ok := m.list.Selected()
+	if !ok {
+		return m, nil
+	}
+	m.action = action
+	m.confirm = tui.Ask(fmt.Sprintf("%s %s", action.verb(), commit.Hash))
+	m.list = m.list.SetPrompt(m.confirm.Prompt())
+	return m, nil
+}
+
+// resolveConfirm answers a pending y/n confirmation: "y" runs the armed action
+// (quit), anything else cancels it.
+func (m Model) resolveConfirm(key string) (tea.Model, tea.Cmd) {
+	confirmed, cleared := m.confirm.Answer(key)
+	m.confirm = cleared
+	m.list = m.list.SetPrompt("")
+	if confirmed {
+		return m, tea.Quit
+	}
+	m.action = NoAction
+	return m, nil
+}
 
 // SelectedHash is the hash of the commit the user acted on, or "" if none.
 func (m Model) SelectedHash() string {
@@ -127,8 +165,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SelectionChangedMsg:
 		m.stream.Cancel() // stop the previous commit's streaming work
 		m.stream = nil
-		if m.drilling || m.collecting {
-			return m, nil // the list is hidden or about to be; don't stream
+		if m.drilling || m.collecting || msg.CacheHit {
+			return m, nil // hidden/about-to-be, or served from cache; don't stream
 		}
 		return m, m.previewCmd(msg.ReqID)
 	case tui.StreamReadyMsg:
@@ -159,6 +197,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
 		}
+		if m.confirm.Active() {
+			return m.resolveConfirm(msg.String())
+		}
 		switch msg.String() {
 		case "enter":
 			if c, ok := m.list.Selected(); ok {
@@ -188,15 +229,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list = m.list.SetContext(m.engines.Name())
 			return m.reloadFresh()
 		case "c":
-			if _, ok := m.list.Selected(); ok {
-				m.action = CherryPick
-				return m, tea.Quit
-			}
+			return m.startAction(CherryPick)
 		case "r":
-			if _, ok := m.list.Selected(); ok {
-				m.action = Revert
-				return m, tea.Quit
-			}
+			return m.startAction(Revert)
 		}
 	}
 	var cmd tea.Cmd
@@ -256,8 +291,13 @@ func commitFiles(repo *git.Repo, hash string) (base string, files []git.ChangedF
 // preview stream is cancelled — the drilled view does its own (streamed) diff,
 // and the hidden list preview shouldn't keep difftastic busy.
 func (m Model) drillInto(commit git.CommitInfo) (tea.Model, tea.Cmd) {
-	base, files, _ := commitFiles(m.repo, commit.Hash) // a list error surfaces as an empty drilldown
-	m.drilled = diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash, false)
+	base, files, err := commitFiles(m.repo, commit.Hash)
+	dv := diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash, false, nil)
+	if err != nil {
+		// Surface the load failure instead of an indistinguishable "No changes found".
+		dv = dv.SetEmptyStatus(fmt.Sprintf("could not load commit diff: %v", err))
+	}
+	m.drilled = dv
 	m.drilling = true
 	m, cmd := m.sendDrilled(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	return m, cmd
