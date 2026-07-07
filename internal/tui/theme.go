@@ -333,22 +333,19 @@ func FooterContent(width int, content string) string {
 	return rule + "\n " + ansi.Truncate(content, maxInt(0, width-1), "")
 }
 
-// PreviewHelpKeys and BasicHelpKeys are the always-available keys listed at the
-// bottom of the help overlay. Screens with a scrollable preview use the former.
-var (
-	// PreviewHelpKeys is the navigation reference shown (in full) in every preview
-	// screen's help overlay, including alternate keys.
-	PreviewHelpKeys = [][2]string{
-		{"j/k  ↑↓", "move / scroll"},
-		{"J/K  ⇧↑↓  ]/[", "next / prev item"},
-		{"gg/G", "top / bottom"},
-		{"{/}", "prev / next section"},
-		{"ctrl+d/u", "scroll half-page"},
-		{"ctrl+f/b", "scroll page"},
-		{"esc", "leave mode"},
-	}
-	BasicHelpKeys = [][2]string{{"esc", "leave mode"}}
-)
+// PreviewHelpKeys is the navigation reference shown (in full) in every preview
+// screen's help overlay, including alternate keys. In the list pane gg/G jump to
+// the ends and ctrl+d/u/f/b step the selection; in the preview pane they scroll,
+// and {/} steps between the diff's file sections.
+var PreviewHelpKeys = [][2]string{
+	{"j/k  ↑↓", "move / scroll"},
+	{"J/K  ⇧↑↓  ]/[", "next / prev item"},
+	{"gg/G", "top / bottom"},
+	{"{/}", "prev / next section"},
+	{"ctrl+d/u", "scroll half-page"},
+	{"ctrl+f/b", "scroll page"},
+	{"esc", "leave mode"},
+}
 
 // HelpView renders a keybinding overlay: header + a panel listing the screen's
 // hints (shown in full, unlike the footer) plus the extra global keys, with a

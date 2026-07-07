@@ -72,7 +72,7 @@ type Model struct {
 func stageHints(engines tui.EngineToggle) [][2]string {
 	hints := [][2]string{
 		{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-		{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"n/p", "hunk"}, {"o", "open"}, {"y", "yank"},
+		{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"{/}", "hunk"}, {"o", "open"}, {"y", "yank"},
 	}
 	if engines.CanToggle() {
 		hints = append(hints, [2]string{"e", "engine"})
@@ -82,13 +82,17 @@ func stageHints(engines tui.EngineToggle) [][2]string {
 
 // stageNavKeys is the navigation reference for the stage help overlay. Stage is
 // not a SplitList, so it lists its own keys (incl. alternates) rather than the
-// SplitList PreviewHelpKeys, which advertises keys stage doesn't implement. esc
+// SplitList PreviewHelpKeys, which advertises keys stage doesn't implement. The
+// keys mirror the SplitList screens: gg/G/ctrl+d/u/f/b navigate the file list
+// (file pane) or scroll the diff (diff pane), and {/} steps between hunks — the
+// same key the SplitList screens use to step between preview sections. esc
 // leaves the current mode (filter / help) and otherwise does nothing — it never
 // quits (that's q / ctrl+c), matching the diff/log/stash screens.
 var stageNavKeys = [][2]string{
 	{"j/k  ↑↓", "move / scroll"},
 	{"J/K  ⇧↑↓  ]/[", "next / prev file"},
-	{"{/}  n/p", "prev / next hunk"},
+	{"gg/G", "top / bottom"},
+	{"{/}", "prev / next hunk"},
 	{"ctrl+d/u", "scroll half-page"},
 	{"ctrl+f/b", "scroll page"},
 	{"esc", "leave mode"},
@@ -228,6 +232,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	}
 
+	// File pane: the vim jump keys move the selection (gg/G to the ends, ctrl+d/u
+	// by half the window, ctrl+f/b by a full window), matching the SplitList
+	// screens' list panes. In the diff pane the same keys scroll the viewport
+	// (handled above via vim.HandleKey).
+	if m.activePane == filePane {
+		window := m.layout().ContentHeight - 2
+		if next, ok := m.vim.HandleListKey(msg, m.selectedIdx, len(m.filteredFiles), window); ok {
+			if next == m.selectedIdx {
+				return m, nil // consumed with no move (e.g. a pending 'g')
+			}
+			return m.selectTo(next)
+		}
+	}
+
 	switch msg.String() {
 	case "?":
 		m.showHelp = true
@@ -288,11 +306,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.activePane == filePane {
 			return m.stageAll()
 		}
-	case "}", "n":
+	case "}":
 		if m.activePane == diffPane {
 			return m.navigateHunk(1)
 		}
-	case "{", "p":
+	case "{":
 		if m.activePane == diffPane {
 			return m.navigateHunk(-1)
 		}
@@ -468,16 +486,23 @@ func (m *Model) applyFilter() {
 }
 
 func (m Model) moveSelection(delta int) (tea.Model, tea.Cmd) {
+	return m.selectTo(m.selectedIdx + delta)
+}
+
+// selectTo moves the file selection to idx (clamped), resets the hunk selection,
+// and loads the new file's diff. Shared by the arrow/J/K steps and the vim jump
+// keys.
+func (m Model) selectTo(idx int) (tea.Model, tea.Cmd) {
 	if len(m.filteredFiles) == 0 {
 		return m, nil
 	}
-	m.selectedIdx += delta
-	if m.selectedIdx < 0 {
-		m.selectedIdx = 0
+	if idx < 0 {
+		idx = 0
 	}
-	if m.selectedIdx >= len(m.filteredFiles) {
-		m.selectedIdx = len(m.filteredFiles) - 1
+	if idx >= len(m.filteredFiles) {
+		idx = len(m.filteredFiles) - 1
 	}
+	m.selectedIdx = idx
 	m.hunkIdx = 0 // reset hunk selection on file change
 	cmd := m.requestDiff()
 	return m, cmd

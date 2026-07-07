@@ -118,3 +118,68 @@ func TestHunkCacheHitAdvancesToken(t *testing.T) {
 		t.Error("a cache hit should show the cached hunks")
 	}
 }
+
+// TestFilePaneVimNav verifies the file list supports the same vim jump keys as
+// the SplitList screens' list panes: gg/G to the ends and ctrl+d to step by half
+// the window.
+func TestFilePaneVimNav(t *testing.T) {
+	key := func(s string) tea.KeyPressMsg { return tea.KeyPressMsg{Code: rune(s[0]), Text: s} }
+	files := []git.StatusFile{{Path: "a"}, {Path: "b"}, {Path: "c"}, {Path: "d"}, {Path: "e"}}
+
+	m := newTestModel()
+	m.ready = true
+	m.width, m.height = 80, 24
+	m.files, m.filteredFiles = files, files
+	// Pre-cache each file's (empty) hunks so navigation is a cache hit and doesn't
+	// dispatch a difftastic load against the nil test repo.
+	for _, f := range files {
+		m.hunkCache[hunkCacheKey(f.Path, m.viewport.Width())] = nil
+	}
+
+	var tm tea.Model = m
+	tm, _ = tm.Update(key("G"))
+	if got := tm.(Model).selectedIdx; got != 4 {
+		t.Errorf("G should select the last file, got %d", got)
+	}
+	tm, _ = tm.Update(key("g"))
+	tm, _ = tm.Update(key("g"))
+	if got := tm.(Model).selectedIdx; got != 0 {
+		t.Errorf("gg should select the first file, got %d", got)
+	}
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if got := tm.(Model).selectedIdx; got == 0 {
+		t.Error("ctrl+d should step the file selection down by half a window")
+	}
+}
+
+// TestHunkNavCanonicalKey verifies {/} steps between hunks in the diff pane and
+// that the former n/p aliases no longer navigate (they were dropped so `p` means
+// only stash's pop across screens).
+func TestHunkNavCanonicalKey(t *testing.T) {
+	key := func(s string) tea.KeyPressMsg { return tea.KeyPressMsg{Code: rune(s[0]), Text: s} }
+	hunks := []displayHunk{
+		{rendered: "h0", hunk: diff.Hunk{NewStart: 1}},
+		{rendered: "h1", hunk: diff.Hunk{NewStart: 10}},
+		{rendered: "h2", hunk: diff.Hunk{NewStart: 20}},
+	}
+
+	m := newTestModel()
+	m.ready = true
+	m.activePane = diffPane
+	m.displayHunks = hunks
+	m.renderHunks()
+
+	var tm tea.Model = m
+	tm, _ = tm.Update(key("}"))
+	if got := tm.(Model).hunkIdx; got != 1 {
+		t.Errorf("} should advance to the next hunk, got %d", got)
+	}
+	tm, _ = tm.Update(key("{"))
+	if got := tm.(Model).hunkIdx; got != 0 {
+		t.Errorf("{ should step to the previous hunk, got %d", got)
+	}
+	tm, _ = tm.Update(key("n"))
+	if got := tm.(Model).hunkIdx; got != 0 {
+		t.Errorf("n should no longer navigate hunks, got %d", got)
+	}
+}

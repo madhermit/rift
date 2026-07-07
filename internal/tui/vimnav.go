@@ -64,12 +64,12 @@ func (v *VimNav) HandleKey(vp *viewport.Model, msg tea.KeyPressMsg) bool {
 	return false
 }
 
-// HandleListKey processes the vim jump keys (gg, G, ctrl+d/u) for a windowed
+// HandleListKey processes the vim jump keys (gg, G, ctrl+d/u/f/b) for a windowed
 // LIST selection rather than a scrolling viewport: gg/G jump to the first/last
-// item and ctrl+d/u by half the visible window. It returns the new selection
-// index and whether the key was consumed. It shares pendingG with HandleKey —
-// only one of the list/preview panes is focused at a time, so a pending 'g'
-// can't straddle both.
+// item, ctrl+d/u by half the visible window, and ctrl+f/b by a full window. It
+// returns the new selection index and whether the key was consumed. It shares
+// pendingG with HandleKey — only one of the list/preview panes is focused at a
+// time, so a pending 'g' can't straddle both.
 func (v *VimNav) HandleListKey(msg tea.KeyPressMsg, selected, total, window int) (int, bool) {
 	if v.pendingG {
 		v.pendingG = false
@@ -90,6 +90,10 @@ func (v *VimNav) HandleListKey(msg tea.KeyPressMsg, selected, total, window int)
 		return clampIndex(selected+window/2, total), true
 	case "ctrl+u":
 		return clampIndex(selected-window/2, total), true
+	case "ctrl+f":
+		return clampIndex(selected+window, total), true
+	case "ctrl+b":
+		return clampIndex(selected-window, total), true
 	}
 	return selected, false
 }

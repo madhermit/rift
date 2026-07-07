@@ -130,6 +130,13 @@ func TestVimNav_HandleListKey(t *testing.T) {
 	if got, ok := v.HandleListKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}, 0, 10, 6); !ok || got != 3 {
 		t.Errorf("ctrl+d = %d,%v; want 3,true", got, ok)
 	}
+	// ctrl+f steps down by a full window, ctrl+b up by a full window (clamped).
+	if got, ok := v.HandleListKey(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}, 0, 20, 6); !ok || got != 6 {
+		t.Errorf("ctrl+f = %d,%v; want 6,true", got, ok)
+	}
+	if got, ok := v.HandleListKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}, 10, 20, 6); !ok || got != 4 {
+		t.Errorf("ctrl+b = %d,%v; want 4,true", got, ok)
+	}
 	// An unrelated key is not consumed.
 	if _, ok := v.HandleListKey(key("x"), 0, 5, 3); ok {
 		t.Error("x should not be handled")

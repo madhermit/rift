@@ -103,7 +103,36 @@ Run `rift completion --help` for per-shell install instructions.
 
 ### Shared TUI
 
-Every screen behaves the same: type `/` to fuzzy-filter, `⇥` to switch panes, vim keys (`j`/`k`, `gg`/`G`, `ctrl-d`/`u`) to move and scroll, `J`/`K` (or `]`/`[`) to step to the next/previous item while reading, `\` to toggle the diff layout (stage's per-hunk view has a fixed layout), `e` to switch diff engines, `y` to yank the selection, `o` to open a file in `$EDITOR` at the change, `?` for the keybinding overlay, and `esc` to leave the current mode (filter, help, or a drilldown). `esc` never quits a work screen — use `q` or `ctrl-c`.
+Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares the same navigation and modal keys; each adds a few screen-specific actions. Press `?` on any screen for its live keybinding overlay.
+
+**Shared keys**
+
+| Key | Action |
+| --- | --- |
+| `j`/`k`, `↑`/`↓` | move selection / scroll the preview |
+| `J`/`K`, `⇧↑`/`⇧↓`, `]`/`[` | step to the next / previous item (even while reading) |
+| `gg`/`G` | jump to first / last |
+| `{`/`}` | previous / next diff section (previous / next hunk in `stage`) |
+| `ctrl-d`/`ctrl-u` | half-page down / up |
+| `ctrl-f`/`ctrl-b` | page down / up |
+| `⇥` | switch between the list and preview panes |
+| `/` | fuzzy-filter (`⏎` accept, `esc` clear) |
+| `y` | yank the selection (path, commit hash, or stash ref) |
+| `?` | keybinding overlay |
+| `q`, `ctrl-c` | quit |
+| `esc` | leave the current mode (filter, help, drilldown) — never quits a work screen |
+
+**Per-screen keys**
+
+| Screen | Keys |
+| --- | --- |
+| `diff` | `s` toggle staged · `t` tests lens · `\` diff layout · `e` engine · `o` open in `$EDITOR` · `r` mark reviewed · `U` show only unreviewed |
+| `log` | `⏎` drill into the commit's files (or tests) · `\` layout · `e` engine · `c` cherry-pick · `r` revert |
+| `stash` | `a` apply · `p` pop · `x` drop · `\` layout · `e` engine |
+| `stage` | `s` stage · `u` unstage · `a` stage all · `o` open in `$EDITOR` · `e` engine (fixed layout, no `\`) |
+| tests lens | `t` back to files · `s` toggle staged · `\` layout · `e` engine · `o` open the test |
+
+The `menu` launchpad is a plain list: `⏎` selects, `/` filters, and `esc`/`q` quit. Destructive actions (`stash` pop/drop, `log` cherry-pick/revert) confirm inline with `y`/`n`.
 
 ### Environment
 

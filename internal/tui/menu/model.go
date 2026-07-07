@@ -39,6 +39,17 @@ var menuHints = [][2]string{
 	{"↑↓", "nav"}, {"/", "filter"}, {"⏎", "select"}, {"?", "help"}, {"q", "quit"},
 }
 
+// menuNavKeys is the navigation reference for the menu's help overlay. The menu
+// is a plain list (no preview pane), so it lists the list-nav keys it actually
+// handles rather than the SplitList PreviewHelpKeys. Unlike a work screen, the
+// menu's esc quits (there's no mode to leave and nowhere to go back to).
+var menuNavKeys = [][2]string{
+	{"j/k", "move"},
+	{"gg/G", "top / bottom"},
+	{"ctrl+d/u", "half-page"},
+	{"esc", "quit"},
+}
+
 func (m Model) Selected() string {
 	return m.selected
 }
@@ -187,7 +198,7 @@ func (m Model) View() tea.View {
 
 	if m.showHelp {
 		contentH := m.height - tui.HeaderRows - tui.FooterRows
-		v := tea.NewView(tui.HelpView("", "a composable fuzzy git tool", menuHints, tui.BasicHelpKeys, m.width, contentH))
+		v := tea.NewView(tui.HelpView("", "a composable fuzzy git tool", menuHints, menuNavKeys, m.width, contentH))
 		v.AltScreen = true
 		return v
 	}
