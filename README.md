@@ -4,9 +4,12 @@ Syntax-aware, worktree-aware, composable fuzzy git tool.
 
 rift wraps the git workflows where UX is the bottleneck — staging, diffing, log browsing, stashing — with structural understanding via [difftastic](https://difftastic.wilfred.me.uk/) and composable output that works for both humans and scripts.
 
+It's built for *reading* changes as much as making them: diffs understand your code's syntax instead of its lines, files can be ticked off as reviewed and re-surface only when they change again, and the `--tests` lens reads a change by the tests it touches — so a quietly deleted assertion in a large (or agent-written) diff has nowhere to hide.
+
 ```
 rift              # contextual launchpad
 rift diff         # syntax-aware diff browser
+rift diff --tests # review a change by the tests it touches
 rift stage        # interactive staging with hunk granularity
 rift log          # structural commit explorer
 rift stash        # stash manager with diff preview
