@@ -30,26 +30,65 @@ type Extractor interface {
 }
 
 // extractorFor returns the extractor for a path's extension, or nil if the
-// language isn't supported (the file is then skipped, per graceful degradation).
+// language isn't supported or the file isn't a conventional test file (the file
+// is then skipped, per graceful degradation). Gating on test-file names keeps a
+// production `func TestConnection(host string) error` out of the tests lens. Rust
+// is the exception: its tests live inline in production files, so it stays gated
+// by the #[test] attribute in rustClassify rather than by filename.
 func extractorFor(path string) Extractor {
+	base := strings.ToLower(filepath.Base(path))
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go":
-		return goExtractor{}
+		if strings.HasSuffix(base, "_test.go") {
+			return goExtractor{}
+		}
 	case ".js", ".jsx", ".mjs", ".cjs":
-		return tsExt("javascript", grammars.JavascriptLanguage, jsClassify)
+		if isJSTestFile(path, base) {
+			return tsExt("javascript", grammars.JavascriptLanguage, jsClassify)
+		}
 	case ".ts", ".mts", ".cts":
-		return tsExt("typescript", grammars.TypescriptLanguage, jsClassify)
+		if isJSTestFile(path, base) {
+			return tsExt("typescript", grammars.TypescriptLanguage, jsClassify)
+		}
 	case ".tsx":
-		return tsExt("typescript", grammars.TsxLanguage, jsClassify)
+		if isJSTestFile(path, base) {
+			return tsExt("typescript", grammars.TsxLanguage, jsClassify)
+		}
 	case ".rb":
-		return tsExt("ruby", grammars.RubyLanguage, rubyClassify)
+		if hasSuffixAny(base, "_test.rb", "_spec.rb") {
+			return tsExt("ruby", grammars.RubyLanguage, rubyClassify)
+		}
 	case ".py":
-		return tsExt("python", grammars.PythonLanguage, pythonClassify)
+		if strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py") {
+			return tsExt("python", grammars.PythonLanguage, pythonClassify)
+		}
 	case ".rs":
 		return tsExt("rust", grammars.RustLanguage, rustClassify)
-	default:
-		return nil
 	}
+	return nil
+}
+
+// isJSTestFile matches the JS/TS test conventions: a *.test.* / *.spec.* file, or
+// any file under a __tests__/ directory.
+func isJSTestFile(path, base string) bool {
+	if strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") {
+		return true
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(path), "/") {
+		if seg == "__tests__" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSuffixAny(s string, suffixes ...string) bool {
+	for _, suf := range suffixes {
+		if strings.HasSuffix(s, suf) {
+			return true
+		}
+	}
+	return false
 }
 
 // tsExt builds a tree-sitter extractor, returning nil (so the file is skipped)
@@ -87,6 +126,9 @@ func (goExtractor) Extract(src []byte) []RawSpec {
 		if !ok || fn.Recv != nil || !isGoTestFunc(fn.Name.Name) {
 			continue
 		}
+		if fn.Body == nil {
+			continue // a bodyless test decl (asm/linkname stub): nothing to walk
+		}
 		// A test with subtests is represented by its subtests; one without is a
 		// leaf in its own right.
 		if subs := goSubtests(fn, line); len(subs) > 0 {
@@ -105,27 +147,51 @@ func (goExtractor) Extract(src []byte) []RawSpec {
 // goSubtests collects a Test function's subtests: literal t.Run("name", …) calls
 // and table-driven cases, where t.Run(tt.field, …) ranges a slice of structs or
 // t.Run(key, …) ranges a map. Table case names are pulled from the table literal.
+// It threads the enclosing t.Run nesting into each spec's Path, so an inner
+// t.Run reads as `TestX › outer › inner` rather than being flattened onto TestX.
 func goSubtests(fn *goast.FuncDecl, line func(token.Pos) int) []RawSpec {
-	parent := fn.Name.Name
-	sub := func(name string, n goast.Node) RawSpec {
-		return RawSpec{Path: []string{parent}, Name: name, StartLine: line(n.Pos()), EndLine: line(n.End())}
+	var subs []RawSpec
+	spec := func(name string, n goast.Node, path []string) RawSpec {
+		return RawSpec{Path: append([]string{}, path...), Name: name, StartLine: line(n.Pos()), EndLine: line(n.End())}
 	}
 
-	var subs []RawSpec
-	goast.Inspect(fn.Body, func(n goast.Node) bool {
-		switch node := n.(type) {
-		case *goast.RangeStmt:
-			for _, c := range tableCases(fn.Body, node) {
-				subs = append(subs, sub(c.name, c.node))
+	var walk func(n goast.Node, path []string)
+	walk = func(n goast.Node, path []string) {
+		goast.Inspect(n, func(node goast.Node) bool {
+			switch x := node.(type) {
+			case *goast.RangeStmt:
+				for _, c := range tableCases(fn.Body, x) {
+					subs = append(subs, spec(c.name, c.node, path))
+				}
+			case *goast.CallExpr:
+				name, ok := runStringLit(x)
+				if !ok {
+					return true
+				}
+				subs = append(subs, spec(name, x, path))
+				// Descend into the subtest body under the extended path; return
+				// false so Inspect doesn't re-walk it and drop the nesting.
+				if body := runFuncLitBody(x); body != nil {
+					walk(body, append(append([]string{}, path...), name))
+				}
+				return false
 			}
-		case *goast.CallExpr:
-			if name, ok := runStringLit(node); ok {
-				subs = append(subs, sub(name, node))
-			}
-		}
-		return true
-	})
+			return true
+		})
+	}
+	walk(fn.Body, []string{fn.Name.Name})
 	return subs
+}
+
+// runFuncLitBody returns the body of the func-literal argument to a t.Run call,
+// which holds any nested subtests, or nil if the subtest fn isn't a literal.
+func runFuncLitBody(call *goast.CallExpr) *goast.BlockStmt {
+	for _, a := range call.Args {
+		if lit, ok := a.(*goast.FuncLit); ok {
+			return lit.Body
+		}
+	}
+	return nil
 }
 
 // runStringLit returns the literal name of a `<x>.Run("name", …)` call.
@@ -360,7 +426,15 @@ type tsExtractor struct {
 
 func (e tsExtractor) Language() string { return e.language }
 
-func (e tsExtractor) Extract(src []byte) []RawSpec {
+func (e tsExtractor) Extract(src []byte) (specs []RawSpec) {
+	// The grammar-load path recovers in tsExt; the parse/walk path can panic too
+	// (a malformed tree, a grammar edge case). Graceful degradation: yield nothing
+	// rather than crash the whole `rift diff --tests`.
+	defer func() {
+		if recover() != nil {
+			specs = nil
+		}
+	}()
 	tree, err := gts.NewParser(e.lang).Parse(src)
 	if err != nil || tree == nil || tree.RootNode() == nil {
 		return nil

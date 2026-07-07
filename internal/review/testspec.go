@@ -74,6 +74,7 @@ func Collect(repo *git.Repo, scope DiffScope) ([]Spec, error) {
 
 	var specs []Spec
 	for _, sc := range scopes {
+		oldNames := extractNames(sc.Ext, sc.Old)
 		for _, r := range sc.Ext.Extract(sc.Content) {
 			if !touched(r, sc.Added) {
 				continue
@@ -84,7 +85,7 @@ func Collect(repo *git.Repo, scope DiffScope) ([]Spec, error) {
 				Path:     r.Path,
 				Name:     r.Name,
 				Line:     r.StartLine,
-				Status:   classify(r, sc.Added),
+				Status:   classify(r, sc.Added, oldNames),
 				Ticket:   ticketPattern.FindString(r.Name),
 			})
 		}
@@ -108,24 +109,41 @@ func touched(r RawSpec, added map[int]bool) bool {
 	return false
 }
 
-// classify decides a touched spec's change kind from the added-line set: every
-// line added → a wholly new test; only the declaration line added → a rename of
-// an existing test; neither (just body lines changed) → a body-only
-// modification under an unchanged name.
-func classify(r RawSpec, added map[int]bool) string {
-	allAdded := true
-	for l := r.StartLine; l <= r.EndLine; l++ {
-		if !added[l] {
-			allAdded = false
-			break
-		}
+// extractNames returns the set of test names present in the old-side content,
+// used to distinguish a genuine rename from a declaration-line touch that leaves
+// the name unchanged. Nil/empty content (a new or root-commit file) → no names.
+func extractNames(ext Extractor, old []byte) map[string]bool {
+	if len(old) == 0 {
+		return nil
 	}
+	names := make(map[string]bool)
+	for _, r := range ext.Extract(old) {
+		names[r.Name] = true
+	}
+	return names
+}
+
+// classify decides a touched spec's change kind from the added-line set and the
+// prior (old-side) test names: every line added → a wholly new test; a touched
+// declaration line whose name is new to the file → a rename of an existing test;
+// anything else (body-only change, or a declaration touch that keeps an existing
+// name, e.g. adding `.only`) → a modification under an unchanged name.
+func classify(r RawSpec, added map[int]bool, oldNames map[string]bool) string {
 	switch {
-	case allAdded:
+	case allAdded(r, added):
 		return "added"
-	case added[r.StartLine]:
+	case added[r.StartLine] && !oldNames[r.Name]:
 		return "renamed"
 	default:
 		return "modified"
 	}
+}
+
+func allAdded(r RawSpec, added map[int]bool) bool {
+	for l := r.StartLine; l <= r.EndLine; l++ {
+		if !added[l] {
+			return false
+		}
+	}
+	return true
 }

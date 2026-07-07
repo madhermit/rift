@@ -56,9 +56,9 @@ func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot, file string
 		newPath = showOrNull(ctx, repoRoot, "", file, filepath.Join(tmpDir, "b", file))
 	case opts.Base != "":
 		oldRef = opts.Base
-		newPath = filepath.Join(repoRoot, file)
+		newPath = worktreeOrNull(filepath.Join(repoRoot, file))
 	default:
-		newPath = filepath.Join(repoRoot, file)
+		newPath = worktreeOrNull(filepath.Join(repoRoot, file))
 	}
 
 	oldPath := showOrNull(ctx, repoRoot, oldRef, file, filepath.Join(tmpDir, "a", file))
@@ -97,49 +97,68 @@ func (d *difftasticEngine) diffFiles(ctx context.Context, oldPath, newPath strin
 
 // DiffHunks renders each hunk individually through difftastic by applying each
 // hunk to the full base file. This gives tree-sitter the full file context for
-// accurate syntax-aware diffs. Falls back to raw lines if difft fails.
+// accurate syntax-aware diffs. The base file is written once and the hunks are
+// rendered concurrently (bounded to the CPU count via ParallelStream), keeping
+// output in hunk order. Falls back to raw lines if difft fails.
 func (d *difftasticEngine) DiffHunks(ctx context.Context, hunks []Hunk, filename, baseContent string, color bool, width int) []string {
 	results := make([]string, len(hunks))
-	for i, h := range hunks {
-		newContent := ApplyHunk(baseContent, h)
-		rendered, err := d.diffContent(ctx, baseContent, newContent, filename, color, width)
-		if err != nil || strings.TrimSpace(rendered) == "" {
-			results[i] = h.Header + "\n" + strings.Join(h.Lines, "\n")
-		} else {
-			results[i] = rendered
-		}
-	}
-	return results
-}
 
-func (d *difftasticEngine) diffContent(ctx context.Context, old, new, filename string, color bool, width int) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "rift-hunk-*")
+	tmpDir, err := os.MkdirTemp("", "rift-hunks-*")
 	if err != nil {
-		return "", err
+		return rawHunks(hunks)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Name the temp files with the real basename (in a/ and b/ subdirs to avoid a
-	// collision) so difftastic detects the language by filename — extensionless
-	// files like Makefile or Containerfile would otherwise render as plain text.
+	// Name the temp files with the real basename so difftastic detects the
+	// language by filename — extensionless files like Makefile or Containerfile
+	// would otherwise render as plain text. The base file is shared across hunks;
+	// each hunk's new side lives in its own subdir to avoid a collision.
 	base := filepath.Base(filename)
 	if base == "." || base == string(filepath.Separator) {
 		base = "f"
 	}
-	oldPath := filepath.Join(tmpDir, "a", base)
-	newPath := filepath.Join(tmpDir, "b", base)
-	if err := writeTemp(oldPath, []byte(old)); err != nil {
+	basePath := filepath.Join(tmpDir, "base", base)
+	if err := writeTemp(basePath, []byte(baseContent)); err != nil {
+		return rawHunks(hunks)
+	}
+
+	i := 0
+	for rendered := range ParallelStream(len(hunks), func(i int) string {
+		h := hunks[i]
+		newPath := filepath.Join(tmpDir, strconv.Itoa(i), base)
+		out, err := d.diffHunk(ctx, basePath, newPath, ApplyHunk(baseContent, h), color, width)
+		if err != nil || strings.TrimSpace(out) == "" {
+			return h.rawRender()
+		}
+		return out
+	}) {
+		results[i] = rendered
+		i++
+	}
+	return results
+}
+
+// diffHunk writes a hunk's new-side content and renders it against the shared
+// base file. Hunks are small; inline keeps them readable regardless of pane width.
+func (d *difftasticEngine) diffHunk(ctx context.Context, basePath, newPath, newContent string, color bool, width int) (string, error) {
+	if err := writeTemp(newPath, []byte(newContent)); err != nil {
 		return "", err
 	}
-	if err := writeTemp(newPath, []byte(new)); err != nil {
-		return "", err
+	return d.diffFiles(ctx, basePath, newPath, color, width, DisplayInline)
+}
+
+// rawHunks is the graceful-degradation output when the scratch dir can't be set
+// up: each hunk's plain header + body.
+func rawHunks(hunks []Hunk) []string {
+	out := make([]string, len(hunks))
+	for i, h := range hunks {
+		out[i] = h.rawRender()
 	}
-	// Hunks are small; inline keeps them readable regardless of pane width.
-	return d.diffFiles(ctx, oldPath, newPath, color, width, DisplayInline)
+	return out
 }
 
 // writeTemp writes content to destPath, creating its parent directory. Used for
-// the a/ and b/ scratch files difftastic diffs.
+// the base and per-hunk scratch files difftastic diffs.
 func writeTemp(destPath string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
 		return err
@@ -149,9 +168,19 @@ func writeTemp(destPath string, content []byte) error {
 
 func showOrNull(ctx context.Context, repoRoot, ref, file, destPath string) string {
 	if err := gitShow(ctx, repoRoot, ref, file, destPath); err != nil {
-		return "/dev/null"
+		return os.DevNull
 	}
 	return destPath
+}
+
+// worktreeOrNull returns path if it exists on disk, else the null device — a
+// deleted-but-tracked file has no worktree side, and difft exits 2 on a missing
+// operand rather than treating it as an empty file.
+func worktreeOrNull(path string) string {
+	if _, err := os.Stat(path); err != nil {
+		return os.DevNull
+	}
+	return path
 }
 
 func gitShow(ctx context.Context, repoRoot, ref, file, destPath string) error {

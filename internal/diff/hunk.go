@@ -26,33 +26,36 @@ func ParseUnifiedDiff(raw string) []FileDiff {
 		return nil
 	}
 
-	// Split into file sections on "diff --git" boundaries.
-	var sections []string
+	// Split into file sections on "diff --git" boundaries, indexing into the
+	// single split rather than concatenating per line — the latter is O(n²) and
+	// stalled for tens of seconds on large single-file diffs.
 	lines := strings.Split(raw, "\n")
-	current := -1
-	for _, line := range lines {
-		if strings.HasPrefix(line, "diff --git ") {
-			sections = append(sections, "")
-			current++
-		}
-		if current < 0 {
-			continue
-		}
-		sections[current] += line + "\n"
-	}
-
 	var result []FileDiff
-	for _, section := range sections {
-		fd := parseFileSection(section)
-		if fd.Path != "" {
+	start := -1
+	flush := func(end int) {
+		if start < 0 {
+			return
+		}
+		if fd := parseFileSection(lines[start:end]); fd.Path != "" {
 			result = append(result, fd)
 		}
 	}
+	for i, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			flush(i)
+			start = i
+		}
+	}
+	flush(len(lines))
 	return result
 }
 
-func parseFileSection(section string) FileDiff {
-	lines := strings.Split(strings.TrimRight(section, "\n"), "\n")
+func parseFileSection(lines []string) FileDiff {
+	// Drop trailing empty lines left by splitting a newline-terminated section so
+	// they aren't mistaken for hunk-body lines.
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
 	if len(lines) == 0 {
 		return FileDiff{}
 	}
@@ -93,29 +96,118 @@ func parseFileSection(section string) FileDiff {
 	return fd
 }
 
+// extractPath resolves the file's path from a diff section, preferring the new
+// side (+++ b/…) and falling back to the old side (--- a/…) for a deletion or the
+// "diff --git" header for a change with no ±±± lines (binary, mode-only). It
+// decodes git's C-style quoting so non-ASCII and special-character paths (which
+// git renders as "b/caf\303\251.js") aren't dropped.
 func extractPath(lines []string) string {
+	var newPath, oldPath, headerPath string
 	for _, line := range lines {
-		if strings.HasPrefix(line, "+++ b/") {
-			return line[6:]
-		}
-		if strings.HasPrefix(line, "+++ /dev/null") {
-			// Deleted file — use the "---" line
-			for _, l := range lines {
-				if strings.HasPrefix(l, "--- a/") {
-					return l[6:]
-				}
+		switch {
+		case strings.HasPrefix(line, "+++ "):
+			newPath = decodeDiffPath(strings.TrimPrefix(line, "+++ "), "b/")
+		case strings.HasPrefix(line, "--- "):
+			oldPath = decodeDiffPath(strings.TrimPrefix(line, "--- "), "a/")
+		case strings.HasPrefix(line, "diff --git "):
+			if headerPath == "" {
+				headerPath = gitHeaderPath(line)
 			}
 		}
 	}
-	// Fallback: parse from "diff --git a/X b/X"
-	if len(lines) > 0 && strings.HasPrefix(lines[0], "diff --git a/") {
-		parts := strings.SplitN(lines[0], " b/", 2)
-		if len(parts) == 2 {
-			return parts[1]
+	switch {
+	case newPath != "": // added or modified
+		return newPath
+	case oldPath != "": // deleted (+++ was /dev/null)
+		return oldPath
+	default:
+		return headerPath
+	}
+}
+
+// decodeDiffPath turns a raw "--- "/"+++ " operand into a repo-relative path:
+// it C-unquotes a quoted operand, trims git's space-disambiguation trailing tab
+// from an unquoted one, maps /dev/null to "", and strips the a/ or b/ prefix.
+func decodeDiffPath(s, prefix string) string {
+	if strings.HasPrefix(s, `"`) {
+		s = unquoteGitPath(s)
+	} else {
+		s = strings.TrimSuffix(s, "\t")
+	}
+	if s == "/dev/null" {
+		return ""
+	}
+	return strings.TrimPrefix(s, prefix)
+}
+
+// gitHeaderPath best-effort extracts the new path from a "diff --git a/… b/…"
+// line, used only when no ±±± lines exist. Spaces make the unquoted form
+// ambiguous, so this is a fallback; quoted operands are unquoted.
+func gitHeaderPath(line string) string {
+	rest := strings.TrimPrefix(line, "diff --git ")
+	if strings.HasPrefix(rest, `"`) {
+		// "a/old" "b/new": the new path is the last space-separated quoted token.
+		if i := strings.LastIndex(rest, ` "`); i >= 0 {
+			return decodeDiffPath(rest[i+1:], "b/")
 		}
+		return ""
+	}
+	if parts := strings.SplitN(rest, " b/", 2); len(parts) == 2 {
+		return parts[1]
 	}
 	return ""
 }
+
+// unquoteGitPath decodes a git C-quoted path (core.quotePath, on by default):
+// the octal escapes it emits for bytes >0x7f plus \a \b \t \n \v \f \r \" \\.
+func unquoteGitPath(s string) string {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return s
+	}
+	inner := s[1 : len(s)-1]
+	var b []byte
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if c != '\\' {
+			b = append(b, c)
+			continue
+		}
+		i++
+		if i >= len(inner) {
+			break
+		}
+		switch e := inner[i]; e {
+		case 'a':
+			b = append(b, '\a')
+		case 'b':
+			b = append(b, '\b')
+		case 't':
+			b = append(b, '\t')
+		case 'n':
+			b = append(b, '\n')
+		case 'v':
+			b = append(b, '\v')
+		case 'f':
+			b = append(b, '\f')
+		case 'r':
+			b = append(b, '\r')
+		case '"':
+			b = append(b, '"')
+		case '\\':
+			b = append(b, '\\')
+		default:
+			if isOctal(e) && i+2 < len(inner) && isOctal(inner[i+1]) && isOctal(inner[i+2]) {
+				b = append(b, byte(int(e-'0')<<6|int(inner[i+1]-'0')<<3|int(inner[i+2]-'0')))
+				i += 2
+			} else {
+				b = append(b, e)
+			}
+		}
+	}
+	return string(b)
+}
+
+func isOctal(c byte) bool { return c >= '0' && c <= '7' }
 
 func parseHunkHeader(line string) Hunk {
 	h := Hunk{Header: line}
@@ -205,11 +297,20 @@ func ShowFile(repoRoot, ref, file string) ([]byte, error) {
 	return out, nil
 }
 
-// RawRangeDiff returns the unified diff of file between two commits (base..target).
-func RawRangeDiff(repoRoot, base, target, file string) (string, error) {
-	cmd := exec.Command("git", "diff", "--no-color", base, target, "--", file)
+// RawRangeDiffAll returns the whole-repo unified diff between two commits — no
+// pathspec, so git's rename detection stays on (a per-file pathspec would defeat
+// it, rendering a renamed file as 100% added). Callers parse it once and index by
+// path.
+func RawRangeDiffAll(repoRoot, base, target string) (string, error) {
+	cmd := exec.Command("git", "diff", "--no-color", base, target)
 	cmd.Dir = repoRoot
 	return runGitDiff(cmd, "git diff range")
+}
+
+// rawRender is the plain header + body of a hunk, used as the graceful-degradation
+// output when structural rendering is unavailable or empty.
+func (h Hunk) rawRender() string {
+	return h.Header + "\n" + strings.Join(h.Lines, "\n")
 }
 
 func (h Hunk) Patch(fileHeader string) string {
@@ -230,6 +331,20 @@ func RawUnifiedDiff(repoRoot string, staged bool, file string) (string, error) {
 		args = append(args, "--staged")
 	}
 	args = append(args, "--", file)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoRoot
+	return runGitDiff(cmd, "git diff raw")
+}
+
+// RawWorktreeDiff returns the whole working-tree (or staged) unified diff — no
+// pathspec, so git's rename detection stays on and one subprocess covers every
+// file. Callers parse it once and index by path. Untracked files aren't included
+// (git diff omits them); those are handled separately.
+func RawWorktreeDiff(repoRoot string, staged bool) (string, error) {
+	args := []string{"diff", "--no-color"}
+	if staged {
+		args = append(args, "--staged")
+	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoRoot
 	return runGitDiff(cmd, "git diff raw")

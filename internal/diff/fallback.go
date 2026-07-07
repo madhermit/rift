@@ -22,7 +22,7 @@ func (f *fallbackEngine) DiffHunks(_ context.Context, hunks []Hunk, _, _ string,
 	results := make([]string, len(hunks))
 	for i, h := range hunks {
 		if !color {
-			results[i] = h.Header + "\n" + strings.Join(h.Lines, "\n")
+			results[i] = h.rawRender()
 			continue
 		}
 		var b strings.Builder

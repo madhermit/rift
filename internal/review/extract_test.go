@@ -150,6 +150,36 @@ mod tests {
 			},
 		},
 		{
+			name: "go bodyless test decl is skipped, not a panic",
+			file: "stub_test.go",
+			// A valid bodyless test func (asm/linkname stub) must not SIGSEGV the
+			// subtest walk; it's skipped and the real test still surfaces.
+			src: `package p
+import "testing"
+func TestExternal(t *testing.T)
+func TestReal(t *testing.T) {}
+`,
+			want: []specKey{
+				{"", "TestReal"},
+			},
+		},
+		{
+			name: "go nested t.Run threads the enclosing path",
+			file: "nested_test.go",
+			src: `package p
+import "testing"
+func TestX(t *testing.T) {
+	t.Run("outer", func(t *testing.T) {
+		t.Run("inner", func(t *testing.T) {})
+	})
+}
+`,
+			want: []specKey{
+				{"TestX", "outer"},
+				{"TestX›outer", "inner"},
+			},
+		},
+		{
 			name: "go keyed-struct table-driven cases",
 			file: "parser_test.go",
 			src: `package p
@@ -226,6 +256,48 @@ func TestPositional(t *testing.T) {
 	}
 }
 
+// TestExtractorForGating covers item 8: extractors run only on conventional
+// test-file names (Rust stays attribute-gated, so any .rs file gets one), so a
+// production file's `func TestConnection(...)` doesn't pollute the lens.
+func TestExtractorForGating(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool // whether an extractor is returned
+	}{
+		{"internal/net/conn.go", false},
+		{"internal/net/conn_test.go", true},
+		{"src/app.js", false},
+		{"src/app.test.js", true},
+		{"src/app.spec.ts", true},
+		{"src/__tests__/app.js", true},
+		{"src/util.py", false},
+		{"test_util.py", true},
+		{"util_test.py", true},
+		{"models/user.rb", false},
+		{"models/user_test.rb", true},
+		{"models/user_spec.rb", true},
+		{"src/lib.rs", true}, // attribute-gated, not filename-gated
+	}
+	for _, tt := range tests {
+		if got := extractorFor(tt.path) != nil; got != tt.want {
+			t.Errorf("extractorFor(%q) != nil = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+// TestExtractRobustness covers item 1b: a tree-sitter Extract on malformed input
+// must degrade to zero results, never panic (the whole `rift diff --tests` would
+// otherwise crash).
+func TestExtractRobustness(t *testing.T) {
+	ext := extractorFor("broken.test.js")
+	if ext == nil {
+		t.Fatal("no js extractor")
+	}
+	for _, src := range []string{"", "describe('unterminated", "\x00\x01\x02 garbage {{{", "it("} {
+		_ = ext.Extract([]byte(src)) // must not panic
+	}
+}
+
 func TestAddedLines(t *testing.T) {
 	raw := `diff --git a/x.js b/x.js
 --- a/x.js
@@ -236,7 +308,7 @@ func TestAddedLines(t *testing.T) {
 +added two
  trailing context
 `
-	added := addedLines(raw)
+	added := addedLinesByPath(raw)["x.js"]
 	if !added[2] || !added[3] {
 		t.Errorf("expected lines 2,3 added, got %v", added)
 	}
@@ -245,23 +317,47 @@ func TestAddedLines(t *testing.T) {
 	}
 }
 
-// TestClassify covers the three change kinds a touched spec can have, decided
-// from which of its lines the diff added: a wholly new test, a rename (only the
-// declaration line is new), and a body-only modification.
+// TestDeletionMarks covers item 5's threat model: a hunk that only deletes lines
+// (e.g. removing an assertion) must still mark a new-side position so the weakened
+// test surfaces, rather than producing an empty added set.
+func TestDeletionMarks(t *testing.T) {
+	raw := `diff --git a/x_test.go b/x_test.go
+--- a/x_test.go
++++ b/x_test.go
+@@ -10,4 +10,3 @@
+ keep one
+-removed assertion
+ keep two
+ keep three
+`
+	added := addedLinesByPath(raw)["x_test.go"]
+	// The deletion abuts new-side line 11 (the line now following the deleted one).
+	if !added[11] {
+		t.Errorf("deletion should mark its new-side position (11), got %v", added)
+	}
+}
+
+// TestClassify covers the change kinds a touched spec can have, decided from
+// which of its lines the diff added plus the prior test names: a wholly new test,
+// a rename (declaration touched, name new to the file), a body-only modification,
+// and — the item 9 fix — a declaration touch that keeps an existing name (e.g.
+// adding `.only`), which is a modification, not a rename.
 func TestClassify(t *testing.T) {
-	spec := RawSpec{StartLine: 10, EndLine: 13}
 	tests := []struct {
-		name  string
-		added map[int]bool
-		want  string
+		name     string
+		spec     RawSpec
+		added    map[int]bool
+		oldNames map[string]bool
+		want     string
 	}{
-		{"all lines new", map[int]bool{10: true, 11: true, 12: true, 13: true}, "added"},
-		{"declaration only", map[int]bool{10: true}, "renamed"},
-		{"declaration plus body", map[int]bool{10: true, 12: true}, "renamed"},
-		{"body only", map[int]bool{12: true}, "modified"},
+		{"all lines new", RawSpec{Name: "t", StartLine: 10, EndLine: 13}, map[int]bool{10: true, 11: true, 12: true, 13: true}, nil, "added"},
+		{"declaration only, new name", RawSpec{Name: "renamed", StartLine: 10, EndLine: 13}, map[int]bool{10: true}, nil, "renamed"},
+		{"declaration plus body, new name", RawSpec{Name: "renamed", StartLine: 10, EndLine: 13}, map[int]bool{10: true, 12: true}, nil, "renamed"},
+		{"body only", RawSpec{Name: "t", StartLine: 10, EndLine: 13}, map[int]bool{12: true}, nil, "modified"},
+		{"declaration touch, name unchanged", RawSpec{Name: "keeps", StartLine: 10, EndLine: 13}, map[int]bool{10: true}, map[string]bool{"keeps": true}, "modified"},
 	}
 	for _, tt := range tests {
-		if got := classify(spec, tt.added); got != tt.want {
+		if got := classify(tt.spec, tt.added, tt.oldNames); got != tt.want {
 			t.Errorf("%s: classify = %q, want %q", tt.name, got, tt.want)
 		}
 	}
