@@ -39,6 +39,25 @@ jobs:
           GOOS=darwin GOARCH=amd64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-darwin-amd64 .
           GOOS=darwin GOARCH=arm64 go build -tags "${GRAMMAR_TAGS}" -ldflags "${LDFLAGS}" -o dist/rift-darwin-arm64 .
 
+      - name: Generate checksums
+        run: |
+          # Sum only the binaries (bare filenames) so install.sh can verify a
+          # single downloaded binary against SHA256SUMS.
+          cd dist
+          sha256sum rift-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Bundle third-party licenses
+        # Non-blocking: if go-licenses can't classify a dependency, the step
+        # fails but the release still ships (just without the license bundle).
+        continue-on-error: true
+        env:
+          GOFLAGS: -tags=${{ env.GRAMMAR_TAGS }}
+        run: |
+          go run github.com/google/go-licenses@latest save ./... \
+            --save_path=third-party-licenses --force
+          tar -czf dist/third-party-licenses.tar.gz third-party-licenses
+
       - name: Extract changelog section
         run: |
           VERSION=${GITHUB_REF#refs/tags/}

@@ -2,7 +2,7 @@
 
 ## A syntax-aware, worktree-aware, composable fuzzy git tool
 
-> **Scope note (current direction).** rift focuses on *consuming* git state — structural diff, log, stash, and hunk staging — and reading it correctly inside any layout, including bare-repo / linked worktrees. It does **not** manage worktrees or branches; [worktrunk](https://github.com/max-sixty/worktrunk) does that well, and rift composes with it (worktrunk creates the worktrees, rift reads them). The `wt` worktree manager and `branch` manager described below are superseded by this decision and kept only as historical context.
+> **Scope note (current direction).** This document was written under the project's original name, **git-flux**; the project shipped as **rift**. It is kept largely unedited as historical design material — the "git-flux" name and many commands sketched below (`checkpoint`, `conflict`, `pr`, `commit`, `review`, `bisect`, plus the `wt` worktree and `branch` managers) are **not built**. What exists today is a focused subset: `rift diff`, `rift log`, `rift stash`, `rift stage`, and `rift version`. rift focuses on *consuming* git state — structural diff, log, stash, and hunk staging — and reading it correctly inside any layout, including bare-repo / linked worktrees. It does **not** manage worktrees or branches; [worktrunk](https://github.com/max-sixty/worktrunk) does that, and rift composes with it (worktrunk creates the worktrees, rift reads them). Treat everything below as design exploration, not a description of current behavior.
 
 ---
 

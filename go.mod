@@ -8,7 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/go-git/go-git/v6 v6.0.0-20260210102253-e4d10f0e569a
+	github.com/go-git/go-git/v6 v6.0.0-20260210102253-e4d10f0e569a // unreleased v6 pin: rift needs the v6 API but works around go-git#1842 (commondir in linked worktrees) via shell fallbacks — do not `go get -u` casually
 	github.com/odvcencio/gotreesitter v0.20.0
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/spf13/cobra v1.10.2

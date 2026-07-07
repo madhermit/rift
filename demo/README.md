@@ -10,7 +10,8 @@ mise run demo
 
 That builds `rift`, creates a throwaway repo with representative content
 (`demo/setup.sh`), and runs each `.tape` to drive a view and write its still
-(and, for `diff`/`stage`, a short GIF) into `docs/images/`.
+(and, for `diff`, `stage`, `tests`, and `reviewed`, a short GIF) into
+`docs/images/`.
 
 ## Requirements
 

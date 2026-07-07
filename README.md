@@ -70,11 +70,36 @@ Every command is interactive by default but never traps you — each supports `-
 rift log                              # interactive TUI
 rift log --print                      # one commit hash per line
 rift log --json                       # structured JSON
+rift version --json                   # {"version":"v0.5.0"} — pin tooling in scripts
 
 # pipe into anything
 rift diff --print | xargs -r "$EDITOR"          # open every changed file
 rift log --json | jq '.[] | select(.files_changed > 10)'
 ```
+
+### Scoping to paths and history
+
+`rift diff` and `rift log` both take a trailing `-- <path>...` to scope to specific files or directories, and both accept refs — `rift diff` takes one or two commits, `rift log` a ref or a commit range:
+
+```bash
+rift diff -- internal/git            # only the changes under internal/git
+rift diff HEAD~3 HEAD -- README.md   # one file's changes across a commit range
+rift log main..HEAD                  # commits on the current branch only
+rift log --all                       # commits from every branch
+rift log -n 50 -- cmd/               # the last 50 commits touching cmd/
+```
+
+### Shell completion
+
+rift generates completion scripts for bash, zsh, and fish (via cobra):
+
+```bash
+source <(rift completion bash)                        # load for the current shell
+rift completion zsh  > "${fpath[1]}/_rift"             # zsh
+rift completion fish > ~/.config/fish/completions/rift.fish
+```
+
+Run `rift completion --help` for per-shell install instructions.
 
 ### Shared TUI
 
@@ -82,17 +107,19 @@ Every screen behaves the same: type `/` to fuzzy-filter, `⇥` to switch panes, 
 
 ## Installation
 
+The install script downloads the right prebuilt binary for your platform and verifies its checksum against the release's `SHA256SUMS`:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/madhermit/rift/main/install.sh | bash
 ```
 
-Or with Go 1.25+:
+Prebuilt binaries for Linux and macOS (amd64 and arm64), plus the `SHA256SUMS` file, are attached to every [Release](https://github.com/madhermit/rift/releases) if you'd rather download and verify by hand.
 
-```bash
-go install github.com/madhermit/rift@latest
-```
-
-Pre-built binaries for Linux and macOS are available on the [Releases](https://github.com/madhermit/rift/releases) page.
+> **Installing with `go install`?** `go install github.com/madhermit/rift@latest` works, but it builds *without* the `grammar_subset*` tags that trim gotreesitter's embedded tree-sitter grammars — so the binary is much larger (~43 MB vs ~21 MB for a release build), and `rift version` reports the module version rather than a release tag. To match the release build, clone the repo and run `mise run install`, or build with the tags yourself:
+>
+> ```bash
+> go build -tags "$GRAMMAR_TAGS" .   # GRAMMAR_TAGS as defined in mise.toml
+> ```
 
 ### External Tools
 

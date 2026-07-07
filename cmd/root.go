@@ -24,8 +24,8 @@ func runGit(args ...string) error {
 
 var rootCmd = &cobra.Command{
 	Use:           "rift",
-	Short:         "Syntax-aware, worktree-native, composable fuzzy git tool",
-	Long:          "rift is a syntax-aware, worktree-native, composable fuzzy git tool.",
+	Short:         "Syntax-aware, worktree-aware, composable fuzzy git tool",
+	Long:          "rift is a syntax-aware, worktree-aware, composable fuzzy git tool.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -34,7 +34,6 @@ func init() {
 	rootCmd.RunE = runRoot
 	rootCmd.PersistentFlags().Bool("print", false, "Output in plain text (non-interactive)")
 	rootCmd.PersistentFlags().Bool("json", false, "Output in JSON format")
-	rootCmd.PersistentFlags().String("format", "", "Output format template")
 }
 
 func Execute() error {

@@ -24,8 +24,7 @@ mise run install     # install to ~/.local/bin/rift
 - **Git reads:** go-git
 - **Git writes:** shelled git commands
 - **Structural diff:** difftastic (external binary, shelled out)
-- **Syntax-aware merge:** mergiraf (external binary, shelled out)
-- **Config:** TOML (`~/.config/rift/config.toml`, per-repo `.rift.toml`)
+- **Test extraction:** tree-sitter grammars (gotreesitter, embedded) for the `--tests` lens
 - **Task runner:** mise
 
 ## Project Structure
@@ -36,13 +35,21 @@ internal/      # private packages
   git/         # git operations (go-git reads, shelled writes)
   tui/         # bubbletea models and views
   diff/        # difftastic integration, fallback line diff
-  merge/       # mergiraf integration
-  review/      # risk classification, review state
-  checkpoint/  # shadow commit checkpoint system
-  config/      # TOML config loading
-  output/      # --print / --json / --format composable output
+  review/      # review state (reviewed marks) + test-case extraction
+  tooling/     # external tool management (difftastic download/detect)
+  output/      # --print / --json composable output
 main.go        # entrypoint
 ```
+
+## Planned (not yet built)
+
+`git-flux-design.md` describes far more than ships today. The following are
+design intent only — do not assume the packages or tools exist:
+
+- **Config:** TOML at `~/.config/rift/config.toml` + per-repo `.rift.toml` (`internal/config`)
+- **Syntax-aware merge / conflict resolution:** mergiraf (`internal/merge`)
+- **Checkpoints:** shadow-commit snapshots on hidden refs (`internal/checkpoint`)
+- **Risk classification** in review — today `internal/review` only tracks reviewed marks and extracts test cases
 
 ## Workflow
 
@@ -67,13 +74,13 @@ main.go        # entrypoint
 - **Internal packages only.** Nothing under `internal/` is public API. The CLI is the interface.
 - **No global state.** Pass dependencies explicitly. No `init()` functions except for cobra command registration.
 - **Composable output on every command.** Every subcommand must support `--print` and `--json` flags. Use `internal/output` for consistent formatting.
-- **Graceful degradation.** If difftastic/mergiraf are unavailable, fall back to built-in alternatives. Never crash on missing external tools.
+- **Graceful degradation.** If difftastic is unavailable, fall back to the built-in line diff. Never crash on missing external tools.
 - **Worktree awareness, not management.** Commands detect and respect worktree context (bare-repo and linked-worktree layouts) so reads work correctly there; the logic lives in `internal/git` (e.g. `isLinkedWorktree`, the `log.go` commondir shell fallback). rift never creates, switches, or prunes worktrees — that's worktrunk's job.
 
 ## External Tool Management
 
-- difftastic (`difft`) and mergiraf are auto-downloaded to `~/.local/share/rift/bin/` on first run
-- System `$PATH` versions are preferred if present and version-compatible
+- difftastic (`difft`) is auto-downloaded to `~/.local/share/rift/bin/` on first run
+- A system `$PATH` version is preferred if present and version-compatible
 - Fallback to built-in line diff if difftastic is unavailable
 - Never block on a failed download
 
