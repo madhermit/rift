@@ -7,6 +7,12 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Fixed
+
+- `install.sh` no longer fails checksum verification on macOS with a matching
+  hash: it now compares hash strings directly instead of relying on `-c` check
+  mode, whose behavior differs between GNU `sha256sum` and macOS's `shasum`.
+
 ## [0.6.0] - 2026-07-07
 
 ### Added

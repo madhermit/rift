@@ -49,12 +49,16 @@ elif [[ -z "$SHA_CMD" ]]; then
   echo "Warning: no sha256sum/shasum tool found; skipping checksum verification"
 else
   EXPECTED=$(printf '%s\n' "$SUMS" | awk -v f="$BINARY" '$2 == f || $2 == "*"f {print $1; exit}')
+  # Compare hash strings directly rather than using `-c` check mode, whose
+  # stdin/format behavior differs between GNU sha256sum and macOS's perl shasum
+  # (a matching hash could still exit non-zero on some macOS versions).
+  GOT=$($SHA_CMD "$TMP" | awk '{print $1}')
   if [[ -z "$EXPECTED" ]]; then
     echo "Warning: no checksum for ${BINARY} in SHA256SUMS; skipping verification"
-  elif ! printf '%s  %s\n' "$EXPECTED" "$TMP" | $SHA_CMD -c >/dev/null 2>&1; then
+  elif [[ "$GOT" != "$EXPECTED" ]]; then
     echo "Checksum verification FAILED for ${BINARY}" >&2
     echo "  expected: ${EXPECTED}" >&2
-    echo "  got:      $($SHA_CMD "$TMP" | awk '{print $1}')" >&2
+    echo "  got:      ${GOT}" >&2
     exit 1
   else
     echo "Checksum verified."
