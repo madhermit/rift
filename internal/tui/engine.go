@@ -2,37 +2,36 @@ package tui
 
 import "github.com/madhermit/rift/internal/diff"
 
-// EngineToggle holds the active diff engine alongside its alternate (the plain
-// line engine), letting a screen flip between them with `e`. When only the plain
-// engine is available the two sides match and the flip is a no-op.
+// EngineToggle is the ring of diff engines a screen cycles with `e`:
+// difftastic (when available) → git's word-diff view → git's moved-line view.
+// Without difftastic the ring is just the two git views.
 type EngineToggle struct {
-	active    diff.Engine
-	alt       diff.Engine
-	canToggle bool // the pair is fixed, so toggle-ability is computed once
+	engines []diff.Engine
+	idx     int
 }
 
-// NewEngineToggle pairs the given engine with the plain line engine as its
-// alternate.
+// NewEngineToggle builds the engine ring starting from the given primary
+// engine. When the primary already is the plain git engine (difftastic
+// unavailable), it isn't added twice.
 func NewEngineToggle(engine diff.Engine) EngineToggle {
-	alt := diff.NewPlainEngine()
-	return EngineToggle{active: engine, alt: alt, canToggle: engine.Name() != alt.Name()}
+	engines := []diff.Engine{engine, diff.NewPlainEngine(), diff.NewMovedEngine()}
+	if engine.Name() == engines[1].Name() {
+		engines = engines[1:]
+	}
+	return EngineToggle{engines: engines}
 }
 
 // Engine is the active engine — what previews are rendered with.
-func (e EngineToggle) Engine() diff.Engine { return e.active }
+func (e EngineToggle) Engine() diff.Engine { return e.engines[e.idx] }
 
 // Name is the active engine's name, used as the header context label.
-func (e EngineToggle) Name() string { return e.active.Name() }
+func (e EngineToggle) Name() string { return e.Engine().Name() }
 
-// CanToggle reports whether the two engines differ (false when only the plain
-// engine is available).
-func (e EngineToggle) CanToggle() bool { return e.canToggle }
+// CanToggle reports whether there is more than one engine to cycle through.
+func (e EngineToggle) CanToggle() bool { return len(e.engines) > 1 }
 
-// Toggle swaps the active and alternate engines, returning the new state; a
-// no-op when only one engine is available.
+// Toggle advances to the next engine in the ring, returning the new state.
 func (e EngineToggle) Toggle() EngineToggle {
-	if e.canToggle {
-		e.active, e.alt = e.alt, e.active
-	}
+	e.idx = (e.idx + 1) % len(e.engines)
 	return e
 }

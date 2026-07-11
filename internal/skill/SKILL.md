@@ -32,6 +32,7 @@ rift diff --name-only              # just the paths, one per line
 ```
 
 `status` is `Modified`, `Added`, `Deleted`, `Renamed`, `Copied`, or `Untracked`.
+In a commit-range or base-ref scope, `Renamed` entries also carry `old_path`.
 
 ## Read the diffs
 

@@ -83,7 +83,13 @@ func gatherRange(repo *git.Repo, base, target string, paths []string) ([]fileSco
 		if added == nil {
 			added = map[int]bool{}
 		}
-		old, _ := diff.ShowFile(root, base, f.Path) // nil old side for a file added in the range
+		// A renamed file's old side lives at its old path in the base — without
+		// it every spec in the file would read as added rather than renamed.
+		oldPath := f.Path
+		if f.OldPath != "" {
+			oldPath = f.OldPath
+		}
+		old, _ := diff.ShowFile(root, base, oldPath) // nil old side for a file added in the range
 		return content, old, added, true
 	}), nil
 }

@@ -21,6 +21,17 @@ pre-1.0).
   `--print` diffs, the `--tests` lens, review state). `rift skill path` writes
   it to `~/.local/share/rift/skills/rift-review/SKILL.md` and prints the path,
   so you can tell an agent "run `rift skill path` and follow that skill".
+- Committed-range and base-ref diffs now detect renames: a moved file lists as
+  one `R` record showing only its real content delta (with an `old → new`
+  preview title and `old_path` in `--json`) instead of a full delete plus add.
+  The tests lens reads a renamed file's old side from its old path, so its
+  specs no longer all report as newly added. Working-tree and staged listings
+  keep git-status semantics (the stage screen operates on real index paths).
+- The `e` engine toggle now cycles three views: difftastic, git's word-diff
+  view, and a new moved-line view (`git-moved`) that colors relocated code
+  distinctly — answering "moved or rewritten?" at a glance. The two git views
+  are separate because git ignores `--color-moved` under `--word-diff`. The
+  moved view is also available without difftastic installed.
 
 ### Fixed
 

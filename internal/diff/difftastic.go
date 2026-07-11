@@ -25,7 +25,7 @@ func (d *difftasticEngine) Diff(ctx context.Context, repoRoot, file string, opts
 }
 
 func (d *difftasticEngine) diffViaGit(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
-	args := buildGitDiffArgs(opts, file, false)
+	args := buildGitDiffArgs(opts, file, nil)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot
 	colorEnv := "DFT_COLOR=never"
@@ -61,7 +61,15 @@ func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot, file string
 		newPath = worktreeOrNull(filepath.Join(repoRoot, file))
 	}
 
-	oldPath := showOrNull(ctx, repoRoot, oldRef, file, filepath.Join(tmpDir, "a", file))
+	// A renamed file's pre-image lives at its old path in the old ref. It's
+	// still extracted under the NEW path (destPath) so both sides share a
+	// relative path — difftastic then labels the diff with that clean path
+	// instead of the temp file's; rift's own preview title carries old → new.
+	oldFile := file
+	if opts.OldPath != "" {
+		oldFile = opts.OldPath
+	}
+	oldPath := showOrNull(ctx, repoRoot, oldRef, oldFile, filepath.Join(tmpDir, "a", file))
 	return d.diffFiles(ctx, oldPath, newPath, opts.Color, opts.Width, opts.Display)
 }
 

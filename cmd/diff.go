@@ -155,9 +155,10 @@ func fileDiff(ctx context.Context, engine diff.Engine, repo *git.Repo, f git.Cha
 		return diff.RawNewFileDiff(repo.Root(), f.Path)
 	}
 	return engine.Diff(ctx, repo.Root(), f.Path, diff.DiffOpts{
-		Staged: staged,
-		Base:   base,
-		Target: target,
-		Color:  false,
+		Staged:  staged,
+		Base:    base,
+		Target:  target,
+		OldPath: f.OldPath,
+		Color:   false,
 	})
 }
