@@ -27,6 +27,15 @@ type ChangedFile struct {
 	Deleted int    `json:"deleted"`
 }
 
+// DisplayPath is the human-facing label for the file: its path, or
+// "old → new" for a rename.
+func (f ChangedFile) DisplayPath() string {
+	if f.OldPath != "" {
+		return f.OldPath + " → " + f.Path
+	}
+	return f.Path
+}
+
 // Paths returns just the paths of the changed files.
 func Paths(files []ChangedFile) []string {
 	paths := make([]string, len(files))
@@ -163,15 +172,18 @@ func nameStatusCode(code string) string {
 	return statusWord(code[0])
 }
 
-// ListChanged lists the changed files for a diff scope, sorted by path and
-// never nil. The scope picks the comparison:
+// ListChanged lists the changed files for a diff scope, pathspec-filtered,
+// sorted by path, and never nil. The scope picks the comparison:
 //   - target set: the committed range base..target, tree to tree
+//   - staged set: the index against HEAD. Staged wins over base to match the
+//     per-file preview (buildGitDiffArgs), which puts --staged first — the CLI
+//     rejects the combination, but the TUI's `s` toggle can produce it, and the
+//     list and previews must agree on what it means
 //   - base set: the working tree against base, so committed changes since the
-//     ref show up too (not just the worktree-vs-HEAD delta), matching a per-file
-//     preview that also diffs against base
-//   - neither: the working tree against the index (or the index against HEAD
-//     when staged)
-func (r *Repo) ListChanged(staged bool, base, target string) ([]ChangedFile, error) {
+//     ref show up too (not just the worktree-vs-HEAD delta), matching a
+//     per-file preview that also diffs against base
+//   - none: the working tree against the index
+func (r *Repo) ListChanged(staged bool, base, target string, paths ...string) ([]ChangedFile, error) {
 	var (
 		files []ChangedFile
 		err   error
@@ -179,14 +191,17 @@ func (r *Repo) ListChanged(staged bool, base, target string) ([]ChangedFile, err
 	switch {
 	case target != "":
 		files, err = r.DiffBetweenCommits(base, target)
+	case staged:
+		files, err = r.ChangedFiles(true)
 	case base != "":
 		files, err = r.DiffAgainstRef(base)
 	default:
-		files, err = r.ChangedFiles(staged)
+		files, err = r.ChangedFiles(false)
 	}
 	if err != nil {
 		return nil, err
 	}
+	files = FilterByPaths(files, paths)
 	if files == nil {
 		files = []ChangedFile{}
 	}
@@ -314,13 +329,16 @@ func matchPath(file string, paths []string) bool {
 	return false
 }
 
+// FilterByPaths keeps the files under any of the given paths. A rename matches
+// on either side, so a file moved out of (or into) the scoped directory still
+// lists rather than silently vanishing from the changeset.
 func FilterByPaths(files []ChangedFile, paths []string) []ChangedFile {
 	if len(paths) == 0 {
 		return files
 	}
 	filtered := []ChangedFile{}
 	for _, f := range files {
-		if matchPath(f.Path, paths) {
+		if matchPath(f.Path, paths) || (f.OldPath != "" && matchPath(f.OldPath, paths)) {
 			filtered = append(filtered, f)
 		}
 	}

@@ -12,6 +12,7 @@ import (
 // describe/context path that contains it, and how the diff changed it.
 type Spec struct {
 	File     string   `json:"file"`
+	OldPath  string   `json:"old_path,omitempty"` // pre-image path when the file was renamed in scope
 	Language string   `json:"language"`
 	Path     []string `json:"path,omitempty"`
 	Name     string   `json:"name"`
@@ -81,6 +82,7 @@ func Collect(repo *git.Repo, scope DiffScope) ([]Spec, error) {
 			}
 			specs = append(specs, Spec{
 				File:     sc.Path,
+				OldPath:  sc.OldPath,
 				Language: sc.Ext.Language(),
 				Path:     r.Path,
 				Name:     r.Name,

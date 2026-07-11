@@ -61,7 +61,7 @@ func New(repo *git.Repo, engine diff.Engine, specs []review.Spec, scope review.D
 		Screen:      tui.Breadcrumb("diff", "tests"),
 		ListTitle:   listTitle(scope),
 		Branch:      repo.CurrentBranch(),
-		Context:     tui.ContextLabel(scope.Target, engine.Name()),
+		Context:     tui.ContextLabel(scope.Target, engine.Name(), false),
 		NavFraction: 40,
 		EmptyStatus: "No test changes in scope",
 		Hints:       hints,
@@ -154,6 +154,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tui.EditorClosedMsg:
 		return m.reloadFresh() // the file may have changed
+	case SpecsChangedMsg:
+		return m.applySpecs(msg.Specs)
 	case tea.KeyPressMsg:
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
@@ -187,6 +189,23 @@ func (m Model) View() tea.View { return m.list.TeaView() }
 func (m Model) Filtering() bool   { return m.list.Filtering() }
 func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
 
+// SpecsChangedMsg tells the tests lens its specs were re-collected externally
+// (the watch poller). The lens applies them in place — unlike a rebuild, the
+// engine cycle, layout, filter, and selection survive.
+type SpecsChangedMsg struct {
+	Specs []review.Spec
+}
+
+// applySpecs replaces the spec set, keeping the selection on the same spec
+// when it survives. Spec previews depend on file content that just changed,
+// so the cache is dropped and the selected spec re-renders.
+func (m Model) applySpecs(specs []review.Spec) (tea.Model, tea.Cmd) {
+	prevKey := m.list.SelectedKey()
+	var cmd tea.Cmd
+	m.list, cmd = m.list.SetItemsSelecting(specs, prevKey)
+	return m, cmd
+}
+
 // SetWatching sets the "watching" tag in the header context, marking the lens
 // as live-reloading. The flag persists on the model because the engine toggle
 // rebuilds the label.
@@ -197,11 +216,7 @@ func (m Model) SetWatching(on bool) Model {
 }
 
 func (m Model) contextLabel() string {
-	label := tui.ContextLabel(m.scope.Target, m.engines.Name())
-	if m.watching {
-		label += " · watching"
-	}
-	return label
+	return tui.ContextLabel(m.scope.Target, m.engines.Name(), m.watching)
 }
 
 // SetBreadcrumb marks this view as an embedded drilldown: it sets the header
@@ -243,7 +258,7 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	opts.Staged, opts.Base, opts.Target = m.scope.Staged, m.scope.Base, m.scope.Target
 	root, engine := m.repo.Root(), m.engines.Engine()
 	return func() tea.Msg {
-		ch, cancel := tui.StreamFiles(engine, root, []git.ChangedFile{{Path: sel.File}}, opts)
+		ch, cancel := tui.StreamFiles(engine, root, []git.ChangedFile{{Path: sel.File, OldPath: sel.OldPath}}, opts)
 		return tui.StreamReadyMsg{ReqID: reqID, Ch: ch, Cancel: cancel}
 	}
 }

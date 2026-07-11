@@ -45,6 +45,12 @@ func TestFingerprint(t *testing.T) {
 			hashes: hashes,
 		},
 		{
+			// A rename record with the same stats must register (OldPath is hashed).
+			name:   "rename recorded",
+			files:  []git.ChangedFile{{Path: "a.go", OldPath: "z.go", Status: "Modified", Added: 3, Deleted: 1}, files[1]},
+			hashes: hashes,
+		},
+		{
 			name:   "empty set",
 			files:  nil,
 			hashes: nil,

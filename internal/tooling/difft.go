@@ -47,12 +47,23 @@ const downloadTimeout = 30 * time.Second
 // network doesn't stall every rift invocation retrying synchronously.
 const failureBackoff = time.Hour
 
-func managedPath() (string, error) {
+// DataDir is rift's per-user data directory (managed binaries, the agent
+// skill). Kept in one place so a future XDG_DATA_HOME override lands
+// everywhere at once.
+func DataDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "share", "rift", "bin", "difft"), nil
+	return filepath.Join(home, ".local", "share", "rift"), nil
+}
+
+func managedPath() (string, error) {
+	dir, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "bin", "difft"), nil
 }
 
 func FindOrInstallDifft() (string, error) {

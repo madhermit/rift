@@ -22,6 +22,34 @@ func (r *Repo) GitPath(rel string) (string, error) {
 	return p, nil
 }
 
+// StagedBlobHashes returns the blob hash of each path's content in the index,
+// in one subprocess (`git ls-files --stage`). Paths absent from the index are
+// omitted. This is the staged-side counterpart of BlobHashes: the index
+// already stores blob OIDs, so nothing is hashed.
+func (r *Repo) StagedBlobHashes(paths []string) map[string]string {
+	hashes := map[string]string{}
+	if len(paths) == 0 {
+		return hashes
+	}
+	args := append([]string{"ls-files", "--stage", "-z", "--"}, paths...)
+	out, err := r.runGit(args...)
+	if err != nil {
+		return hashes
+	}
+	// Records: "<mode> <oid> <stage>\t<path>", NUL-terminated.
+	for _, rec := range strings.Split(out, "\x00") {
+		meta, path, ok := strings.Cut(rec, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) == 3 {
+			hashes[path] = fields[1]
+		}
+	}
+	return hashes
+}
+
 // BlobHashes returns the git blob hash of each path's current working-tree
 // content, in one subprocess. Paths that don't exist on disk (a deleted file, a
 // directory) are omitted — there's no content to hash.

@@ -346,3 +346,77 @@ func TestDiffBetweenCommits_Rename(t *testing.T) {
 		t.Errorf("rename = %+v, want %+v", got, want)
 	}
 }
+
+// TestListChanged_StagedWinsOverBase pins the precedence contract: staged
+// beats base, matching the per-file preview (buildGitDiffArgs), so the TUI's
+// `s` toggle in a base-ref scope lists the same side the previews render.
+func TestListChanged_StagedWinsOverBase(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	wt, err := repo.repo.Worktree()
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+	head, err := repo.repo.Head()
+	if err != nil {
+		t.Fatalf("get head: %v", err)
+	}
+	base := head.Hash().String()
+
+	// One committed-since-base change and one staged change.
+	writeFile(t, repo.root, "committed.go", "package main\n")
+	if _, err := wt.Add("committed.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	testCommit(t, wt, "committed change")
+	writeFile(t, repo.root, "staged.go", "package main\n")
+	if _, err := wt.Add("staged.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+
+	files, err := repo.ListChanged(true, base, "")
+	if err != nil {
+		t.Fatalf("ListChanged() error = %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "staged.go" {
+		t.Errorf("staged+base should list the staged side only, got %+v", files)
+	}
+}
+
+func TestStagedBlobHashes(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	wt, err := repo.repo.Worktree()
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+	writeFile(t, repo.root, "f.go", "package main\n")
+	if _, err := wt.Add("f.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+
+	staged := repo.StagedBlobHashes([]string{"f.go"})
+	if staged["f.go"] == "" {
+		t.Fatalf("expected an index hash for f.go, got %v", staged)
+	}
+
+	// Editing the worktree without re-adding must not change the index hash —
+	// that's the property the staged watch fingerprint relies on.
+	writeFile(t, repo.root, "f.go", "package main\n\nfunc edited() {}\n")
+	after := repo.StagedBlobHashes([]string{"f.go"})
+	if after["f.go"] != staged["f.go"] {
+		t.Errorf("index hash changed on a worktree-only edit: %q -> %q", staged["f.go"], after["f.go"])
+	}
+	if wtHash := repo.BlobHashes([]string{"f.go"})["f.go"]; wtHash == after["f.go"] {
+		t.Errorf("worktree and index hashes should differ after the edit, both %q", wtHash)
+	}
+
+	// Re-staging picks up the new content.
+	if _, err := wt.Add("f.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	restaged := repo.StagedBlobHashes([]string{"f.go"})
+	if restaged["f.go"] == staged["f.go"] {
+		t.Errorf("index hash should change after re-staging, still %q", staged["f.go"])
+	}
+}

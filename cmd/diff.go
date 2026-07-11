@@ -85,11 +85,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return runTestsLens(mode, repo, scope)
 	}
 
-	files, err := repo.ListChanged(staged, base, target)
+	files, err := repo.ListChanged(staged, base, target, pathArgs...)
 	if err != nil {
 		return err
 	}
-	files = git.FilterByPaths(files, pathArgs)
 
 	// --unreviewed narrows any non-interactive listing to files not yet marked
 	// reviewed (a working-tree concept). --name-only prints a plain listing even

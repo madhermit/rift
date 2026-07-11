@@ -14,6 +14,7 @@ import (
 // the set of line numbers the diff added or modified.
 type fileScope struct {
 	Path    string
+	OldPath string // pre-image path when the file was renamed in scope
 	Ext     Extractor
 	Content []byte
 	Old     []byte
@@ -109,7 +110,7 @@ func collect(files []git.ChangedFile, resolve func(git.ChangedFile) (content, ol
 		if !ok {
 			continue
 		}
-		scopes = append(scopes, fileScope{Path: f.Path, Ext: ext, Content: content, Old: old, Added: added})
+		scopes = append(scopes, fileScope{Path: f.Path, OldPath: f.OldPath, Ext: ext, Content: content, Old: old, Added: added})
 	}
 	return scopes
 }

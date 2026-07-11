@@ -48,10 +48,10 @@ usually much less text than `git diff` for the same change.
 
 ```bash
 rift diff --tests --json           # the test cases the diff touches
-rift log HEAD~5 --tests --json     # same, for a commit range
+rift diff HEAD~5 HEAD --tests --json  # same, for a commit range
 ```
 
-Output: `[{file, language, name, line, status, path?, ticket?}, ...]` where
+Output: `[{file, language, name, line, status, path?, old_path?, ticket?}, ...]` where
 `status` is `added`, `renamed`, or `modified`. Pay closest attention to
 `modified`: an existing test whose body changed can mean a quietly weakened
 assertion. A change that touches no tests is also a finding worth reporting.
