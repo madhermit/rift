@@ -11,7 +11,7 @@ import (
 type stubEngine struct{}
 
 func (stubEngine) Name() string { return "difftastic" }
-func (stubEngine) Diff(context.Context, string, string, diff.DiffOpts) (string, error) {
+func (stubEngine) Diff(context.Context, string, diff.File, diff.DiffOpts) (string, error) {
 	return "", nil
 }
 func (stubEngine) DiffHunks(context.Context, []diff.Hunk, string, string, bool, int) []string {

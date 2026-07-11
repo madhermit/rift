@@ -17,14 +17,14 @@ type difftasticEngine struct {
 
 func (d *difftasticEngine) Name() string { return "difftastic" }
 
-func (d *difftasticEngine) Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
+func (d *difftasticEngine) Diff(ctx context.Context, repoRoot string, file File, opts DiffOpts) (string, error) {
 	if opts.Width <= 0 {
 		return d.diffViaGit(ctx, repoRoot, file, opts)
 	}
 	return d.diffDirect(ctx, repoRoot, file, opts)
 }
 
-func (d *difftasticEngine) diffViaGit(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
+func (d *difftasticEngine) diffViaGit(ctx context.Context, repoRoot string, file File, opts DiffOpts) (string, error) {
 	args := buildGitDiffArgs(opts, file, nil)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot
@@ -36,7 +36,7 @@ func (d *difftasticEngine) diffViaGit(ctx context.Context, repoRoot, file string
 	return runGitDiff(cmd, "difftastic")
 }
 
-func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
+func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot string, file File, opts DiffOpts) (string, error) {
 	tmpDir, err := os.MkdirTemp("", "rift-diff-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
@@ -50,26 +50,26 @@ func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot, file string
 	switch {
 	case opts.Base != "" && opts.Target != "":
 		oldRef = opts.Base
-		newPath = showOrNull(ctx, repoRoot, opts.Target, file, filepath.Join(tmpDir, "b", file))
+		newPath = showOrNull(ctx, repoRoot, opts.Target, file.Path, filepath.Join(tmpDir, "b", file.Path))
 	case opts.Staged:
 		oldRef = "HEAD"
-		newPath = showOrNull(ctx, repoRoot, "", file, filepath.Join(tmpDir, "b", file))
+		newPath = showOrNull(ctx, repoRoot, "", file.Path, filepath.Join(tmpDir, "b", file.Path))
 	case opts.Base != "":
 		oldRef = opts.Base
-		newPath = worktreeOrNull(filepath.Join(repoRoot, file))
+		newPath = worktreeOrNull(filepath.Join(repoRoot, file.Path))
 	default:
-		newPath = worktreeOrNull(filepath.Join(repoRoot, file))
+		newPath = worktreeOrNull(filepath.Join(repoRoot, file.Path))
 	}
 
 	// A renamed file's pre-image lives at its old path in the old ref. It's
 	// still extracted under the NEW path (destPath) so both sides share a
 	// relative path — difftastic then labels the diff with that clean path
 	// instead of the temp file's; rift's own preview title carries old → new.
-	oldFile := file
-	if opts.OldPath != "" {
-		oldFile = opts.OldPath
+	oldFile := file.Path
+	if file.OldPath != "" {
+		oldFile = file.OldPath
 	}
-	oldPath := showOrNull(ctx, repoRoot, oldRef, oldFile, filepath.Join(tmpDir, "a", file))
+	oldPath := showOrNull(ctx, repoRoot, oldRef, oldFile, filepath.Join(tmpDir, "a", file.Path))
 	return d.diffFiles(ctx, oldPath, newPath, opts.Color, opts.Width, opts.Display)
 }
 

@@ -16,12 +16,10 @@ var reviewedGlyph = lipgloss.NewStyle().Foreground(tui.Green)
 
 // FilesChangedMsg tells the lens its changed-file set was re-listed externally
 // (the watch poller): Files is the new set, already pathspec-filtered and
-// sorted. Hashes, when non-nil, carries the poll's worktree content hashes so
-// the lens doesn't rehash the same files on the event loop (nil means compute
-// them — the staged scope's poll hashes the index, which is the wrong identity
-// for reviewed marks). The lens applies the set in place, keeping the
-// selection and — for files whose content didn't change — the cached previews
-// and the reader's scroll position.
+// sorted, and Hashes its worktree content hashes (computed off the event loop
+// by the poll; nil means compute them here). The lens applies the set in
+// place, keeping the selection and — for files whose content didn't change —
+// the cached previews and the reader's scroll position.
 type FilesChangedMsg struct {
 	Files  []git.ChangedFile
 	Hashes map[string]string

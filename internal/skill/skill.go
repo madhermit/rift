@@ -34,21 +34,7 @@ func Path() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", fmt.Errorf("create skill directory: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(p), ".skill-*")
-	if err != nil {
-		return "", fmt.Errorf("write skill file: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once renamed away
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("write skill file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("write skill file: %w", err)
-	}
-	_ = os.Chmod(tmpName, 0o644)
-	if err := os.Rename(tmpName, p); err != nil {
+	if err := tooling.WriteFileAtomic(p, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("write skill file: %w", err)
 	}
 	return p, nil

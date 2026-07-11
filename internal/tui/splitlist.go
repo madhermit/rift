@@ -297,20 +297,7 @@ func (m SplitList[T]) SetItems(items []T) (SplitList[T], tea.Cmd) {
 // value equals key (when it survives the new set/filter), instead of resetting to
 // the top. Used to preserve the user's position across a file-list reload.
 func (m SplitList[T]) SetItemsSelecting(items []T, key string) (SplitList[T], tea.Cmd) {
-	m.items = items
-	m.cache = map[string]string{}
-	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
-	m.selected = 0
-	if key != "" && m.cfg.Match != nil {
-		for i, it := range m.filtered {
-			if m.cfg.Match(it) == key {
-				m.selected = i
-				break
-			}
-		}
-	}
-	m.resizeViewport()
-	return m.requestPreview()
+	return m.setItems(items, key, nil)
 }
 
 // SetItemsSelectingStale is SetItemsSelecting for an in-place refresh (the
@@ -320,10 +307,24 @@ func (m SplitList[T]) SetItemsSelecting(items []T, key string) (SplitList[T], te
 // re-request, no viewport reset), so a change elsewhere in the tree doesn't
 // cost the reader their place in the diff they're reading.
 func (m SplitList[T]) SetItemsSelectingStale(items []T, key string, stale map[string]bool) (SplitList[T], tea.Cmd) {
+	return m.setItems(items, key, stale)
+}
+
+// setItems is the shared core of the SetItems* family. nil stale means the
+// item set reflects a different state entirely: the whole cache drops and the
+// selection's preview is re-requested. A non-nil stale set (of raw CacheKey
+// values — stored cache keys carry a width qualifier that is stripped for the
+// comparison) evicts only those previews, and a surviving, non-stale selection
+// keeps its shown preview untouched.
+func (m SplitList[T]) setItems(items []T, key string, stale map[string]bool) (SplitList[T], tea.Cmd) {
 	m.items = items
-	for k := range m.cache {
-		if stale[k] {
-			delete(m.cache, k)
+	if stale == nil {
+		m.cache = map[string]string{}
+	} else {
+		for k := range m.cache {
+			if raw, _, _ := strings.Cut(k, "\x00"); stale[raw] {
+				delete(m.cache, k)
+			}
 		}
 	}
 	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
@@ -339,8 +340,14 @@ func (m SplitList[T]) SetItemsSelectingStale(items []T, key string, stale map[st
 		}
 	}
 	m.resizeViewport()
-	if it, ok := m.Selected(); kept && ok && !m.loading && m.prevErr == nil && !stale[m.cacheKey(it)] {
-		return m, nil // shown preview is still current; don't move the reader
+	if it, ok := m.Selected(); stale != nil && kept && ok && !m.loading && m.prevErr == nil {
+		raw := ""
+		if m.cfg.CacheKey != nil {
+			raw = m.cfg.CacheKey(it)
+		}
+		if raw != "" && !stale[raw] {
+			return m, nil // shown preview is still current; don't move the reader
+		}
 	}
 	return m.requestPreview()
 }

@@ -32,23 +32,18 @@ type Model struct {
 	filesLens  tui.PreviewChild // built lazily / at New; nil until first shown
 	testsLens  tui.PreviewChild
 	showTests  bool
-	unreviewed bool // open the file lens with the unreviewed-only filter on
-	watch      bool // poll the working tree and refresh on change (see watch.go)
-	watchFP    string
-	watchGen   int  // invalidates in-flight ticks/polls when the chain or scope changes
-	collecting bool // a tests collect for the current gen is in flight
+	unreviewed bool   // open the file lens with the unreviewed-only filter on
+	watch      bool   // poll the working tree and refresh on change (see watch.go)
+	watchFP    string // last polled fingerprint; "" means the next poll baselines without refreshing
+	watchGen   int    // invalidates in-flight ticks/polls when the chain or scope changes
+	collectGen int    // gen of the in-flight tests collect; pending iff == gen (-1 when none)
 	gen        int
 	width      int
 	height     int
 }
 
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope review.DiffScope, showTests, unreviewed, watch bool) Model {
-	m := Model{repo: repo, engine: engine, scope: scope, files: files, showTests: showTests, unreviewed: unreviewed, watch: watch}
-	if watch {
-		// Seed the fingerprint from the files the lens opens with, so a change
-		// landing before the first poll still registers as a change.
-		m.watchFP = fingerprint(files, watchHashes(repo, scope, files))
-	}
+	m := Model{repo: repo, engine: engine, scope: scope, files: files, showTests: showTests, unreviewed: unreviewed, watch: watch, collectGen: -1}
 	if showTests {
 		m.testsLens = m.buildTests() // sync at startup is fine
 	} else {
@@ -75,7 +70,9 @@ func (m Model) newTests(specs []review.Spec) tui.PreviewChild {
 
 func (m Model) Init() tea.Cmd {
 	if m.watch {
-		return tea.Batch(tui.ThemeInit(), watchTick(m.watchGen))
+		// Poll immediately: the first result baselines the fingerprint (watchFP
+		// is ""), off the event loop, without refreshing the just-built lens.
+		return tea.Batch(tui.ThemeInit(), m.pollWatch())
 	}
 	return tui.ThemeInit()
 }
@@ -99,7 +96,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.gen {
 			return m, nil // a superseded tests build (toggled again before it landed)
 		}
-		m.collecting = false
+		m.collectGen = -1
 		m = m.clearCollecting() // the specs landed; drop the "collecting…" note
 		if msg.apply && m.showTests {
 			// A watch refresh: apply the fresh specs to the shown lens in place,
@@ -166,7 +163,7 @@ func (m Model) toggle() (tea.Model, tea.Cmd) {
 		// the user the collect is running.
 		m.gen++
 		m = m.noteCollecting()
-		m.collecting = true
+		m.collectGen = m.gen
 		return m, m.collectTests(m.gen, false)
 	}
 	return m.show(true)
@@ -208,20 +205,20 @@ func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	m.files, _ = scopeFiles(m.repo, m.scope) // best-effort, like the reload paths
 	var rearm tea.Cmd
 	if m.watch {
-		// A poll in flight captured the old scope: orphan it (gen bump) and re-arm
-		// a fresh chain, re-seeding the fingerprint so the flip itself doesn't
-		// read as a tree change on the next poll.
+		// A poll in flight captured the old scope: orphan it (watchGen bump) and
+		// start a fresh chain with an immediate poll — watchFP resets so that
+		// poll baselines the new scope off the event loop instead of reading the
+		// flip itself as a tree change.
 		m.watchGen++
-		m.watchFP = fingerprint(m.files, watchHashes(m.repo, m.scope, m.files))
-		rearm = watchTick(m.watchGen)
+		m.watchFP = ""
+		rearm = m.pollWatch()
 	}
 	if m.showTests {
 		model, cmd := m.recollect(false)
 		return model, tea.Batch(cmd, rearm)
 	}
 	m = m.cancelShown()
-	m.gen++
-	m.collecting = false // a pending `t` collect targeted the old scope; let it drop
+	m.gen++ // also invalidates a pending `t` collect, which targeted the old scope
 	m.filesLens, m.testsLens = m.buildFiles(), nil
 	model, cmd := m.delegate(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	return model, tea.Batch(cmd, rearm)
@@ -237,7 +234,7 @@ func (m Model) recollect(apply bool) (tea.Model, tea.Cmd) {
 	m.gen++
 	m = m.noteCollecting()
 	m.filesLens = nil
-	m.collecting = true
+	m.collectGen = m.gen
 	return m, m.collectTests(m.gen, apply)
 }
 
@@ -246,13 +243,12 @@ func (m Model) recollect(apply bool) (tea.Model, tea.Cmd) {
 // that lens's in-flight preview messages.
 func (m Model) show(tests bool) (tea.Model, tea.Cmd) {
 	m = m.cancelShown()
-	if !tests && m.collecting {
+	if !tests && m.collectGen == m.gen {
 		// The gen bump below drops the pending collect, and its fingerprint has
 		// already been consumed — the retained tests lens predates the tree that
 		// collect targeted, so drop it too; the next `t` re-collects instead of
 		// showing stale specs indefinitely.
 		m.testsLens = nil
-		m.collecting = false
 	}
 	m.showTests = tests
 	m.gen++
