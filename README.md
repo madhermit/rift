@@ -10,9 +10,11 @@ It wraps the git workflows where UX is the bottleneck — diffing, staging, log 
 rift              # contextual launchpad
 rift diff         # syntax-aware diff browser
 rift diff --tests # review a change by the tests it touches
+rift diff --watch # live-reloading review while an agent edits
 rift stage        # interactive staging with hunk granularity
 rift log          # structural commit explorer
 rift stash        # stash manager with diff preview
+rift skill        # built-in skill that teaches agents the review workflow
 ```
 
 rift is **worktree-aware** — every command reads correctly inside bare-repo and linked-worktree layouts — but it does not *manage* worktrees or branches. For creating, switching, and pruning worktrees, pair it with [worktrunk](https://github.com/max-sixty/worktrunk).
@@ -30,6 +32,27 @@ rift is **worktree-aware** — every command reads correctly inside bare-repo an
 rift occupies the space between them: **transient** (invoke, act, return to shell), **structural** (diffs understand your code's syntax), and **composable** (every command has `--print` and `--json` modes).
 
 The bet behind it: as agents write more of the code, the scarce human activity becomes *reading* it — so a git tool should be built for review first, and none of the above are.
+
+### How it compares
+
+A new cohort of review-first diff viewers — [hunk](https://github.com/modem-dev/hunk) most notably — shares that bet. rift's angle within it: structural diffs, review that goes deeper than viewing (tracking, test impact, staging, history), and composable output on everything.
+
+| Capability | rift | [hunk](https://github.com/modem-dev/hunk) | [lazygit](https://github.com/jesseduffield/lazygit) | [forgit](https://github.com/wfxr/forgit) | [delta](https://github.com/dandavison/delta) | [difftastic](https://difftastic.wilfred.me.uk/) |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| Structural (syntax-aware) diffs | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Interactive multi-file review | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Review tracking (content-keyed marks) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Test-impact lens (`--tests`) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Interactive hunk staging | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ |
+| Log & stash browsing | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ |
+| `--print` / `--json` on every command | ✅ | ❌ | ❌ | ❌ | — | ❌ |
+| Watch mode (live reload) | ✅ | ✅ | ✅ | ❌ | — | ❌ |
+| Transient — invoke, act, return to shell | ✅ | ✅ | ❌ | ✅ | — | — |
+| Single static binary | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| Inline agent annotations | 🔜 | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Mouse support | 🔜 | ✅ | ✅ | ❌ | — | — |
+
+✅ yes · ❌ no · — not applicable · 🔜 planned. delta and difftastic are diff renderers/pagers rather than browsers, so several rows don't apply — rift uses difftastic as its diff engine and falls back to a built-in line diff without it.
 
 ## Key Features
 
@@ -60,6 +83,10 @@ Add `--tests` to `rift diff` or `rift log` to read a change by the *tests* it to
 In `rift diff`, press `r` to mark the selected file **reviewed** (a `✓` replaces its status glyph) and `U` to show only the files you haven't reviewed yet — so you can walk a large change file by file and watch the list shrink as you tick each one off. A mark is keyed to the file's content, so it **resets the moment the file changes** (e.g. an agent edits it again) and re-applies on revert, making it easy to re-review only what's new. Marks persist per worktree (in `.git/rift/`, uncommitted); `--unreviewed` narrows `--print` / `--json` / `--name-only` to the not-yet-reviewed files.
 
 ![rift diff — marking changes reviewed and filtering to what's left](docs/images/reviewed.gif)
+
+### Watch mode
+
+`rift diff --watch` keeps the browser live while something else edits the working tree — typically an agent writing code in another pane. The file list, stats, and diffs refresh in place (your selection survives), the tests lens re-collects, and because reviewed marks are content-keyed they reset the moment a file changes again — so the unreviewed filter always shows exactly what still needs eyes. A `watching` tag in the header shows it's live. Works with any working-tree scope, including a base ref (`rift diff main --watch`) and the staged side.
 
 ### Interactive staging
 
@@ -178,15 +205,30 @@ The `--json` output on every command gives agents structural understanding that 
 
 ```bash
 # inspect changes as structured data
-rift diff --json | jq '.[] | select(.status == "modified")'
+rift diff --json | jq '.[] | select(.status == "Modified")'
+
+# the tests a change added, renamed, or modified
+rift diff --tests --json
+
+# the files a human hasn't (re-)reviewed yet
+rift diff --unreviewed --name-only
 
 # list recent commits
 rift log --json -n 10 | jq '.[].hash'
 ```
 
+rift also ships a built-in [skill](internal/skill/SKILL.md) that teaches an agent the whole review workflow — inspecting a changeset, reading structural diffs, checking test impact, and respecting review state:
+
+```bash
+rift skill        # print it
+rift skill path   # write it to a stable path and print the location
+```
+
+Tell your agent: *"Run `rift skill path` and follow that skill to review this change."* Pair it with `rift diff --watch` in your own terminal and the review loop closes — you watch files tick off (and re-surface) as the agent works.
+
 ## Status
 
-The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.6.0**), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Config and local code review are planned next.
+The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.6.0**), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, inline agent annotations (file-based, in the same store as reviewed marks — no daemon), and mouse support.
 
 Worktree and branch *management* are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
 
