@@ -143,6 +143,37 @@ func nameStatusCode(code string) string {
 	return statusWord(code[0])
 }
 
+// ListChanged lists the changed files for a diff scope, sorted by path and
+// never nil. The scope picks the comparison:
+//   - target set: the committed range base..target, tree to tree
+//   - base set: the working tree against base, so committed changes since the
+//     ref show up too (not just the worktree-vs-HEAD delta), matching a per-file
+//     preview that also diffs against base
+//   - neither: the working tree against the index (or the index against HEAD
+//     when staged)
+func (r *Repo) ListChanged(staged bool, base, target string) ([]ChangedFile, error) {
+	var (
+		files []ChangedFile
+		err   error
+	)
+	switch {
+	case target != "":
+		files, err = r.DiffBetweenCommits(base, target)
+	case base != "":
+		files, err = r.DiffAgainstRef(base)
+	default:
+		files, err = r.ChangedFiles(staged)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if files == nil {
+		files = []ChangedFile{}
+	}
+	SortByPath(files)
+	return files, nil
+}
+
 func DiffTargets(args []string) (base, target string, err error) {
 	switch len(args) {
 	case 0:

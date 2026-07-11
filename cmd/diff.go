@@ -26,6 +26,7 @@ func init() {
 	diffCmd.Flags().Bool("name-only", false, "Only show changed file names")
 	diffCmd.Flags().Bool("tests", false, "Show the test cases the diff touches instead of files")
 	diffCmd.Flags().Bool("unreviewed", false, "Only show files not yet marked reviewed")
+	diffCmd.Flags().Bool("watch", false, "Reload automatically as the working tree changes")
 	rootCmd.AddCommand(diffCmd)
 }
 
@@ -61,6 +62,16 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--staged cannot be combined with a commit argument")
 	}
 
+	// --watch reloads the TUI as the working tree changes: a committed range is
+	// immutable, and a non-interactive listing has nothing to reload into.
+	watch, _ := cmd.Flags().GetBool("watch")
+	if watch && target != "" {
+		return fmt.Errorf("--watch requires a working-tree diff, not a commit range")
+	}
+	if watch && (mode != output.Interactive || nameOnly) {
+		return fmt.Errorf("--watch requires the interactive TUI")
+	}
+
 	// Committed() keys on Target, so a working-tree scope ignores Base and a
 	// committed range ignores Staged — one literal covers both.
 	scope := review.DiffScope{Staged: staged, Base: base, Target: target, Paths: pathArgs}
@@ -74,7 +85,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return runTestsLens(mode, repo, scope)
 	}
 
-	files, err := listChangedFiles(repo, staged, base, target)
+	files, err := repo.ListChanged(staged, base, target)
 	if err != nil {
 		return err
 	}
@@ -102,37 +113,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	case output.Print:
 		return printDiffs(engine, repo, files, staged, base, target)
 	default:
-		m := lensui.New(repo, engine, files, scope, tests, unrev)
+		m := lensui.New(repo, engine, files, scope, tests, unrev, watch)
 		_, err := tui.NewProgram(m).Run()
 		return err
 	}
-}
-
-func listChangedFiles(repo *git.Repo, staged bool, base, target string) ([]git.ChangedFile, error) {
-	var (
-		files []git.ChangedFile
-		err   error
-	)
-	switch {
-	case target != "":
-		// Committed range: base..target, tree to tree.
-		files, err = repo.DiffBetweenCommits(base, target)
-	case base != "":
-		// Single ref: working tree vs base, so committed changes since the ref
-		// show up too (not just the worktree-vs-HEAD delta), matching the
-		// per-file preview which also diffs against base.
-		files, err = repo.DiffAgainstRef(base)
-	default:
-		files, err = repo.ChangedFiles(staged)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if files == nil {
-		files = []git.ChangedFile{}
-	}
-	git.SortByPath(files)
-	return files, nil
 }
 
 // filterUnreviewed drops files whose current content is marked reviewed.

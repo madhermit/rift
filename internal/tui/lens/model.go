@@ -33,13 +33,20 @@ type Model struct {
 	testsLens  tui.PreviewChild
 	showTests  bool
 	unreviewed bool // open the file lens with the unreviewed-only filter on
+	watch      bool // poll the working tree and refresh on change (see watch.go)
+	watchFP    string
 	gen        int
 	width      int
 	height     int
 }
 
-func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope review.DiffScope, showTests, unreviewed bool) Model {
-	m := Model{repo: repo, engine: engine, scope: scope, files: files, showTests: showTests, unreviewed: unreviewed}
+func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope review.DiffScope, showTests, unreviewed, watch bool) Model {
+	m := Model{repo: repo, engine: engine, scope: scope, files: files, showTests: showTests, unreviewed: unreviewed, watch: watch}
+	if watch {
+		// Seed the fingerprint from the files the lens opens with, so a change
+		// landing before the first poll still registers as a change.
+		m.watchFP = watchFingerprint(repo, files)
+	}
 	if showTests {
 		m.testsLens = m.buildTests() // sync at startup is fine
 	} else {
@@ -49,18 +56,39 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope revi
 }
 
 func (m Model) buildFiles() tui.PreviewChild {
-	return diffui.New(m.repo, m.engine, m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true, m.scope.Paths, m.unreviewed)
+	lens := diffui.New(m.repo, m.engine, m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true, m.scope.Paths, m.unreviewed)
+	if m.watch {
+		lens = lens.SetWatching()
+	}
+	return lens
 }
 
 func (m Model) buildTests() tui.PreviewChild {
 	specs, _ := review.Collect(m.repo, m.scope)
-	return reviewui.New(m.repo, m.engine, specs, m.scope, true)
+	return m.newTests(specs)
 }
 
-func (m Model) Init() tea.Cmd { return tui.ThemeInit() }
+// newTests builds the tests lens over already-collected specs, tagging it with
+// the watch indicator when live.
+func (m Model) newTests(specs []review.Spec) tui.PreviewChild {
+	lens := reviewui.New(m.repo, m.engine, specs, m.scope, true)
+	if m.watch {
+		lens = lens.SetWatching()
+	}
+	return lens
+}
+
+func (m Model) Init() tea.Cmd {
+	if m.watch {
+		return tea.Batch(tui.ThemeInit(), watchTick())
+	}
+	return tui.ThemeInit()
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case watchTickMsg, watchStateMsg:
+		return m.watchUpdate(msg)
 	case lensMsg:
 		if msg.gen != m.gen {
 			return m, nil // a stale preview message from a lens we toggled away from
@@ -70,7 +98,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.gen {
 			return m, nil // a superseded tests build (toggled again before it landed)
 		}
-		m.testsLens = reviewui.New(m.repo, m.engine, msg.specs, m.scope, true)
+		m.testsLens = m.newTests(msg.specs)
 		m = m.clearCollecting() // the specs landed; drop the "collecting…" note
 		return m.show(true)
 	case tea.WindowSizeMsg:
@@ -160,7 +188,12 @@ func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 	m = m.cancelShown()
 	m.scope.Staged = !m.scope.Staged
 	m.gen++
-	m.files = worktreeFiles(m.repo, m.scope.Staged, m.scope.Paths)
+	m.files = scopeFiles(m.repo, m.scope)
+	if m.watch {
+		// Re-seed for the new scope, or the next poll would read the staged flip
+		// itself as a working-tree change and refresh a lens that's already fresh.
+		m.watchFP = watchFingerprint(m.repo, m.files)
+	}
 	if m.showTests {
 		// Keep showing the now-stale tests until the re-collect lands, with a footer
 		// note that the collect is running.
@@ -207,16 +240,16 @@ func (m Model) collectTests(gen int) tea.Cmd {
 	}
 }
 
-// worktreeFiles lists the changed files for a working-tree staged toggle, sorted
-// and pathspec-filtered like the diff command's own listing — so the file lens
-// keeps the `-- path` scope that the tests lens (via review.Collect) already does.
-func worktreeFiles(repo *git.Repo, staged bool, paths []string) []git.ChangedFile {
-	files, err := repo.ChangedFiles(staged)
+// scopeFiles lists the changed files for a working-tree scope (staged side,
+// base ref, pathspec), sorted and filtered like the diff command's own listing
+// — so the file lens keeps the `-- path` scope that the tests lens (via
+// review.Collect) already does.
+func scopeFiles(repo *git.Repo, scope review.DiffScope) []git.ChangedFile {
+	files, err := repo.ListChanged(scope.Staged, scope.Base, "")
 	if err != nil {
 		return nil
 	}
-	git.SortByPath(files)
-	return git.FilterByPaths(files, paths)
+	return git.FilterByPaths(files, scope.Paths)
 }
 
 // lensCollectedMsg delivers the parsed tests for the first switch to the tests

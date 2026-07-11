@@ -14,6 +14,13 @@ import (
 
 var reviewedGlyph = lipgloss.NewStyle().Foreground(tui.Green)
 
+// FilesChangedMsg tells the lens its changed-file set was re-listed externally
+// (the watch poller): Files is the new set, already pathspec-filtered and
+// sorted. The lens applies it in place, keeping the selection where possible.
+type FilesChangedMsg struct {
+	Files []git.ChangedFile
+}
+
 // reviewMarks is the reviewed-state lookup the row renderer reads: the persisted
 // marks plus each file's current blob hash. Both are mutated in place — Toggle on
 // the store, a fresh hash map after an edit — so the row closure that captures
@@ -43,6 +50,7 @@ type Model struct {
 	paths          []string          // pathspec scope (from `-- path...`), re-applied on reload
 	marks          *reviewMarks      // nil for a commit diff — historical files don't get reviewed
 	unreviewedOnly bool
+	watching       bool // show the live-watch indicator in the header context
 }
 
 // prependAllEntry adds a synthetic "All" row (carrying the totals) that previews
@@ -184,6 +192,23 @@ func (m Model) displayFiles() []git.ChangedFile {
 	return prependAllEntry(m.files)
 }
 
+// SetWatching adds a "watching" tag to the header context, marking the lens as
+// live-reloading. The flag persists on the model because the engine toggle
+// rebuilds the label.
+func (m Model) SetWatching() Model {
+	m.watching = true
+	m.list = m.list.SetContext(m.contextLabel())
+	return m
+}
+
+func (m Model) contextLabel() string {
+	label := tui.ContextLabel(m.target, m.engines.Name())
+	if m.watching {
+		label += " · watching"
+	}
+	return label
+}
+
 // SetEmptyStatus overrides the footer text shown when the list is empty (e.g. a
 // commit whose diff failed to load, distinct from "No changes found").
 func (m Model) SetEmptyStatus(s string) Model {
@@ -258,6 +283,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// can flip its reviewed state — so reload the file list (recomputing hashes),
 		// preserving the selection, rather than leaving stale rows and +/- stats.
 		return m.reloadFiles()
+	case FilesChangedMsg:
+		if m.commitDiff {
+			return m, nil // historical set; nothing external can change it
+		}
+		return m.applyFiles(msg.Files)
 	case tea.KeyPressMsg:
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
@@ -271,7 +301,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break // only one engine available; nothing to toggle
 			}
 			m.engines = m.engines.Toggle()
-			m.list = m.list.SetContext(tui.ContextLabel(m.target, m.engines.Name()))
+			m.list = m.list.SetContext(m.contextLabel())
 			return m.reloadFresh()
 		case "o":
 			// Disabled for a commit diff: the files are historical, so editing the
@@ -336,20 +366,25 @@ func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// reloadFiles re-reads the changed-file list for the working-tree scope (staged
-// side and pathspec), refreshes reviewed hashes, and repopulates the list while
-// keeping the selection on the same file when it survives. A commit diff shows a
-// fixed historical set, so it only reloads the current preview.
+// reloadFiles re-reads the changed-file list for the current scope (staged
+// side, base ref, and pathspec) and applies it. A commit diff shows a fixed
+// historical set, so it only reloads the current preview.
 func (m Model) reloadFiles() (tea.Model, tea.Cmd) {
 	if m.commitDiff {
 		return m.reloadFresh()
 	}
-	files, err := m.repo.ChangedFiles(m.staged)
+	files, err := m.repo.ListChanged(m.staged, m.base, "")
 	if err != nil {
 		return m, nil
 	}
-	git.SortByPath(files)
-	m.files = git.FilterByPaths(files, m.paths)
+	return m.applyFiles(git.FilterByPaths(files, m.paths))
+}
+
+// applyFiles replaces the changed-file set, refreshes reviewed hashes, and
+// repopulates the list while keeping the selection on the same file when it
+// survives.
+func (m Model) applyFiles(files []git.ChangedFile) (tea.Model, tea.Cmd) {
+	m.files = files
 	if m.marks != nil {
 		m.marks.hashes = review.ContentHashes(m.repo, m.files)
 	}
