@@ -58,6 +58,29 @@ func DataDir() (string, error) {
 	return filepath.Join(home, ".local", "share", "rift"), nil
 }
 
+// WriteFileAtomic writes data to path via a temp file and rename, so a
+// concurrent reader never sees a truncated file. The parent directory must
+// already exist.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once renamed away
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
 func managedPath() (string, error) {
 	dir, err := DataDir()
 	if err != nil {

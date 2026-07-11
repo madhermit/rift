@@ -96,14 +96,22 @@ type DiffOpts struct {
 	Staged  bool
 	Base    string
 	Target  string
-	OldPath string // pre-image path when the file was renamed in this scope
 	Color   bool
 	Width   int
 	Display Display
 }
 
+// File identifies the file a diff is for. OldPath is set when the file was
+// renamed in the scope — it rides with the file (not DiffOpts) so a caller
+// passing shared opts per file can't forget it and silently render a rename
+// as a whole-file addition.
+type File struct {
+	Path    string
+	OldPath string
+}
+
 type Engine interface {
-	Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error)
+	Diff(ctx context.Context, repoRoot string, file File, opts DiffOpts) (string, error)
 	DiffHunks(ctx context.Context, hunks []Hunk, filename, baseContent string, color bool, width int) []string
 	Name() string
 }
@@ -150,7 +158,7 @@ func displayFlags(color, moved bool) []string {
 // buildGitDiffArgs builds `git diff` arguments with the given extra display
 // flags (nil for the difftastic-via-git path, whose external-diff driver must
 // see a plain diff).
-func buildGitDiffArgs(opts DiffOpts, file string, display []string) []string {
+func buildGitDiffArgs(opts DiffOpts, file File, display []string) []string {
 	args := []string{"diff"}
 	if opts.Color {
 		args = append(args, "--color=always")
@@ -165,13 +173,13 @@ func buildGitDiffArgs(opts DiffOpts, file string, display []string) []string {
 	} else if opts.Base != "" {
 		args = append(args, opts.Base)
 	}
-	if file != "" {
-		if opts.OldPath != "" && opts.OldPath != file {
+	if file.Path != "" {
+		if file.OldPath != "" && file.OldPath != file.Path {
 			// A renamed file needs both sides in the pathspec for git to pair
 			// them, and --find-renames guards against diff.renames=false config.
-			return append(args, "--find-renames", "--", file, opts.OldPath)
+			return append(args, "--find-renames", "--", file.Path, file.OldPath)
 		}
-		args = append(args, "--", file)
+		args = append(args, "--", file.Path)
 	}
 	return args
 }

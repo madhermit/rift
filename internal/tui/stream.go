@@ -38,14 +38,12 @@ func PreviewDiffOpts(width int, display diff.Display) diff.DiffOpts {
 // StreamFiles diffs files concurrently and returns a channel yielding each
 // file's rendered diff in order (for a progressive preview), plus a cancel that
 // stops the work — killing the difftastic subprocesses of a stream the user
-// navigated away from. Shared by the diff, log, and stash previews. Each file's
-// OldPath (when renamed) rides into the engine via the per-file opts.
+// navigated away from. Shared by the diff, log, and stash previews. Each
+// file's OldPath (when renamed) rides into the engine as part of its identity.
 func StreamFiles(engine diff.Engine, root string, files []git.ChangedFile, opts diff.DiffOpts) (<-chan string, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := diff.ParallelStream(len(files), func(i int) string {
-		o := opts
-		o.OldPath = files[i].OldPath
-		return renderFileDiff(ctx, engine, root, files[i], o)
+		return renderFileDiff(ctx, engine, root, files[i], opts)
 	})
 	return ch, cancel
 }
@@ -57,7 +55,7 @@ func StreamFiles(engine diff.Engine, root string, files []git.ChangedFile, opts 
 // fails renders a visible marker rather than vanishing silently; a cancelled
 // diff (navigated away) renders nothing, since it's discarded.
 func renderFileDiff(ctx context.Context, engine diff.Engine, root string, f git.ChangedFile, opts diff.DiffOpts) string {
-	content, err := engine.Diff(ctx, root, f.Path, opts)
+	content, err := engine.Diff(ctx, root, diff.File{Path: f.Path, OldPath: f.OldPath}, opts)
 	label := f.DisplayPath()
 	switch {
 	case ctx.Err() != nil:

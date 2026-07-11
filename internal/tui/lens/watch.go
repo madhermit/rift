@@ -46,7 +46,11 @@ func watchTick(gen int) tea.Cmd {
 // pollWatch re-lists the scope's changed files off the event loop and
 // fingerprints them, so Update can tell whether anything the lens shows has
 // changed. A listing error is reported as failed — never as an empty set,
-// which would wipe the lens.
+// which would wipe the lens. The message always carries worktree content
+// hashes (the reviewed-marks identity, forwarded to the file lens); the
+// fingerprint side additionally uses index hashes for the staged scope, where
+// a re-stage must register even when the worktree and the stat line don't
+// change.
 func (m Model) pollWatch() tea.Cmd {
 	repo, scope, gen := m.repo, m.scope, m.watchGen
 	return func() tea.Msg {
@@ -54,19 +58,13 @@ func (m Model) pollWatch() tea.Cmd {
 		if err != nil {
 			return watchStateMsg{gen: gen, failed: true}
 		}
-		hashes := watchHashes(repo, scope, files)
-		return watchStateMsg{gen: gen, fingerprint: fingerprint(files, hashes), files: files, hashes: hashes}
+		hashes := review.ContentHashes(repo, files)
+		fpHashes := hashes
+		if scope.Staged {
+			fpHashes = repo.StagedBlobHashes(git.Paths(files))
+		}
+		return watchStateMsg{gen: gen, fingerprint: fingerprint(files, fpHashes), files: files, hashes: hashes}
 	}
-}
-
-// watchHashes is each file's content identity for the fingerprint: index blob
-// hashes for the staged scope (a re-stage must register even when the worktree
-// and the stat line don't change), worktree content hashes otherwise.
-func watchHashes(repo *git.Repo, scope review.DiffScope, files []git.ChangedFile) map[string]string {
-	if scope.Staged {
-		return repo.StagedBlobHashes(git.Paths(files))
-	}
-	return review.ContentHashes(repo, files)
 }
 
 // fingerprint reduces a changed-file set to a comparable identity: the listing
@@ -95,6 +93,12 @@ func (m Model) watchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.failed || msg.fingerprint == m.watchFP {
+			return m, watchTick(m.watchGen)
+		}
+		if m.watchFP == "" {
+			// Baseline poll (startup or a scope flip): the lens was just built
+			// from this state, so record the fingerprint without refreshing.
+			m.watchFP = msg.fingerprint
 			return m, watchTick(m.watchGen)
 		}
 		m.watchFP = msg.fingerprint
@@ -144,13 +148,12 @@ func (m Model) refreshChanged(files []git.ChangedFile, hashes map[string]string)
 	// Invalidate in-flight messages for the pre-change tree. A `t` press racing
 	// this refresh had its collect dropped by the bump, so relaunch it against
 	// the new tree — the switch to tests then happens when the fresh specs land.
+	pending := m.collectGen == m.gen
 	m.gen++
 	var relaunch tea.Cmd
-	if m.collecting {
+	if pending {
+		m.collectGen = m.gen
 		relaunch = m.collectTests(m.gen, false)
-	}
-	if m.scope.Staged {
-		hashes = nil // poll hashes are index identities; reviewed marks need worktree hashes
 	}
 	model, cmd := m.delegate(diffui.FilesChangedMsg{Files: files, Hashes: hashes})
 	return model, tea.Batch(cmd, relaunch)

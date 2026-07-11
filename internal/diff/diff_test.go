@@ -37,82 +37,82 @@ func TestBuildGitDiffArgs(t *testing.T) {
 	tests := []struct {
 		name    string
 		opts    DiffOpts
-		file    string
+		file    File
 		display []string
 		want    []string
 	}{
 		{
 			name: "staged with color (no display flags)",
 			opts: DiffOpts{Staged: true, Color: true},
-			file: "main.go",
+			file: File{Path: "main.go"},
 			want: []string{"diff", "--color=always", "--staged", "--", "main.go"},
 		},
 		{
 			name: "staged no color",
 			opts: DiffOpts{Staged: true, Color: false},
-			file: "main.go",
+			file: File{Path: "main.go"},
 			want: []string{"diff", "--color=never", "--staged", "--", "main.go"},
 		},
 		{
 			name: "base only",
 			opts: DiffOpts{Base: "HEAD~1"},
-			file: "main.go",
+			file: File{Path: "main.go"},
 			want: []string{"diff", "--color=never", "HEAD~1", "--", "main.go"},
 		},
 		{
 			name: "base and target",
 			opts: DiffOpts{Base: "abc123", Target: "def456"},
-			file: "main.go",
+			file: File{Path: "main.go"},
 			want: []string{"diff", "--color=never", "abc123", "def456", "--", "main.go"},
 		},
 		{
 			name: "no opts (working tree)",
 			opts: DiffOpts{},
-			file: "main.go",
+			file: File{Path: "main.go"},
 			want: []string{"diff", "--color=never", "--", "main.go"},
 		},
 		{
 			name: "rename pathspec covers both sides",
-			opts: DiffOpts{Base: "a", Target: "b", OldPath: "old.go"},
-			file: "new.go",
+			opts: DiffOpts{Base: "a", Target: "b"},
+			file: File{Path: "new.go", OldPath: "old.go"},
 			want: []string{"diff", "--color=never", "a", "b", "--find-renames", "--", "new.go", "old.go"},
 		},
 		{
 			name: "color with base and target",
 			opts: DiffOpts{Base: "a", Target: "b", Color: true},
-			file: "f.go",
+			file: File{Path: "f.go"},
 			want: []string{"diff", "--color=always", "a", "b", "--", "f.go"},
 		},
 		{
 			name: "empty file omits separator",
 			opts: DiffOpts{Color: true},
-			file: "",
+			file: File{},
 			want: []string{"diff", "--color=always"},
 		},
 		{
 			name: "empty file with staged",
 			opts: DiffOpts{Staged: true},
-			file: "",
+			file: File{},
 			want: []string{"diff", "--color=never", "--staged"},
 		},
 		{
 			name:    "display with color adds word-diff and ws flags",
 			opts:    DiffOpts{Staged: true, Color: true},
-			file:    "main.go",
+			file:    File{Path: "main.go"},
 			display: displayFlags(true, false),
 			want:    []string{"diff", "--color=always", "--word-diff=color", "--ws-error-highlight=all", "--staged", "--", "main.go"},
 		},
 		{
 			name:    "moved display trades word-diff for color-moved",
 			opts:    DiffOpts{Staged: true, Color: true},
-			file:    "main.go",
+			file:    File{Path: "main.go"},
 			display: displayFlags(true, true),
 			want:    []string{"diff", "--color=always", "--color-moved=zebra", "--color-moved-ws=allow-indentation-change", "--ws-error-highlight=all", "--staged", "--", "main.go"},
 		},
 		{
 			name:    "display without color stays vanilla",
 			opts:    DiffOpts{Staged: true, Color: false},
-			file:    "main.go",
+			file:    File{Path: "main.go"},
 			display: displayFlags(false, false),
 			want:    []string{"diff", "--color=never", "--staged", "--", "main.go"},
 		},
@@ -162,7 +162,7 @@ func TestFallbackEngineUntracked(t *testing.T) {
 	}
 
 	e := &fallbackEngine{}
-	out, err := e.Diff(context.Background(), dir, "new.txt", DiffOpts{})
+	out, err := e.Diff(context.Background(), dir, File{Path: "new.txt"}, DiffOpts{})
 	if err != nil {
 		t.Fatalf("untracked diff: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestFallbackEngineUntracked(t *testing.T) {
 		t.Errorf("untracked file should render as a new-file diff, got %q", out)
 	}
 
-	out, err = e.Diff(context.Background(), dir, "tracked.txt", DiffOpts{})
+	out, err = e.Diff(context.Background(), dir, File{Path: "tracked.txt"}, DiffOpts{})
 	if err != nil {
 		t.Fatalf("tracked diff: %v", err)
 	}

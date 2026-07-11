@@ -27,7 +27,7 @@ func (f *fallbackEngine) Name() string {
 // re-checked: if the file is untracked, it's diffed against the null device
 // instead so its content renders as a new-file diff — matching the difftastic
 // engine, which reaches the same result via its failed `git show :file`.
-func (f *fallbackEngine) Diff(ctx context.Context, repoRoot, file string, opts DiffOpts) (string, error) {
+func (f *fallbackEngine) Diff(ctx context.Context, repoRoot string, file File, opts DiffOpts) (string, error) {
 	display := displayFlags(opts.Color, f.moved)
 	args := buildGitDiffArgs(opts, file, display)
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -37,10 +37,10 @@ func (f *fallbackEngine) Diff(ctx context.Context, repoRoot, file string, opts D
 		return out, err
 	}
 	worktreeScope := !opts.Staged && opts.Base == "" && opts.Target == ""
-	if !worktreeScope || !isUntracked(ctx, repoRoot, file) {
+	if !worktreeScope || !isUntracked(ctx, repoRoot, file.Path) {
 		return out, nil
 	}
-	args = append(buildGitDiffArgs(opts, "", display), "--no-index", "--", os.DevNull, file)
+	args = append(buildGitDiffArgs(opts, File{}, display), "--no-index", "--", os.DevNull, file.Path)
 	cmd = exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot
 	return runGitDiff(cmd, "git diff untracked")

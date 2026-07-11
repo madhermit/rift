@@ -153,11 +153,10 @@ func fileDiff(ctx context.Context, engine diff.Engine, repo *git.Repo, f git.Cha
 	if f.Status == "Untracked" {
 		return diff.RawNewFileDiff(repo.Root(), f.Path)
 	}
-	return engine.Diff(ctx, repo.Root(), f.Path, diff.DiffOpts{
-		Staged:  staged,
-		Base:    base,
-		Target:  target,
-		OldPath: f.OldPath,
-		Color:   false,
+	return engine.Diff(ctx, repo.Root(), diff.File{Path: f.Path, OldPath: f.OldPath}, diff.DiffOpts{
+		Staged: staged,
+		Base:   base,
+		Target: target,
+		Color:  false,
 	})
 }
