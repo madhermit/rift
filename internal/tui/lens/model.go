@@ -35,7 +35,8 @@ type Model struct {
 	unreviewed bool // open the file lens with the unreviewed-only filter on
 	watch      bool // poll the working tree and refresh on change (see watch.go)
 	watchFP    string
-	watchGen   int // invalidates in-flight ticks/polls when `w` toggles the chain
+	watchGen   int  // invalidates in-flight ticks/polls when the chain or scope changes
+	collecting bool // a tests collect for the current gen is in flight
 	gen        int
 	width      int
 	height     int
@@ -46,7 +47,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope revi
 	if watch {
 		// Seed the fingerprint from the files the lens opens with, so a change
 		// landing before the first poll still registers as a change.
-		m.watchFP = watchFingerprint(repo, files)
+		m.watchFP = fingerprint(files, watchHashes(repo, scope, files))
 	}
 	if showTests {
 		m.testsLens = m.buildTests() // sync at startup is fine
@@ -85,15 +86,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.watchUpdate(msg)
 	case lensMsg:
 		if msg.gen != m.gen {
-			return m, nil // a stale preview message from a lens we toggled away from
+			// A stale message from a superseded generation. A stream that had just
+			// started never got its cancel registered — invoke it here, or its
+			// difftastic subprocesses would run to completion unmanaged.
+			if sr, ok := msg.msg.(tui.StreamReadyMsg); ok && sr.Cancel != nil {
+				sr.Cancel()
+			}
+			return m, nil
 		}
 		return m.delegate(msg.msg)
 	case lensCollectedMsg:
 		if msg.gen != m.gen {
 			return m, nil // a superseded tests build (toggled again before it landed)
 		}
-		m.testsLens = m.newTests(msg.specs)
+		m.collecting = false
 		m = m.clearCollecting() // the specs landed; drop the "collecting…" note
+		if msg.apply && m.showTests {
+			// A watch refresh: apply the fresh specs to the shown lens in place,
+			// preserving its engine/layout/filter and the reviewer's selection.
+			if _, ok := m.testsLens.(reviewui.Model); ok {
+				return m.delegate(reviewui.SpecsChangedMsg{Specs: msg.specs})
+			}
+		}
+		if m.showTests {
+			// Replacing a visible stale lens: kill any stream it started during
+			// the collect, or its difftastic runs outlive the discarded model.
+			m = m.cancelShown()
+		}
+		m.testsLens = m.newTests(msg.specs)
 		return m.show(true)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -146,7 +166,8 @@ func (m Model) toggle() (tea.Model, tea.Cmd) {
 		// the user the collect is running.
 		m.gen++
 		m = m.noteCollecting()
-		return m, m.collectTests(m.gen)
+		m.collecting = true
+		return m, m.collectTests(m.gen, false)
 	}
 	return m.show(true)
 }
@@ -183,24 +204,41 @@ func (m Model) clearCollecting() Model {
 // toggle. The file lens is cheap to rebuild now; the tests lens re-parses off the
 // event loop (like the first switch to tests) so `s` doesn't block the UI.
 func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
-	m = m.cancelShown()
 	m.scope.Staged = !m.scope.Staged
-	m.gen++
-	m.files = scopeFiles(m.repo, m.scope)
+	m.files, _ = scopeFiles(m.repo, m.scope) // best-effort, like the reload paths
+	var rearm tea.Cmd
 	if m.watch {
-		// Re-seed for the new scope, or the next poll would read the staged flip
-		// itself as a working-tree change and refresh a lens that's already fresh.
-		m.watchFP = watchFingerprint(m.repo, m.files)
+		// A poll in flight captured the old scope: orphan it (gen bump) and re-arm
+		// a fresh chain, re-seeding the fingerprint so the flip itself doesn't
+		// read as a tree change on the next poll.
+		m.watchGen++
+		m.watchFP = fingerprint(m.files, watchHashes(m.repo, m.scope, m.files))
+		rearm = watchTick(m.watchGen)
 	}
 	if m.showTests {
-		// Keep showing the now-stale tests until the re-collect lands, with a footer
-		// note that the collect is running.
-		m = m.noteCollecting()
-		m.filesLens = nil
-		return m, m.collectTests(m.gen)
+		model, cmd := m.recollect(false)
+		return model, tea.Batch(cmd, rearm)
 	}
+	m = m.cancelShown()
+	m.gen++
+	m.collecting = false // a pending `t` collect targeted the old scope; let it drop
 	m.filesLens, m.testsLens = m.buildFiles(), nil
-	return m.delegate(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	model, cmd := m.delegate(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	return model, tea.Batch(cmd, rearm)
+}
+
+// recollect invalidates the current specs and re-collects for the tests view:
+// the stale tests lens stays visible (with a "collecting" note) until the
+// fresh specs land. apply=true applies them to the shown lens in place (a
+// watch refresh — the reviewer's view state survives); apply=false rebuilds
+// the lens (a scope flip).
+func (m Model) recollect(apply bool) (tea.Model, tea.Cmd) {
+	m = m.cancelShown()
+	m.gen++
+	m = m.noteCollecting()
+	m.filesLens = nil
+	m.collecting = true
+	return m, m.collectTests(m.gen, apply)
 }
 
 // show switches the displayed lens and re-syncs its layout. It cancels the lens
@@ -208,6 +246,14 @@ func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
 // that lens's in-flight preview messages.
 func (m Model) show(tests bool) (tea.Model, tea.Cmd) {
 	m = m.cancelShown()
+	if !tests && m.collecting {
+		// The gen bump below drops the pending collect, and its fingerprint has
+		// already been consumed — the retained tests lens predates the tree that
+		// collect targeted, so drop it too; the next `t` re-collects instead of
+		// showing stale specs indefinitely.
+		m.testsLens = nil
+		m.collecting = false
+	}
 	m.showTests = tests
 	m.gen++
 	return m.delegate(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -230,11 +276,11 @@ func (m Model) delegate(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View { return m.shown().View() }
 
-func (m Model) collectTests(gen int) tea.Cmd {
+func (m Model) collectTests(gen int, apply bool) tea.Cmd {
 	repo, scope := m.repo, m.scope
 	return func() tea.Msg {
 		specs, _ := review.Collect(repo, scope)
-		return lensCollectedMsg{gen: gen, specs: specs}
+		return lensCollectedMsg{gen: gen, apply: apply, specs: specs}
 	}
 }
 
@@ -242,18 +288,15 @@ func (m Model) collectTests(gen int) tea.Cmd {
 // base ref, pathspec), sorted and filtered like the diff command's own listing
 // — so the file lens keeps the `-- path` scope that the tests lens (via
 // review.Collect) already does.
-func scopeFiles(repo *git.Repo, scope review.DiffScope) []git.ChangedFile {
-	files, err := repo.ListChanged(scope.Staged, scope.Base, "")
-	if err != nil {
-		return nil
-	}
-	return git.FilterByPaths(files, scope.Paths)
+func scopeFiles(repo *git.Repo, scope review.DiffScope) ([]git.ChangedFile, error) {
+	return repo.ListChanged(scope.Staged, scope.Base, "", scope.Paths...)
 }
 
 // lensCollectedMsg delivers the parsed tests for the first switch to the tests
 // lens, tagged with the generation that requested it.
 type lensCollectedMsg struct {
 	gen   int
+	apply bool // apply the specs to the shown lens in place (a watch refresh)
 	specs []review.Spec
 }
 

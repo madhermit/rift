@@ -298,11 +298,12 @@ func ShowFile(repoRoot, ref, file string) ([]byte, error) {
 }
 
 // RawRangeDiffAll returns the whole-repo unified diff between two commits — no
-// pathspec, so git's rename detection stays on (a per-file pathspec would defeat
-// it, rendering a renamed file as 100% added). Callers parse it once and index by
-// path.
+// pathspec, and --find-renames forced, so rename detection is on even under
+// diff.renames=false config (a per-file pathspec or a config-disabled detection
+// would render a renamed file as 100% added, disagreeing with the listing).
+// Callers parse it once and index by path.
 func RawRangeDiffAll(repoRoot, base, target string) (string, error) {
-	cmd := exec.Command("git", "diff", "--no-color", base, target)
+	cmd := exec.Command("git", "diff", "--no-color", "--find-renames", base, target)
 	cmd.Dir = repoRoot
 	return runGitDiff(cmd, "git diff range")
 }
@@ -337,11 +338,12 @@ func RawUnifiedDiff(repoRoot string, staged bool, file string) (string, error) {
 }
 
 // RawWorktreeDiff returns the whole working-tree (or staged) unified diff — no
-// pathspec, so git's rename detection stays on and one subprocess covers every
-// file. Callers parse it once and index by path. Untracked files aren't included
-// (git diff omits them); those are handled separately.
+// pathspec, and --find-renames forced (see RawRangeDiffAll), so rename
+// detection stays on and one subprocess covers every file. Callers parse it
+// once and index by path. Untracked files aren't included (git diff omits
+// them); those are handled separately.
 func RawWorktreeDiff(repoRoot string, staged bool) (string, error) {
-	args := []string{"diff", "--no-color"}
+	args := []string{"diff", "--no-color", "--find-renames"}
 	if staged {
 		args = append(args, "--staged")
 	}

@@ -16,9 +16,15 @@ var reviewedGlyph = lipgloss.NewStyle().Foreground(tui.Green)
 
 // FilesChangedMsg tells the lens its changed-file set was re-listed externally
 // (the watch poller): Files is the new set, already pathspec-filtered and
-// sorted. The lens applies it in place, keeping the selection where possible.
+// sorted. Hashes, when non-nil, carries the poll's worktree content hashes so
+// the lens doesn't rehash the same files on the event loop (nil means compute
+// them — the staged scope's poll hashes the index, which is the wrong identity
+// for reviewed marks). The lens applies the set in place, keeping the
+// selection and — for files whose content didn't change — the cached previews
+// and the reader's scroll position.
 type FilesChangedMsg struct {
-	Files []git.ChangedFile
+	Files  []git.ChangedFile
+	Hashes map[string]string
 }
 
 // reviewMarks is the reviewed-state lookup the row renderer reads: the persisted
@@ -140,20 +146,16 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		Screen:      "diff",
 		ListTitle:   m.listTitle(),
 		Branch:      repo.CurrentBranch(),
-		Context:     tui.ContextLabel(target, engine.Name()),
+		Context:     tui.ContextLabel(target, engine.Name(), false),
 		NavFraction: 30,
 		EmptyStatus: m.emptyStatus(),
 		Hints:       hints,
 		Match:       func(f git.ChangedFile) string { return f.Path },
 		PreviewTitle: func(f git.ChangedFile) string {
-			switch {
-			case f.Path == "":
+			if f.Path == "" {
 				return "all changes"
-			case f.OldPath != "":
-				return f.OldPath + " → " + f.Path
-			default:
-				return f.Path
 			}
+			return f.DisplayPath()
 		},
 		// Cache per file; the All entry depends on the filtered set, so skip it.
 		// Staged/display changes clear the cache (SetItems / ClearCacheAndReload).
@@ -206,11 +208,7 @@ func (m Model) SetWatching(on bool) Model {
 }
 
 func (m Model) contextLabel() string {
-	label := tui.ContextLabel(m.target, m.engines.Name())
-	if m.watching {
-		label += " · watching"
-	}
-	return label
+	return tui.ContextLabel(m.target, m.engines.Name(), m.watching)
 }
 
 // SetEmptyStatus overrides the footer text shown when the list is empty (e.g. a
@@ -291,7 +289,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.commitDiff {
 			return m, nil // historical set; nothing external can change it
 		}
-		return m.applyFiles(msg.Files)
+		return m.applyFiles(msg.Files, msg.Hashes)
 	case tea.KeyPressMsg:
 		if m.list.Filtering() || m.list.ShowingHelp() {
 			break
@@ -377,26 +375,65 @@ func (m Model) reloadFiles() (tea.Model, tea.Cmd) {
 	if m.commitDiff {
 		return m.reloadFresh()
 	}
-	files, err := m.repo.ListChanged(m.staged, m.base, "")
+	files, err := m.repo.ListChanged(m.staged, m.base, "", m.paths...)
 	if err != nil {
 		return m, nil
 	}
-	return m.applyFiles(git.FilterByPaths(files, m.paths))
+	return m.applyFiles(files, nil)
 }
 
-// applyFiles replaces the changed-file set, refreshes reviewed hashes, and
-// repopulates the list while keeping the selection on the same file when it
-// survives.
-func (m Model) applyFiles(files []git.ChangedFile) (tea.Model, tea.Cmd) {
+// applyFiles replaces the changed-file set (hashes may carry precomputed
+// worktree content hashes; nil means compute them) and repopulates the list,
+// keeping the selection on the same file when it survives. Only files whose
+// record or content actually changed lose their cached preview — so a watch
+// refresh triggered by some other file leaves the diff being read untouched.
+func (m Model) applyFiles(files []git.ChangedFile, hashes map[string]string) (tea.Model, tea.Cmd) {
+	if hashes == nil {
+		hashes = review.ContentHashes(m.repo, files)
+	}
+	stale := staleKeys(m.files, files, m.hashes(), hashes)
 	m.files = files
 	if m.marks != nil {
-		m.marks.hashes = review.ContentHashes(m.repo, m.files)
+		m.marks.hashes = hashes
 	}
 	prevKey := m.list.SelectedKey()
 	m.list = m.list.SetListTitle(m.listTitle())
 	var cmd tea.Cmd
-	m.list, cmd = m.list.SetItemsSelecting(m.displayFiles(), prevKey)
+	m.list, cmd = m.list.SetItemsSelectingStale(m.displayFiles(), prevKey, stale)
 	return m, cmd
+}
+
+// hashes is the current content-hash map (empty when reviewing is off).
+func (m Model) hashes() map[string]string {
+	if m.marks == nil {
+		return nil
+	}
+	return m.marks.hashes
+}
+
+// staleKeys is the set of preview cache keys invalidated by a file-set change:
+// files whose record (status/stats) or content hash differs, plus files that
+// disappeared, plus the synthetic "All changes" entry (keyed ""), whose
+// preview aggregates everything.
+func staleKeys(old, new []git.ChangedFile, oldHashes, newHashes map[string]string) map[string]bool {
+	stale := map[string]bool{"": true}
+	prev := make(map[string]git.ChangedFile, len(old))
+	for _, f := range old {
+		prev[f.Path] = f
+	}
+	seen := make(map[string]bool, len(new))
+	for _, f := range new {
+		seen[f.Path] = true
+		if p, ok := prev[f.Path]; !ok || p != f || oldHashes[f.Path] != newHashes[f.Path] {
+			stale[f.Path] = true
+		}
+	}
+	for path := range prev {
+		if !seen[path] {
+			stale[path] = true
+		}
+	}
+	return stale
 }
 
 func (m Model) View() tea.View { return m.list.TeaView() }

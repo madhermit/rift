@@ -258,12 +258,16 @@ func HeaderContext(branch, rest string) string {
 
 // ContextLabel is the header right-context for a diff-backed screen: the engine
 // name, prefixed with the target ref when viewing a committed range (target is
-// "" for a working-tree/staged diff).
-func ContextLabel(target, engineName string) string {
-	if target == "" {
-		return engineName
+// "" for a working-tree/staged diff) and tagged when the screen live-reloads.
+func ContextLabel(target, engineName string, watching bool) string {
+	label := engineName
+	if target != "" {
+		label = target + " · " + engineName
 	}
-	return target + " · " + engineName
+	if watching {
+		label += " · watching"
+	}
+	return label
 }
 
 // Footer renders the two-row bottom bar: a faint rule then a status segment

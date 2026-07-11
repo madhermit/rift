@@ -58,10 +58,7 @@ func StreamFiles(engine diff.Engine, root string, files []git.ChangedFile, opts 
 // diff (navigated away) renders nothing, since it's discarded.
 func renderFileDiff(ctx context.Context, engine diff.Engine, root string, f git.ChangedFile, opts diff.DiffOpts) string {
 	content, err := engine.Diff(ctx, root, f.Path, opts)
-	label := f.Path
-	if f.OldPath != "" {
-		label = f.OldPath + " → " + f.Path
-	}
+	label := f.DisplayPath()
 	switch {
 	case ctx.Err() != nil:
 		return ""

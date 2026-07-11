@@ -313,6 +313,38 @@ func (m SplitList[T]) SetItemsSelecting(items []T, key string) (SplitList[T], te
 	return m.requestPreview()
 }
 
+// SetItemsSelectingStale is SetItemsSelecting for an in-place refresh (the
+// watch poller): instead of dropping the whole cache, it evicts only the
+// previews whose CacheKey is in stale — and when the selection survives on an
+// item that isn't stale, it leaves the shown preview entirely untouched (no
+// re-request, no viewport reset), so a change elsewhere in the tree doesn't
+// cost the reader their place in the diff they're reading.
+func (m SplitList[T]) SetItemsSelectingStale(items []T, key string, stale map[string]bool) (SplitList[T], tea.Cmd) {
+	m.items = items
+	for k := range m.cache {
+		if stale[k] {
+			delete(m.cache, k)
+		}
+	}
+	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
+	m.selected = 0
+	kept := false
+	if key != "" && m.cfg.Match != nil {
+		for i, it := range m.filtered {
+			if m.cfg.Match(it) == key {
+				m.selected = i
+				kept = true
+				break
+			}
+		}
+	}
+	m.resizeViewport()
+	if it, ok := m.Selected(); kept && ok && !m.loading && m.prevErr == nil && !stale[m.cacheKey(it)] {
+		return m, nil // shown preview is still current; don't move the reader
+	}
+	return m.requestPreview()
+}
+
 // SetPrompt sets (or clears, when empty) an inline footer prompt that overrides
 // the normal footer — parents use it to show a y/n confirmation while gating a
 // destructive action.
