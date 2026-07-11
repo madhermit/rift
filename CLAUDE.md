@@ -38,6 +38,7 @@ internal/      # private packages
   review/      # review state (reviewed marks) + test-case extraction
   tooling/     # external tool management (difftastic download/detect)
   output/      # --print / --json composable output
+  skill/       # embedded agent skill (SKILL.md) + materialization
 main.go        # entrypoint
 ```
 
@@ -50,6 +51,8 @@ design intent only — do not assume the packages or tools exist:
 - **Syntax-aware merge / conflict resolution:** mergiraf (`internal/merge`)
 - **Checkpoints:** shadow-commit snapshots on hidden refs (`internal/checkpoint`)
 - **Risk classification** in review — today `internal/review` only tracks reviewed marks and extracts test cases
+- **Inline agent annotations:** `rift annotate` writing to a JSON store next to the reviewed marks (`.git/rift/annotations.json`), rendered in the diff preview and picked up by `--watch`. File-based on purpose — no daemon/socket (see the design doc's Future Considerations)
+- **Mouse support:** wheel scroll + click-to-select via bubbletea mouse events; must keep terminal text selection workable (see design doc)
 
 ## Workflow
 

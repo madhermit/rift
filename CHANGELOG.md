@@ -7,8 +7,25 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Added
+
+- `rift diff --watch` live-reloads the browser as the working tree changes —
+  built for reviewing while an agent edits in another pane. The file list,
+  stats, and diffs refresh in place (the selection survives), the tests lens
+  re-collects, and content-keyed reviewed marks reset as files change, so the
+  unreviewed filter always shows what still needs eyes. A `watching` tag in
+  the header shows it's live.
+- `rift skill` prints a built-in agent skill that teaches an AI agent rift's
+  composable review workflow (`--json` changeset inspection, structural
+  `--print` diffs, the `--tests` lens, review state). `rift skill path` writes
+  it to `~/.local/share/rift/skills/rift-review/SKILL.md` and prints the path,
+  so you can tell an agent "run `rift skill path` and follow that skill".
+
 ### Fixed
 
+- In a base-ref diff (`rift diff main`), returning from the editor (`o`) no
+  longer replaces the file list with the plain worktree-vs-index set — the
+  reload now honors the base ref.
 - `install.sh` no longer fails checksum verification on macOS with a matching
   hash: it now compares hash strings directly instead of relying on `-c` check
   mode, whose behavior differs between GNU `sha256sum` and macOS's `shasum`.
