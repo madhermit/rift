@@ -123,7 +123,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		hints = append(hints, [2]string{"t", "tests"})
 	}
 	if !commitDiff {
-		hints = append(hints, [2]string{"s", "staged"})
+		hints = append(hints, [2]string{"s", "staged"}, [2]string{"w", "watch"})
 	}
 	hints = append(hints, [2]string{"\\", "layout"})
 	if engines.CanToggle() {
@@ -192,11 +192,11 @@ func (m Model) displayFiles() []git.ChangedFile {
 	return prependAllEntry(m.files)
 }
 
-// SetWatching adds a "watching" tag to the header context, marking the lens as
-// live-reloading. The flag persists on the model because the engine toggle
+// SetWatching sets the "watching" tag in the header context, marking the lens
+// as live-reloading. The flag persists on the model because the engine toggle
 // rebuilds the label.
-func (m Model) SetWatching() Model {
-	m.watching = true
+func (m Model) SetWatching(on bool) Model {
+	m.watching = on
 	m.list = m.list.SetContext(m.contextLabel())
 	return m
 }

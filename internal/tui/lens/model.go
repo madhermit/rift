@@ -35,6 +35,7 @@ type Model struct {
 	unreviewed bool // open the file lens with the unreviewed-only filter on
 	watch      bool // poll the working tree and refresh on change (see watch.go)
 	watchFP    string
+	watchGen   int // invalidates in-flight ticks/polls when `w` toggles the chain
 	gen        int
 	width      int
 	height     int
@@ -57,10 +58,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope revi
 
 func (m Model) buildFiles() tui.PreviewChild {
 	lens := diffui.New(m.repo, m.engine, m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true, m.scope.Paths, m.unreviewed)
-	if m.watch {
-		lens = lens.SetWatching()
-	}
-	return lens
+	return lens.SetWatching(m.watch)
 }
 
 func (m Model) buildTests() tui.PreviewChild {
@@ -68,19 +66,15 @@ func (m Model) buildTests() tui.PreviewChild {
 	return m.newTests(specs)
 }
 
-// newTests builds the tests lens over already-collected specs, tagging it with
-// the watch indicator when live.
+// newTests builds the tests lens over already-collected specs, tagged with the
+// current watch state.
 func (m Model) newTests(specs []review.Spec) tui.PreviewChild {
-	lens := reviewui.New(m.repo, m.engine, specs, m.scope, true)
-	if m.watch {
-		lens = lens.SetWatching()
-	}
-	return lens
+	return reviewui.New(m.repo, m.engine, specs, m.scope, true).SetWatching(m.watch)
 }
 
 func (m Model) Init() tea.Cmd {
 	if m.watch {
-		return tea.Batch(tui.ThemeInit(), watchTick())
+		return tea.Batch(tui.ThemeInit(), watchTick(m.watchGen))
 	}
 	return tui.ThemeInit()
 }
@@ -114,6 +108,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			if !m.scope.Committed() {
 				return m.toggleStaged()
+			}
+		case "w":
+			if !m.scope.Committed() {
+				return m.toggleWatch()
 			}
 		}
 	}

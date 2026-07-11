@@ -14,7 +14,8 @@ pre-1.0).
   stats, and diffs refresh in place (the selection survives), the tests lens
   re-collects, and content-keyed reviewed marks reset as files change, so the
   unreviewed filter always shows what still needs eyes. A `watching` tag in
-  the header shows it's live.
+  the header shows it's live, and `w` toggles it without restarting —
+  enabling catches up on anything that changed while it was off.
 - `rift skill` prints a built-in agent skill that teaches an AI agent rift's
   composable review workflow (`--json` changeset inspection, structural
   `--print` diffs, the `--tests` lens, review state). `rift skill path` writes

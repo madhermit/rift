@@ -86,7 +86,7 @@ In `rift diff`, press `r` to mark the selected file **reviewed** (a `✓` replac
 
 ### Watch mode
 
-`rift diff --watch` keeps the browser live while something else edits the working tree — typically an agent writing code in another pane. The file list, stats, and diffs refresh in place (your selection survives), the tests lens re-collects, and because reviewed marks are content-keyed they reset the moment a file changes again — so the unreviewed filter always shows exactly what still needs eyes. A `watching` tag in the header shows it's live. Works with any working-tree scope, including a base ref (`rift diff main --watch`) and the staged side.
+`rift diff --watch` keeps the browser live while something else edits the working tree — typically an agent writing code in another pane. The file list, stats, and diffs refresh in place (your selection survives), the tests lens re-collects, and because reviewed marks are content-keyed they reset the moment a file changes again — so the unreviewed filter always shows exactly what still needs eyes. A `watching` tag in the header shows it's live. Works with any working-tree scope, including a base ref (`rift diff main --watch`) and the staged side — and toggles live with `w`, so you can turn it on the moment an agent starts working without losing your place (enabling catches up on anything that changed while it was off).
 
 ### Interactive staging
 
@@ -158,11 +158,11 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 
 | Screen | Keys |
 | --- | --- |
-| `diff` | `s` toggle staged · `t` tests lens · `\` diff layout · `e` engine · `o` open in `$EDITOR` · `r` mark reviewed · `U` show only unreviewed |
+| `diff` | `s` toggle staged · `w` toggle watch · `t` tests lens · `\` diff layout · `e` engine · `o` open in `$EDITOR` · `r` mark reviewed · `U` show only unreviewed |
 | `log` | `⏎` drill into the commit's files (or tests) · `\` layout · `e` engine · `c` cherry-pick · `r` revert |
 | `stash` | `a` apply · `p` pop · `x` drop · `\` layout · `e` engine |
 | `stage` | `s` stage · `u` unstage · `a` stage all · `o` open in `$EDITOR` · `e` engine (fixed layout, no `\`) |
-| tests lens | `t` back to files · `s` toggle staged · `\` layout · `e` engine · `o` open the test |
+| tests lens | `t` back to files · `s` toggle staged · `w` toggle watch · `\` layout · `e` engine · `o` open the test |
 
 The `menu` launchpad is a plain list: `⏎` selects, `/` filters, and `esc`/`q` quit. Destructive actions (`stash` pop/drop, `log` cherry-pick/revert) confirm inline with `y`/`n`.
 
