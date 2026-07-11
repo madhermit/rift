@@ -205,7 +205,7 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 		if len(files) == 0 {
 			return tui.StreamReadyMsg{ReqID: reqID}
 		}
-		ch, cancel := tui.StreamFiles(engine, repo.Root(), git.Paths(files), opts)
+		ch, cancel := tui.StreamFiles(engine, repo.Root(), files, opts)
 		return tui.StreamReadyMsg{ReqID: reqID, Ch: ch, Cancel: cancel}
 	}
 }

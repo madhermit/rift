@@ -266,3 +266,83 @@ func TestParseNumstatZ(t *testing.T) {
 		}
 	}
 }
+
+func TestParseNameStatusZ_Rename(t *testing.T) {
+	// A rename record carries three fields: R<score>\0OLD\0NEW. Following
+	// records parse normally.
+	out := "R087\x00old dir/a.go\x00new dir/b.go\x00M\x00c.go\x00"
+	got := parseNameStatusZ(out)
+	want := []ChangedFile{
+		{Path: "new dir/b.go", OldPath: "old dir/a.go", Status: "Renamed"},
+		{Path: "c.go", Status: "Modified"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d files, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("file %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseNumstatZ_Rename(t *testing.T) {
+	// A rename record leaves the inline path empty and appends OLD and NEW as
+	// separate NUL fields; stats key on the new path.
+	out := "3\t1\t\x00old/a.go\x00new/b.go\x005\t0\tc.go\x00"
+	got := parseNumstatZ(out)
+	want := map[string][2]int{
+		"new/b.go": {3, 1},
+		"c.go":     {5, 0},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d: %+v", len(got), len(want), got)
+	}
+	for path, w := range want {
+		if got[path] != w {
+			t.Errorf("%q = %v, want %v", path, got[path], w)
+		}
+	}
+}
+
+// TestDiffBetweenCommits_Rename covers rename detection end to end: a renamed
+// file with a small edit reports one record with both paths and the edit's
+// stats, not a full delete + add.
+func TestDiffBetweenCommits_Rename(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	wt, err := repo.repo.Worktree()
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+
+	content := "package main\n\nfunc a() {}\nfunc b() {}\nfunc c() {}\nfunc d() {}\nfunc e() {}\nfunc f() {}\nfunc g() {}\nfunc h() {}\n"
+	writeFile(t, repo.root, "old_name.go", content)
+	if _, err := wt.Add("old_name.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	base := testCommit(t, wt, "add old_name")
+
+	// Rename with a one-line tweak: similar enough for -M to pair the paths.
+	writeFile(t, repo.root, "new_name.go", strings.Replace(content, "func h() {}", "func i() {}", 1))
+	if _, err := wt.Remove("old_name.go"); err != nil {
+		t.Fatalf("git rm: %v", err)
+	}
+	if _, err := wt.Add("new_name.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	target := testCommit(t, wt, "rename old_name to new_name")
+
+	files, err := repo.DiffBetweenCommits(base.String(), target.String())
+	if err != nil {
+		t.Fatalf("DiffBetweenCommits() error = %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 rename record, got %d: %+v", len(files), files)
+	}
+	got := files[0]
+	want := ChangedFile{Path: "new_name.go", OldPath: "old_name.go", Status: "Renamed", Added: 1, Deleted: 1}
+	if got != want {
+		t.Errorf("rename = %+v, want %+v", got, want)
+	}
+}

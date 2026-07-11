@@ -365,7 +365,7 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 			return tui.StreamReadyMsg{ReqID: reqID, Header: header}
 		}
 		opts.Base, opts.Target = base, commit.Hash
-		ch, cancel := tui.StreamFiles(engine, repo.Root(), git.Paths(files), opts)
+		ch, cancel := tui.StreamFiles(engine, repo.Root(), files, opts)
 		return tui.StreamReadyMsg{ReqID: reqID, Header: header, Ch: ch, Cancel: cancel}
 	}
 }

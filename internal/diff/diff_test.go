@@ -38,7 +38,7 @@ func TestBuildGitDiffArgs(t *testing.T) {
 		name    string
 		opts    DiffOpts
 		file    string
-		display bool
+		display []string
 		want    []string
 	}{
 		{
@@ -72,6 +72,12 @@ func TestBuildGitDiffArgs(t *testing.T) {
 			want: []string{"diff", "--color=never", "--", "main.go"},
 		},
 		{
+			name: "rename pathspec covers both sides",
+			opts: DiffOpts{Base: "a", Target: "b", OldPath: "old.go"},
+			file: "new.go",
+			want: []string{"diff", "--color=never", "a", "b", "--find-renames", "--", "new.go", "old.go"},
+		},
+		{
 			name: "color with base and target",
 			opts: DiffOpts{Base: "a", Target: "b", Color: true},
 			file: "f.go",
@@ -93,14 +99,21 @@ func TestBuildGitDiffArgs(t *testing.T) {
 			name:    "display with color adds word-diff and ws flags",
 			opts:    DiffOpts{Staged: true, Color: true},
 			file:    "main.go",
-			display: true,
+			display: displayFlags(true, false),
 			want:    []string{"diff", "--color=always", "--word-diff=color", "--ws-error-highlight=all", "--staged", "--", "main.go"},
+		},
+		{
+			name:    "moved display trades word-diff for color-moved",
+			opts:    DiffOpts{Staged: true, Color: true},
+			file:    "main.go",
+			display: displayFlags(true, true),
+			want:    []string{"diff", "--color=always", "--color-moved=zebra", "--color-moved-ws=allow-indentation-change", "--ws-error-highlight=all", "--staged", "--", "main.go"},
 		},
 		{
 			name:    "display without color stays vanilla",
 			opts:    DiffOpts{Staged: true, Color: false},
 			file:    "main.go",
-			display: true,
+			display: displayFlags(false, false),
 			want:    []string{"diff", "--color=never", "--staged", "--", "main.go"},
 		},
 	}

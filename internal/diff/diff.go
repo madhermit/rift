@@ -96,6 +96,7 @@ type DiffOpts struct {
 	Staged  bool
 	Base    string
 	Target  string
+	OldPath string // pre-image path when the file was renamed in this scope
 	Color   bool
 	Width   int
 	Display Display
@@ -121,30 +122,42 @@ func NewPlainEngine() Engine {
 	return &fallbackEngine{}
 }
 
-// displayFlags add intra-line word coloring and whitespace-error highlighting to
-// the plain git-diff engine's output. They apply only in color mode and only to
-// the fallback engine — difftastic supplies its own structural intra-line
-// highlighting, and the raw-diff path used for hunk parsing must stay vanilla.
-func displayFlags(color bool) []string {
+// NewMovedEngine returns the git-diff engine with moved-line detection: git
+// classifies relocated lines and colors them distinctly, answering "moved or
+// rewritten?" at a glance. A separate engine (not a flag on the plain one)
+// because git ignores --color-moved under --word-diff, so the two views are
+// mutually exclusive.
+func NewMovedEngine() Engine {
+	return &fallbackEngine{moved: true}
+}
+
+// displayFlags are the git-diff engines' readability flags, color mode only —
+// difftastic supplies its own structural intra-line highlighting, and the
+// raw-diff path used for hunk parsing must stay vanilla. The default view adds
+// intra-line word coloring; the moved view trades that for git's moved-line
+// classification (zebra alternates colors between distinct moved blocks, and
+// the ws mode keeps re-indented moves classified as moves).
+func displayFlags(color, moved bool) []string {
 	if !color {
 		return nil
+	}
+	if moved {
+		return []string{"--color-moved=zebra", "--color-moved-ws=allow-indentation-change", "--ws-error-highlight=all"}
 	}
 	return []string{"--word-diff=color", "--ws-error-highlight=all"}
 }
 
-// buildGitDiffArgs builds `git diff` arguments. display adds the fallback
-// engine's readability flags; the difftastic-via-git path passes false so its
-// external-diff driver sees a plain diff.
-func buildGitDiffArgs(opts DiffOpts, file string, display bool) []string {
+// buildGitDiffArgs builds `git diff` arguments with the given extra display
+// flags (nil for the difftastic-via-git path, whose external-diff driver must
+// see a plain diff).
+func buildGitDiffArgs(opts DiffOpts, file string, display []string) []string {
 	args := []string{"diff"}
 	if opts.Color {
 		args = append(args, "--color=always")
 	} else {
 		args = append(args, "--color=never")
 	}
-	if display {
-		args = append(args, displayFlags(opts.Color)...)
-	}
+	args = append(args, display...)
 	if opts.Staged {
 		args = append(args, "--staged")
 	} else if opts.Base != "" && opts.Target != "" {
@@ -153,6 +166,11 @@ func buildGitDiffArgs(opts DiffOpts, file string, display bool) []string {
 		args = append(args, opts.Base)
 	}
 	if file != "" {
+		if opts.OldPath != "" && opts.OldPath != file {
+			// A renamed file needs both sides in the pathspec for git to pair
+			// them, and --find-renames guards against diff.renames=false config.
+			return append(args, "--find-renames", "--", file, opts.OldPath)
+		}
 		args = append(args, "--", file)
 	}
 	return args

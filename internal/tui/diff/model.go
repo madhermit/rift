@@ -146,10 +146,14 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		Hints:       hints,
 		Match:       func(f git.ChangedFile) string { return f.Path },
 		PreviewTitle: func(f git.ChangedFile) string {
-			if f.Path == "" {
+			switch {
+			case f.Path == "":
 				return "all changes"
+			case f.OldPath != "":
+				return f.OldPath + " → " + f.Path
+			default:
+				return f.Path
 			}
-			return f.Path
 		},
 		// Cache per file; the All entry depends on the filtered set, so skip it.
 		// Staged/display changes clear the cache (SetItems / ClearCacheAndReload).
@@ -439,14 +443,14 @@ func (m Model) previewOpts() diff.DiffOpts {
 
 // previewFiles is the list of files a selection previews: just the selected file,
 // or every changed file for the synthetic "All changes" entry (empty path).
-func previewFiles(sel git.ChangedFile, visible []git.ChangedFile) []string {
+func previewFiles(sel git.ChangedFile, visible []git.ChangedFile) []git.ChangedFile {
 	if sel.Path != "" {
-		return []string{sel.Path}
+		return []git.ChangedFile{sel}
 	}
-	var files []string
+	var files []git.ChangedFile
 	for _, f := range visible {
 		if f.Path != "" {
-			files = append(files, f.Path)
+			files = append(files, f)
 		}
 	}
 	return files

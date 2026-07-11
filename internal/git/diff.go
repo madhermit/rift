@@ -21,6 +21,7 @@ const EmptyTree = "4b825dc642cb6eb9a060e54bf899d69f82cf7207"
 
 type ChangedFile struct {
 	Path    string `json:"path"`
+	OldPath string `json:"old_path,omitempty"` // set for a rename/copy: the pre-image path
 	Status  string `json:"status"`
 	Added   int    `json:"added"`
 	Deleted int    `json:"deleted"`
@@ -93,42 +94,61 @@ func applyNumstat(files []ChangedFile, stats map[string][2]int) {
 	}
 }
 
-// parseNumstatZ parses `git diff --numstat -z --no-renames` output: NUL-
-// terminated "added\tdeleted\tpath" records. Binary files report "-" for the
-// counts, which Atoi maps to 0. -z keeps the path verbatim (no C-quoting).
+// parseNumstatZ parses `git diff --numstat -z` output: NUL-terminated
+// "added\tdeleted\tpath" records. A rename/copy record leaves the inline path
+// empty and appends the two paths as separate NUL fields (old, then new); the
+// stats are keyed by the new path, matching parseNameStatusZ. Binary files
+// report "-" for the counts, which Atoi maps to 0. -z keeps paths verbatim
+// (no C-quoting).
 func parseNumstatZ(out string) map[string][2]int {
 	stats := make(map[string][2]int)
-	for _, rec := range strings.Split(out, "\x00") {
-		if rec == "" {
-			continue
-		}
-		parts := strings.SplitN(rec, "\t", 3)
+	fields := strings.Split(out, "\x00")
+	for i := 0; i < len(fields); i++ {
+		parts := strings.SplitN(fields[i], "\t", 3)
 		if len(parts) != 3 {
 			continue
 		}
 		added, _ := strconv.Atoi(parts[0])   // "-" (binary) → 0
 		deleted, _ := strconv.Atoi(parts[1]) // "-" (binary) → 0
-		stats[parts[2]] = [2]int{added, deleted}
+		path := parts[2]
+		if path == "" && i+2 < len(fields) { // rename/copy: paths follow as two fields
+			path = fields[i+2]
+			i += 2
+		}
+		if path != "" {
+			stats[path] = [2]int{added, deleted}
+		}
 	}
 	return stats
 }
 
-// parseNameStatusZ parses `git diff --name-status -z --no-renames` (and the
-// equivalent diff-tree) output: NUL-separated fields alternating STATUS, PATH.
-// With renames disabled there are no three-field rename records, so every entry
-// is a clean pair and non-ASCII paths come through verbatim (no C-quoting).
+// parseNameStatusZ parses `git diff --name-status -z --find-renames` (and the
+// equivalent diff-tree) output: NUL-separated fields, normally STATUS, PATH
+// pairs. A rename/copy record (R<score>/C<score>) carries a third field — the
+// record is STATUS, OLD, NEW. -z keeps non-ASCII paths verbatim (no C-quoting).
 func parseNameStatusZ(out string) []ChangedFile {
 	fields := strings.Split(out, "\x00")
 	var files []ChangedFile
-	for i := 0; i+1 < len(fields); i += 2 {
+	for i := 0; i+1 < len(fields); {
 		status, path := fields[i], fields[i+1]
 		if status == "" || path == "" {
+			i += 2
+			continue
+		}
+		if (status[0] == 'R' || status[0] == 'C') && i+2 < len(fields) && fields[i+2] != "" {
+			files = append(files, ChangedFile{
+				Path:    fields[i+2],
+				OldPath: path,
+				Status:  nameStatusCode(status),
+			})
+			i += 3
 			continue
 		}
 		files = append(files, ChangedFile{
 			Path:   path,
 			Status: nameStatusCode(status),
 		})
+		i += 2
 	}
 	return files
 }
@@ -205,10 +225,12 @@ func DiffTargets(args []string) (base, target string, err error) {
 // real empty-tree object (resolved from git, since its hash is object-format
 // dependent) instead.
 //
-// --no-renames keeps a rename as a delete + an add (like statusFiles), so a
-// renamed file in a commit drilldown renders correctly instead of as a whole
-// addition — the new path doesn't exist at the base, so the diff engine would
-// extract a /dev/null old side for it.
+// --find-renames reports a rename as a single record with both paths (even if
+// the user's config sets diff.renames=false), so a moved file reads as its
+// small content delta instead of a full delete + add. The old path travels on
+// ChangedFile.OldPath, which the diff engines use to extract the pre-image —
+// worktree/staged listings (statusFiles) intentionally stay rename-free, since
+// the stage screen operates on the real index paths.
 func (r *Repo) DiffBetweenCommits(baseRef, targetRef string) ([]ChangedFile, error) {
 	base, useRoot := baseRef, false
 	if baseRef == EmptyTree {
@@ -224,9 +246,9 @@ func (r *Repo) DiffBetweenCommits(baseRef, targetRef string) ([]ChangedFile, err
 	}
 	return changedFilesWithStats(func(format string) (string, error) {
 		if useRoot {
-			return r.runGit("diff-tree", "--root", "--no-commit-id", format, "--no-renames", "-z", "-r", targetRef)
+			return r.runGit("diff-tree", "--root", "--no-commit-id", format, "--find-renames", "-z", "-r", targetRef)
 		}
-		return r.runGit("diff", format, "--no-renames", "-z", base, targetRef)
+		return r.runGit("diff", format, "--find-renames", "-z", base, targetRef)
 	})
 }
 
@@ -276,9 +298,10 @@ func (r *Repo) emptyTreeHash() (string, error) {
 // scope: it surfaces both committed and uncommitted changes since baseRef, so the
 // listing matches the per-file preview, which also diffs the working tree against
 // baseRef. Untracked files are excluded, matching `git diff <ref>` semantics.
+// Renames are reported as single records (see DiffBetweenCommits).
 func (r *Repo) DiffAgainstRef(baseRef string) ([]ChangedFile, error) {
 	return changedFilesWithStats(func(format string) (string, error) {
-		return r.runGit("diff", format, "--no-renames", "-z", baseRef)
+		return r.runGit("diff", format, "--find-renames", "-z", baseRef)
 	})
 }
 

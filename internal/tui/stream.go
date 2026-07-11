@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
+	"github.com/madhermit/rift/internal/git"
 )
 
 // ChunkMsg carries one item's rendered preview from a progressive stream. More
@@ -34,41 +35,48 @@ func PreviewDiffOpts(width int, display diff.Display) diff.DiffOpts {
 	return diff.DiffOpts{Color: ColorEnabled(), Width: width, Display: display}
 }
 
-// StreamFiles diffs paths concurrently and returns a channel yielding each file's
-// rendered diff in order (for a progressive preview), plus a cancel that stops
-// the work — killing the difftastic subprocesses of a stream the user navigated
-// away from. Shared by the diff, log, and stash previews.
-func StreamFiles(engine diff.Engine, root string, paths []string, opts diff.DiffOpts) (<-chan string, func()) {
+// StreamFiles diffs files concurrently and returns a channel yielding each
+// file's rendered diff in order (for a progressive preview), plus a cancel that
+// stops the work — killing the difftastic subprocesses of a stream the user
+// navigated away from. Shared by the diff, log, and stash previews. Each file's
+// OldPath (when renamed) rides into the engine via the per-file opts.
+func StreamFiles(engine diff.Engine, root string, files []git.ChangedFile, opts diff.DiffOpts) (<-chan string, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := diff.ParallelStream(len(paths), func(i int) string {
-		return renderFileDiff(ctx, engine, root, paths[i], opts)
+	ch := diff.ParallelStream(len(files), func(i int) string {
+		o := opts
+		o.OldPath = files[i].OldPath
+		return renderFileDiff(ctx, engine, root, files[i], o)
 	})
 	return ch, cancel
 }
 
 // renderFileDiff diffs one file, prefixing a section banner. The banner is a
 // hidden marker — the preview strips it from the body (the diff's own header is
-// the visible boundary) and pins its path in the legend as you scroll into the
-// file; see VimNav.SetContent. A file whose diff fails renders a visible marker
-// rather than vanishing silently; a cancelled diff (navigated away) renders
-// nothing, since it's discarded.
-func renderFileDiff(ctx context.Context, engine diff.Engine, root, file string, opts diff.DiffOpts) string {
-	content, err := engine.Diff(ctx, root, file, opts)
+// the visible boundary) and pins its label in the legend as you scroll into the
+// file (a rename reads "old → new"); see VimNav.SetContent. A file whose diff
+// fails renders a visible marker rather than vanishing silently; a cancelled
+// diff (navigated away) renders nothing, since it's discarded.
+func renderFileDiff(ctx context.Context, engine diff.Engine, root string, f git.ChangedFile, opts diff.DiffOpts) string {
+	content, err := engine.Diff(ctx, root, f.Path, opts)
+	label := f.Path
+	if f.OldPath != "" {
+		label = f.OldPath + " → " + f.Path
+	}
 	switch {
 	case ctx.Err() != nil:
 		return ""
 	case err != nil:
-		return diffErrorMarker(file, opts, err)
+		return diffErrorMarker(label, opts, err)
 	case content == "":
 		return ""
 	default:
-		return SectionBanner(file, opts.Width) + "\n" + content + "\n"
+		return SectionBanner(label, opts.Width) + "\n" + content + "\n"
 	}
 }
 
-func diffErrorMarker(file string, opts diff.DiffOpts, err error) string {
+func diffErrorMarker(label string, opts diff.DiffOpts, err error) string {
 	line := strings.SplitN(err.Error(), "\n", 2)[0]
-	return SectionBanner(file, opts.Width) + "\n  ⚠ diff unavailable: " + line + "\n"
+	return SectionBanner(label, opts.Width) + "\n  ⚠ diff unavailable: " + line + "\n"
 }
 
 // PreviewStream tracks an in-flight progressive preview feeding a SplitList: a

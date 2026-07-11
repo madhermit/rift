@@ -243,7 +243,7 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	opts.Staged, opts.Base, opts.Target = m.scope.Staged, m.scope.Base, m.scope.Target
 	root, engine := m.repo.Root(), m.engines.Engine()
 	return func() tea.Msg {
-		ch, cancel := tui.StreamFiles(engine, root, []string{sel.File}, opts)
+		ch, cancel := tui.StreamFiles(engine, root, []git.ChangedFile{{Path: sel.File}}, opts)
 		return tui.StreamReadyMsg{ReqID: reqID, Ch: ch, Cancel: cancel}
 	}
 }
