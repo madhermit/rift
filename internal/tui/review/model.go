@@ -28,9 +28,10 @@ type Model struct {
 	engines tui.EngineToggle
 	list    tui.SplitList[review.Spec]
 
-	scope   review.DiffScope
-	display diff.Display
-	stream  *tui.PreviewStream // active spec-diff stream; nil otherwise
+	scope    review.DiffScope
+	display  diff.Display
+	stream   *tui.PreviewStream // active spec-diff stream; nil otherwise
+	watching bool               // show the live-watch indicator in the header context
 }
 
 // New builds the tests lens for a diff. The scope decides whether it reads the
@@ -166,7 +167,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.engines = m.engines.Toggle()
-			m.list = m.list.SetContext(tui.ContextLabel(m.scope.Target, m.engines.Name()))
+			m.list = m.list.SetContext(m.contextLabel())
 			return m.reloadFresh()
 		case "o":
 			if sel, ok := m.list.Selected(); ok {
@@ -185,6 +186,23 @@ func (m Model) View() tea.View { return m.list.TeaView() }
 // embedding this model (the log drilldown) knows when not to intercept esc.
 func (m Model) Filtering() bool   { return m.list.Filtering() }
 func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
+
+// SetWatching adds a "watching" tag to the header context, marking the lens as
+// live-reloading. The flag persists on the model because the engine toggle
+// rebuilds the label.
+func (m Model) SetWatching() Model {
+	m.watching = true
+	m.list = m.list.SetContext(m.contextLabel())
+	return m
+}
+
+func (m Model) contextLabel() string {
+	label := tui.ContextLabel(m.scope.Target, m.engines.Name())
+	if m.watching {
+		label += " · watching"
+	}
+	return label
+}
 
 // SetBreadcrumb marks this view as an embedded drilldown: it sets the header
 // breadcrumb (e.g. "log ❯ a1b2c3d ❯ tests") and adds an "esc back" footer hint.
