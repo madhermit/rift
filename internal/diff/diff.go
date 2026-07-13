@@ -130,27 +130,18 @@ func NewPlainEngine() Engine {
 	return &fallbackEngine{}
 }
 
-// NewMovedEngine returns the git-diff engine with moved-line detection: git
-// classifies relocated lines and colors them distinctly, answering "moved or
-// rewritten?" at a glance. A separate engine (not a flag on the plain one)
-// because git ignores --color-moved under --word-diff, so the two views are
-// mutually exclusive.
-func NewMovedEngine() Engine {
-	return &fallbackEngine{moved: true}
-}
-
-// displayFlags are the git-diff engines' readability flags, color mode only —
+// displayFlags are the git-diff engine's readability flags, color mode only —
 // difftastic supplies its own structural intra-line highlighting, and the
-// raw-diff path used for hunk parsing must stay vanilla. The default view adds
-// intra-line word coloring; the moved view trades that for git's moved-line
-// classification (zebra alternates colors between distinct moved blocks, and
-// the ws mode keeps re-indented moves classified as moves).
-func displayFlags(color, moved bool) []string {
+// raw-diff path used for hunk parsing must stay vanilla.
+//
+// Word emphasis is the best-effort default. A moved-line view
+// (--color-moved=zebra --color-moved-ws=allow-indentation-change) is planned
+// as a config option instead of a second default: git silently ignores
+// --color-moved under --word-diff (verified empirically), so the two views
+// are mutually exclusive per invocation and can't be combined here.
+func displayFlags(color bool) []string {
 	if !color {
 		return nil
-	}
-	if moved {
-		return []string{"--color-moved=zebra", "--color-moved-ws=allow-indentation-change", "--ws-error-highlight=all"}
 	}
 	return []string{"--word-diff=color", "--ws-error-highlight=all"}
 }

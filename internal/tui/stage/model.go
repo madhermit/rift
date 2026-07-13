@@ -120,7 +120,7 @@ func (m Model) layout() tui.SplitLayout {
 }
 
 func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
-	engines := tui.NewHunkEngineToggle(engine)
+	engines := tui.NewEngineToggle(engine)
 	return Model{
 		repo:          repo,
 		engines:       engines,

@@ -99,21 +99,14 @@ func TestBuildGitDiffArgs(t *testing.T) {
 			name:    "display with color adds word-diff and ws flags",
 			opts:    DiffOpts{Staged: true, Color: true},
 			file:    File{Path: "main.go"},
-			display: displayFlags(true, false),
+			display: displayFlags(true),
 			want:    []string{"diff", "--color=always", "--word-diff=color", "--ws-error-highlight=all", "--staged", "--", "main.go"},
-		},
-		{
-			name:    "moved display trades word-diff for color-moved",
-			opts:    DiffOpts{Staged: true, Color: true},
-			file:    File{Path: "main.go"},
-			display: displayFlags(true, true),
-			want:    []string{"diff", "--color=always", "--color-moved=zebra", "--color-moved-ws=allow-indentation-change", "--ws-error-highlight=all", "--staged", "--", "main.go"},
 		},
 		{
 			name:    "display without color stays vanilla",
 			opts:    DiffOpts{Staged: true, Color: false},
 			file:    File{Path: "main.go"},
-			display: displayFlags(false, false),
+			display: displayFlags(false),
 			want:    []string{"diff", "--color=never", "--staged", "--", "main.go"},
 		},
 	}
