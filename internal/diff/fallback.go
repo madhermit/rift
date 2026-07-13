@@ -8,19 +8,9 @@ import (
 	"strings"
 )
 
-// fallbackEngine renders diffs with git itself. Its two flavors are exclusive
-// because git silently ignores --color-moved under --word-diff: the default
-// view emphasizes intra-line word changes, the moved view classifies moved
-// lines instead (relocated code renders in git's moved colors rather than as
-// unrelated delete + add).
-type fallbackEngine struct{ moved bool }
+type fallbackEngine struct{}
 
-func (f *fallbackEngine) Name() string {
-	if f.moved {
-		return "git-moved"
-	}
-	return "git-diff"
-}
+func (f *fallbackEngine) Name() string { return "git-diff" }
 
 // Diff shells `git diff` for one file. An untracked file yields no output there
 // (git diff only covers tracked content), so an empty worktree-scope result is
@@ -28,7 +18,7 @@ func (f *fallbackEngine) Name() string {
 // instead so its content renders as a new-file diff — matching the difftastic
 // engine, which reaches the same result via its failed `git show :file`.
 func (f *fallbackEngine) Diff(ctx context.Context, repoRoot string, file File, opts DiffOpts) (string, error) {
-	display := displayFlags(opts.Color, f.moved)
+	display := displayFlags(opts.Color)
 	args := buildGitDiffArgs(opts, file, display)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoRoot

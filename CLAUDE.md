@@ -53,6 +53,7 @@ design intent only — do not assume the packages or tools exist:
 - **Risk classification** in review — today `internal/review` only tracks reviewed marks and extracts test cases
 - **Inline agent annotations:** `rift annotate` writing to a JSON store next to the reviewed marks (`.git/rift/annotations.json`), rendered in the diff preview and picked up by `--watch`. File-based on purpose — no daemon/socket (see the design doc's Future Considerations)
 - **Mouse support:** wheel scroll + click-to-select via bubbletea mouse events; must keep terminal text selection workable (see design doc)
+- **Moved-line diff view:** a config option swapping the git engine's flags to `--color-moved=zebra --color-moved-ws=allow-indentation-change` (mutually exclusive with the default `--word-diff=color` — git silently ignores `--color-moved` under word-diff, so it can't be a combined default; see `displayFlags` in `internal/diff`)
 
 ## Workflow
 

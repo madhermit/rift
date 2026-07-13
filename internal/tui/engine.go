@@ -2,42 +2,24 @@ package tui
 
 import "github.com/madhermit/rift/internal/diff"
 
-// EngineToggle is the ring of diff engines a screen cycles with `e`:
-// difftastic (when available) → git's word-diff view → git's moved-line view.
+// EngineToggle pairs the primary diff engine (difftastic when available) with
+// git's own diff as the alternate, cycled with `e`. When the primary already
+// is the git engine (difftastic unavailable) there is nothing to toggle.
 type EngineToggle struct {
 	engines []diff.Engine
 	idx     int
 }
 
 // NewEngineToggle builds the engine ring starting from the given primary
-// engine. Alternates matching the primary aren't added twice, so a ring seeded
-// with an already-cycled git engine (a log drilldown passes the active engine)
-// stays duplicate-free. The moved-line view is only offered when color is on —
-// its flags are inert without color, which would make it indistinguishable
-// from the plain view.
+// engine. An alternate matching the primary isn't added twice, so a ring
+// seeded with an already-cycled engine (a log drilldown passes the active
+// engine) stays duplicate-free.
 func NewEngineToggle(engine diff.Engine) EngineToggle {
-	alts := []diff.Engine{diff.NewPlainEngine()}
-	if ColorEnabled() {
-		alts = append(alts, diff.NewMovedEngine())
+	engines := []diff.Engine{engine}
+	if alt := diff.NewPlainEngine(); alt.Name() != engine.Name() {
+		engines = append(engines, alt)
 	}
-	return EngineToggle{engines: ring(engine, alts)}
-}
-
-// NewHunkEngineToggle is the ring for hunk-rendering screens (stage): the
-// moved-line view is omitted because DiffHunks renders hunks directly, where
-// git's move detection never engages — it would cycle identical output.
-func NewHunkEngineToggle(engine diff.Engine) EngineToggle {
-	return EngineToggle{engines: ring(engine, []diff.Engine{diff.NewPlainEngine()})}
-}
-
-func ring(primary diff.Engine, alts []diff.Engine) []diff.Engine {
-	engines := []diff.Engine{primary}
-	for _, alt := range alts {
-		if alt.Name() != primary.Name() {
-			engines = append(engines, alt)
-		}
-	}
-	return engines
+	return EngineToggle{engines: engines}
 }
 
 // Engine is the active engine — what previews are rendered with.
@@ -47,7 +29,7 @@ func (e EngineToggle) Engine() diff.Engine { return e.engines[e.idx] }
 func (e EngineToggle) Name() string { return e.Engine().Name() }
 
 // CanToggle reports whether there is more than one engine to cycle through
-// (false e.g. without difftastic under NO_COLOR — the hint is then hidden).
+// (false without difftastic — the hint is then hidden).
 func (e EngineToggle) CanToggle() bool { return len(e.engines) > 1 }
 
 // Toggle advances to the next engine in the ring, returning the new state; a

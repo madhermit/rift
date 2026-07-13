@@ -9,6 +9,8 @@ pre-1.0).
 
 ### Added
 
+### Fixed
+
 - `rift diff --watch` live-reloads the browser as the working tree changes —
   built for reviewing while an agent edits in another pane. The file list,
   stats, and diffs refresh in place (the selection survives), the tests lens
@@ -27,13 +29,6 @@ pre-1.0).
   The tests lens reads a renamed file's old side from its old path, so its
   specs no longer all report as newly added. Working-tree and staged listings
   keep git-status semantics (the stage screen operates on real index paths).
-- The `e` engine toggle now cycles three views: difftastic, git's word-diff
-  view, and a new moved-line view (`git-moved`) that colors relocated code
-  distinctly — answering "moved or rewritten?" at a glance. The two git views
-  are separate because git ignores `--color-moved` under `--word-diff`. The
-  moved view is also available without difftastic installed.
-
-### Fixed
 
 - In a base-ref diff (`rift diff main`), returning from the editor (`o`) no
   longer replaces the file list with the plain worktree-vs-index set — the
@@ -213,7 +208,7 @@ pre-1.0).
   - `rift diff` shows the file list and toggles to the tests view live with `t`
     (the header reads `rift ❯ diff ❯ tests` to show it's a lens); `--tests` just
     opens straight into it. Works on the working tree, `--staged`, or a `<commit>
-    <commit>` range, with `--print`/`--json` for scripting. The diff preview
+<commit>` range, with `--print`/`--json` for scripting. The diff preview
     scrolls to the selected test and labels it in the panel's border, so a
     body-only change stays named even when its declaration isn't in the diff;
     `o` opens it in `$EDITOR` at its line.
@@ -276,7 +271,7 @@ pre-1.0).
 
 ## [0.2.0] - 2026-05-31
 
-A big step toward being a daily driver for *reading* git state: the diff and log
+A big step toward being a daily driver for _reading_ git state: the diff and log
 browsers got a top-to-bottom presentation overhaul, and the tool's scope
 tightened around what it does best.
 
@@ -304,7 +299,7 @@ tightened around what it does best.
   quitting; quit stays on `q` / `ctrl+c`.
 - Upgraded to the Charm v2 ecosystem (bubbletea / lipgloss / bubbles) and
   extracted a reusable split-list component shared across screens.
-- Repositioned as *worktree-aware* — every command reads correctly inside
+- Repositioned as _worktree-aware_ — every command reads correctly inside
   bare-repo and linked-worktree layouts — rather than worktree-managing. Pair
   with [worktrunk](https://github.com/max-sixty/worktrunk) for managing
   worktrees and branches.
