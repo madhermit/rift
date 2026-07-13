@@ -503,3 +503,14 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
+
+// MouseEnabled reports whether mouse tracking should be requested. On by
+// default; RIFT_MOUSE=off (or 0/none) disables it for users who prefer the
+// terminal's native text selection without the shift-click escape hatch.
+func MouseEnabled() bool {
+	switch os.Getenv("RIFT_MOUSE") {
+	case "off", "0", "none", "false":
+		return false
+	}
+	return true
+}

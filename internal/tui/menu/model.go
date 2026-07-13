@@ -75,6 +75,8 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
@@ -85,6 +87,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SelectedMsg:
 		m.selected = msg.Command
 		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// handleMouse maps mouse input onto the menu list: the wheel moves the
+// selection, a click selects the row under the pointer, and a click on the
+// already-selected row activates it (the menu is a launcher, so a click means
+// "choose this").
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.showHelp || !m.ready {
+		return m, nil
+	}
+	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		if delta := tui.WheelDelta(msg); delta != 0 {
+			m.moveSelection(delta)
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		// Rows render un-windowed from the panel's first inner line.
+		idx := msg.Y - tui.HeaderRows - 1
+		if idx < 0 || idx >= len(m.filtered) {
+			return m, nil
+		}
+		if idx == m.selectedIdx {
+			cmd := m.filtered[idx]
+			return m, func() tea.Msg { return SelectedMsg{Command: cmd.Name} }
+		}
+		m.selectedIdx = idx
+		return m, nil
 	}
 	return m, nil
 }
@@ -198,9 +233,7 @@ func (m Model) View() tea.View {
 
 	if m.showHelp {
 		contentH := m.height - tui.HeaderRows - tui.FooterRows
-		v := tea.NewView(tui.HelpView("", "a composable fuzzy git tool", menuHints, menuNavKeys, m.width, contentH))
-		v.AltScreen = true
-		return v
+		return tui.ScreenView(tui.HelpView("", "a composable fuzzy git tool", menuHints, menuNavKeys, m.width, contentH))
 	}
 
 	var items strings.Builder
@@ -230,7 +263,5 @@ func (m Model) View() tea.View {
 		footer = tui.Footer(m.width, fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filtered)), menuHints)
 	}
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, panel, footer))
-	v.AltScreen = true
-	return v
+	return tui.ScreenView(lipgloss.JoinVertical(lipgloss.Left, header, panel, footer))
 }

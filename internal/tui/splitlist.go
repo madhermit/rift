@@ -393,6 +393,8 @@ func (m SplitList[T]) SelectedKey() string {
 
 func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
@@ -569,6 +571,88 @@ func (m SplitList[T]) stepList(delta int) (SplitList[T], tea.Cmd) {
 		return m, nil // already at the boundary; nothing to reload
 	}
 	m.selected = next
+	return m.requestPreview()
+}
+
+// WheelLines is how many preview lines one wheel notch scrolls.
+const WheelLines = 3
+
+// handleMouse routes a mouse event by position: the wheel scrolls whichever
+// pane the pointer is over (the preview by lines, the list by selection), and
+// a left click selects the row under the pointer and focuses the pane it hit.
+// Modal states (help overlay, an inline confirm prompt) ignore the mouse the
+// same way they capture the keyboard; wheel events still work while filtering
+// since the filter only captures text input.
+func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
+	if m.showHelp || m.prompt != "" || !m.ready {
+		return m, nil
+	}
+	pos := msg.Mouse()
+	previewH, navH := m.stackLayout()
+	listTop, previewTop := HeaderRows, HeaderRows+navH
+	inList := navH > 0 && pos.Y >= listTop && pos.Y < previewTop
+	inPreview := pos.Y >= previewTop && pos.Y < previewTop+previewH
+
+	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		delta := WheelDelta(msg)
+		if delta == 0 {
+			return m, nil
+		}
+		if inList {
+			return m.stepList(delta)
+		}
+		if inPreview || navH == 0 {
+			if delta < 0 {
+				m.viewport.ScrollUp(WheelLines)
+			} else {
+				m.viewport.ScrollDown(WheelLines)
+			}
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		switch {
+		case inList:
+			// Resolve the clicked row against the layout the user clicked on,
+			// then focus — focusing can expand a one-row peek into the full
+			// strip, which would re-window the rows under the pointer.
+			sel, cmd := m.selectRow(pos.Y-listTop-1, navH-2)
+			return sel.focusPane(splitListPane), cmd
+		case inPreview:
+			return m.focusPane(splitPreviewPane), nil
+		}
+	}
+	return m, nil
+}
+
+// focusPane switches the focused pane (a click's equivalent of ⇥) and
+// re-lays-out, since focus decides how the vertical split divides.
+func (m SplitList[T]) focusPane(p splitPane) SplitList[T] {
+	if m.active == p {
+		return m
+	}
+	m.active = p
+	m.resizeViewport()
+	return m
+}
+
+// selectRow selects the item at the given inner list row (0-based, borders
+// already subtracted), mapping through the same window the list rendered with
+// (innerH is the clicked layout's inner strip height). Clicks on the border or
+// past the last item keep the current selection.
+func (m SplitList[T]) selectRow(row, innerH int) (SplitList[T], tea.Cmd) {
+	if row < 0 || row >= innerH || len(m.filtered) == 0 {
+		return m, nil
+	}
+	offset, _ := ListWindow(m.selected, len(m.filtered), maxInt(1, innerH))
+	idx := offset + row
+	if idx >= len(m.filtered) || idx == m.selected {
+		return m, nil
+	}
+	m.selected = idx
 	return m.requestPreview()
 }
 
@@ -997,7 +1081,5 @@ func (m SplitList[T]) content() string {
 // TeaView wraps the rendered screen in a full-screen tea.View. Parent models
 // delegate their View() to this.
 func (m SplitList[T]) TeaView() tea.View {
-	v := tea.NewView(m.View())
-	v.AltScreen = true
-	return v
+	return ScreenView(m.View())
 }

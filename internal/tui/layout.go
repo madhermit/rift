@@ -1,5 +1,7 @@
 package tui
 
+import tea "charm.land/bubbletea/v2"
+
 // CollapsedListWidth is the width of the list pane when the diff pane is
 // active and the list collapses to a narrow strip.
 const CollapsedListWidth = 12
@@ -58,4 +60,29 @@ func ComputeSplitLayout(width, height int, collapsed bool, minList, maxList int)
 		}
 	}
 	return l
+}
+
+// ScreenView wraps rendered screen content in the standard full-screen
+// tea.View: alt-screen on, and mouse tracking requested unless the user
+// opted out (see MouseEnabled). Every top-level screen builds its view here
+// so terminal modes stay consistent across them.
+func ScreenView(content string) tea.View {
+	v := tea.NewView(content)
+	v.AltScreen = true
+	if MouseEnabled() {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+	return v
+}
+
+// WheelDelta maps a wheel message to a vertical scroll direction: -1 up,
+// 1 down, 0 for horizontal wheel events (which the screens don't use).
+func WheelDelta(msg tea.MouseWheelMsg) int {
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		return -1
+	case tea.MouseWheelDown:
+		return 1
+	}
+	return 0
 }

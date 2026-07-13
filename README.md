@@ -51,7 +51,7 @@ A new cohort of review-first diff viewers — [hunk](https://github.com/modem-de
 | Transient — invoke, act, return to shell |  ✅  |                    ✅                     |                         ❌                          |                    ✅                    |                      —                       |                        —                        |
 | Single static binary                     |  ✅  |                    ❌                     |                         ✅                          |                    ❌                    |                      ✅                      |                       ✅                        |
 | Inline agent annotations                 |  🔜  |                    ✅                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ❌                        |
-| Mouse support                            |  🔜  |                    ✅                     |                         ✅                          |                    ❌                    |                      —                       |                        —                        |
+| Mouse support                            |  ✅  |                    ✅                     |                         ✅                          |                    ❌                    |                      —                       |                        —                        |
 
 ✅ yes · ❌ no · — not applicable · 🔜 planned. delta and difftastic are diff renderers/pagers rather than browsers, so several rows don't apply — rift uses difftastic as its diff engine and falls back to a built-in line diff without it.
 
@@ -167,10 +167,15 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 
 The `menu` launchpad is a plain list: `⏎` selects, `/` filters, and `esc`/`q` quit. Destructive actions (`stash` pop/drop, `log` cherry-pick/revert) confirm inline with `y`/`n`.
 
+**Mouse**
+
+The mouse works everywhere the keyboard does: the wheel scrolls the pane under the pointer (over a list it moves the selection), a click selects the row it lands on and focuses the pane it hit, and in the `menu` a click on the selected entry launches it. Set `RIFT_MOUSE=off` if you'd rather keep the terminal's native text selection — and note most terminals bypass mouse tracking with shift-click/drag, so copying out of a diff still works either way.
+
 ### Environment
 
 - `RIFT_THEME=light|dark` — force the color palette instead of detecting the terminal's background. Unset, rift asks the terminal and falls back to the dark palette when there's no reply.
 - `RIFT_ICONS=ascii` (or `none`) — suppress the Nerd Font file-type icons for terminals without a patched font; the icon column drops out cleanly.
+- `RIFT_MOUSE=off` — disable mouse tracking (wheel/click), keeping the terminal's native text selection.
 - `NO_COLOR` — disable all ANSI color.
 - `VISUAL` / `EDITOR` — the editor `o` opens (falling back to `vi`).
 

@@ -140,6 +140,8 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tui.EditorClosedMsg:
@@ -429,6 +431,66 @@ func (m Model) reloadFiles() tea.Cmd {
 		}
 		return filesLoadedMsg{files: files}
 	}
+}
+
+// handleMouse routes mouse input by pane: the wheel scrolls the hunk view or
+// steps the file selection, a click selects the file row under the pointer and
+// focuses the pane it hit. The row is resolved against the layout the user
+// clicked on, before any focus change re-widens the panes.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.showHelp || !m.ready {
+		return m, nil
+	}
+	pos := msg.Mouse()
+	l := m.layout()
+	inContent := pos.Y >= tui.HeaderRows && pos.Y < tui.HeaderRows+l.ContentHeight
+	inFiles := inContent && pos.X < l.ListWidth
+	inDiff := inContent && !inFiles
+
+	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		delta := tui.WheelDelta(msg)
+		if delta == 0 {
+			return m, nil
+		}
+		if inFiles {
+			return m.moveSelection(delta)
+		}
+		if inDiff {
+			if delta < 0 {
+				m.viewport.ScrollUp(tui.WheelLines)
+			} else {
+				m.viewport.ScrollDown(tui.WheelLines)
+			}
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		switch {
+		case inFiles:
+			row := pos.Y - tui.HeaderRows - 1
+			innerH := l.ContentHeight - 2
+			focus := m
+			focus.activePane = filePane
+			if row < 0 || row >= innerH || len(m.filteredFiles) == 0 {
+				return focus.applyLayout()
+			}
+			offset, _ := tui.ListWindow(m.selectedIdx, len(m.filteredFiles), max(1, innerH))
+			if idx := offset + row; idx < len(m.filteredFiles) && idx != m.selectedIdx {
+				next, cmd := focus.selectTo(idx)
+				focus = next.(Model)
+				lm, lcmd := focus.applyLayout()
+				return lm, tea.Batch(cmd, lcmd)
+			}
+			return focus.applyLayout()
+		case inDiff:
+			m.activePane = diffPane
+			return m.applyLayout()
+		}
+	}
+	return m, nil
 }
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
