@@ -184,8 +184,8 @@ func fileRow(marks *reviewMarks) func(git.ChangedFile, int, bool) string {
 
 // displayFiles is the list the SplitList shows. In the default view it's every
 // changed file under a synthetic "All" entry. In the unreviewed-only view it's
-// just the not-yet-reviewed files with no "All" row — so as you tick files off,
-// the cursor (reset to the top by the re-filter) lands on the next one to review.
+// just the not-yet-reviewed files with no "All" row; toggleReviewed re-selects
+// the next unreviewed file when one drops out.
 func (m Model) displayFiles() []git.ChangedFile {
 	if m.unreviewedOnly && m.marks != nil {
 		return m.marks.state.Unreviewed(m.files, m.marks.hashes)
@@ -341,8 +341,12 @@ func (m Model) toggleReviewed() (tea.Model, tea.Cmd) {
 	marked := m.marks.state.Toggle(sel.Path, m.marks.hashes[sel.Path])
 	m.list = m.list.SetListTitle(m.listTitle())
 	if m.unreviewedOnly {
+		// The marked file drops out of this view; keep the cursor on the next
+		// unreviewed file after it (not the top — marking from the middle of
+		// the list must not yank the reviewer back to row one).
+		next, _ := nextUnreviewed(m.list.VisibleItems(), sel.Path, m.marks.reviewed)
 		var cmd tea.Cmd
-		m.list, cmd = m.list.SetItems(m.displayFiles())
+		m.list, cmd = m.list.SetItemsSelecting(m.displayFiles(), next)
 		return m, cmd
 	}
 	if !marked {
