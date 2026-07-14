@@ -51,7 +51,7 @@ func TestSelectRow(t *testing.T) {
 func TestFocusPaneRelayouts(t *testing.T) {
 	m := testList([]string{"a", "b", "c"})
 	_, surveyNav := m.stackLayout()
-	m = m.focusPane(splitPreviewPane)
+	m, _ = m.focusPane(splitPreviewPane)
 	if m.active != splitPreviewPane {
 		t.Fatal("focusPane did not switch panes")
 	}
@@ -59,7 +59,7 @@ func TestFocusPaneRelayouts(t *testing.T) {
 	if readNav >= surveyNav {
 		t.Errorf("reading layout should collapse the strip: %d -> %d", surveyNav, readNav)
 	}
-	if m.focusPane(splitPreviewPane).active != splitPreviewPane {
+	if same, _ := m.focusPane(splitPreviewPane); same.active != splitPreviewPane {
 		t.Error("re-focusing the same pane should be a no-op")
 	}
 }

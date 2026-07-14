@@ -109,19 +109,29 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
-		// Rows render un-windowed from the panel's first inner line.
+		// Rows render un-windowed from the panel's first inner line — and the
+		// panel clips at its inner height, so a click must land on a row that
+		// is both real and visible (a border/footer click on a short terminal
+		// must not select, let alone launch, a clipped-away entry).
 		idx := msg.Y - tui.HeaderRows - 1
-		if idx < 0 || idx >= len(m.filtered) {
+		visible := m.height - tui.HeaderRows - tui.FooterRows - 2
+		if idx < 0 || idx >= len(m.filtered) || idx >= visible {
 			return m, nil
 		}
 		if idx == m.selectedIdx {
-			cmd := m.filtered[idx]
-			return m, func() tea.Msg { return SelectedMsg{Command: cmd.Name} }
+			return m, m.activate(idx)
 		}
 		m.selectedIdx = idx
 		return m, nil
 	}
 	return m, nil
+}
+
+// activate launches the command at idx — the single path shared by the enter
+// key and a click on the selected row.
+func (m Model) activate(idx int) tea.Cmd {
+	cmd := m.filtered[idx]
+	return func() tea.Msg { return SelectedMsg{Command: cmd.Name} }
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -157,10 +167,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		if len(m.filtered) > 0 {
-			cmd := m.filtered[m.selectedIdx]
-			return m, func() tea.Msg {
-				return SelectedMsg{Command: cmd.Name}
-			}
+			return m, m.activate(m.selectedIdx)
 		}
 	case "up", "k":
 		m.moveSelection(-1)

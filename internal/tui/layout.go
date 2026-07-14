@@ -86,3 +86,20 @@ func WheelDelta(msg tea.MouseWheelMsg) int {
 	}
 	return 0
 }
+
+// ClickedRow maps a click on a list's inner row (0-based, panel borders
+// already subtracted) to the item index it lands on, through the same window
+// the list renders with (see ListWindow). ok is false when the click misses —
+// a border, past the last item — or lands on the already-selected item, so
+// callers treat it as "selection changed".
+func ClickedRow(row, innerH, selected, total int) (int, bool) {
+	if row < 0 || row >= innerH || total == 0 {
+		return 0, false
+	}
+	offset, _ := ListWindow(selected, total, innerH)
+	idx := offset + row
+	if idx >= total || idx == selected {
+		return 0, false
+	}
+	return idx, true
+}

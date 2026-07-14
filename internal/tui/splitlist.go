@@ -574,9 +574,6 @@ func (m SplitList[T]) stepList(delta int) (SplitList[T], tea.Cmd) {
 	return m.requestPreview()
 }
 
-// WheelLines is how many preview lines one wheel notch scrolls.
-const WheelLines = 3
-
 // handleMouse routes a mouse event by position: the wheel scrolls whichever
 // pane the pointer is over (the preview by lines, the list by selection), and
 // a left click selects the row under the pointer and focuses the pane it hit.
@@ -595,19 +592,18 @@ func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
-		delta := WheelDelta(msg)
-		if delta == 0 {
+		if inList {
+			if delta := WheelDelta(msg); delta != 0 {
+				return m.stepList(delta)
+			}
 			return m, nil
 		}
-		if inList {
-			return m.stepList(delta)
-		}
-		if inPreview || navH == 0 {
-			if delta < 0 {
-				m.viewport.ScrollUp(WheelLines)
-			} else {
-				m.viewport.ScrollDown(WheelLines)
-			}
+		if inPreview {
+			// The viewport handles wheel messages natively (vertical and
+			// horizontal), same as the keyboard scrolling path.
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
 		}
 		return m, nil
 	case tea.MouseClickMsg:
@@ -620,23 +616,24 @@ func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
 			// then focus — focusing can expand a one-row peek into the full
 			// strip, which would re-window the rows under the pointer.
 			sel, cmd := m.selectRow(pos.Y-listTop-1, navH-2)
-			return sel.focusPane(splitListPane), cmd
+			focused, fcmd := sel.focusPane(splitListPane)
+			return focused, tea.Batch(cmd, fcmd)
 		case inPreview:
-			return m.focusPane(splitPreviewPane), nil
+			return m.focusPane(splitPreviewPane)
 		}
 	}
 	return m, nil
 }
 
-// focusPane switches the focused pane (a click's equivalent of ⇥) and
-// re-lays-out, since focus decides how the vertical split divides.
-func (m SplitList[T]) focusPane(p splitPane) SplitList[T] {
+// focusPane switches the focused pane (a click's equivalent of ⇥) through the
+// same relayout path as the keyboard, so the width-keyed-cache contract lives
+// in one place.
+func (m SplitList[T]) focusPane(p splitPane) (SplitList[T], tea.Cmd) {
 	if m.active == p {
-		return m
+		return m, nil
 	}
 	m.active = p
-	m.resizeViewport()
-	return m
+	return m.relayout()
 }
 
 // selectRow selects the item at the given inner list row (0-based, borders
@@ -644,12 +641,8 @@ func (m SplitList[T]) focusPane(p splitPane) SplitList[T] {
 // (innerH is the clicked layout's inner strip height). Clicks on the border or
 // past the last item keep the current selection.
 func (m SplitList[T]) selectRow(row, innerH int) (SplitList[T], tea.Cmd) {
-	if row < 0 || row >= innerH || len(m.filtered) == 0 {
-		return m, nil
-	}
-	offset, _ := ListWindow(m.selected, len(m.filtered), maxInt(1, innerH))
-	idx := offset + row
-	if idx >= len(m.filtered) || idx == m.selected {
+	idx, ok := ClickedRow(row, innerH, m.selected, len(m.filtered))
+	if !ok {
 		return m, nil
 	}
 	m.selected = idx

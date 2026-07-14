@@ -435,7 +435,9 @@ func (m Model) reloadFiles() tea.Cmd {
 
 // handleMouse routes mouse input by pane: the wheel scrolls the hunk view or
 // steps the file selection, a click selects the file row under the pointer and
-// focuses the pane it hit. The row is resolved against the layout the user
+// focuses the pane it hit. Clicks on an already-focused pane that change
+// nothing are no-ops — re-running the layout would snap the diff scroll back
+// to the selected hunk. The row is resolved against the layout the user
 // clicked on, before any focus change re-widens the panes.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.showHelp || !m.ready {
@@ -449,19 +451,18 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
-		delta := tui.WheelDelta(msg)
-		if delta == 0 {
+		if inFiles {
+			if delta := tui.WheelDelta(msg); delta != 0 {
+				return m.moveSelection(delta)
+			}
 			return m, nil
 		}
-		if inFiles {
-			return m.moveSelection(delta)
-		}
 		if inDiff {
-			if delta < 0 {
-				m.viewport.ScrollUp(tui.WheelLines)
-			} else {
-				m.viewport.ScrollDown(tui.WheelLines)
-			}
+			// The viewport handles wheel messages natively (vertical and
+			// horizontal), same as the keyboard scrolling fallthrough.
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
 		}
 		return m, nil
 	case tea.MouseClickMsg:
@@ -470,22 +471,25 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		switch {
 		case inFiles:
-			row := pos.Y - tui.HeaderRows - 1
-			innerH := l.ContentHeight - 2
-			focus := m
-			focus.activePane = filePane
-			if row < 0 || row >= innerH || len(m.filteredFiles) == 0 {
-				return focus.applyLayout()
+			target, ok := tui.ClickedRow(pos.Y-tui.HeaderRows-1, l.ContentHeight-2, m.selectedIdx, len(m.filteredFiles))
+			if m.activePane != filePane {
+				m.activePane = filePane
+				if ok {
+					// Apply the selection before the layout's own diff request,
+					// so the pane flip and the new file cost one load, not two.
+					m.selectedIdx = target
+					m.hunkIdx = 0
+				}
+				return m.applyLayout()
 			}
-			offset, _ := tui.ListWindow(m.selectedIdx, len(m.filteredFiles), max(1, innerH))
-			if idx := offset + row; idx < len(m.filteredFiles) && idx != m.selectedIdx {
-				next, cmd := focus.selectTo(idx)
-				focus = next.(Model)
-				lm, lcmd := focus.applyLayout()
-				return lm, tea.Batch(cmd, lcmd)
+			if ok {
+				return m.selectTo(target)
 			}
-			return focus.applyLayout()
+			return m, nil
 		case inDiff:
+			if m.activePane == diffPane {
+				return m, nil
+			}
 			m.activePane = diffPane
 			return m.applyLayout()
 		}
@@ -563,6 +567,9 @@ func (m Model) selectTo(idx int) (tea.Model, tea.Cmd) {
 	}
 	if idx >= len(m.filteredFiles) {
 		idx = len(m.filteredFiles) - 1
+	}
+	if idx == m.selectedIdx {
+		return m, nil // already there (or clamped back to the boundary); nothing to reload
 	}
 	m.selectedIdx = idx
 	m.hunkIdx = 0 // reset hunk selection on file change
@@ -770,15 +777,13 @@ func (m *Model) renderHunks() {
 
 func (m Model) View() tea.View {
 	if !m.ready {
-		return tea.NewView("Loading...")
+		return tui.ScreenView("Loading...")
 	}
 
 	l := m.layout()
 
 	if m.showHelp {
-		v := tea.NewView(tui.HelpView("stage", tui.HeaderContext(m.branch, m.engines.Name()), m.hints, stageNavKeys, m.width, l.ContentHeight))
-		v.AltScreen = true
-		return v
+		return tui.ScreenView(tui.HelpView("stage", tui.HeaderContext(m.branch, m.engines.Name()), m.hints, stageNavKeys, m.width, l.ContentHeight))
 	}
 
 	collapsed := m.activePane == diffPane
@@ -840,9 +845,7 @@ func (m Model) View() tea.View {
 		footer = tui.Footer(m.width, status, m.hints)
 	}
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))
-	v.AltScreen = true
-	return v
+	return tui.ScreenView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))
 }
 
 func findFileIndex(files []git.StatusFile, path string) int {

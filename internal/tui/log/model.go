@@ -145,6 +145,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok && m.drilling {
 		return m.updateDrilled(key)
 	}
+	// Mouse input belongs to whichever view is visible: while drilled, routing
+	// it to the hidden commit list would silently move its selection (and a
+	// later esc/cherry-pick/revert would act on the drifted commit).
+	if mm, ok := msg.(tea.MouseMsg); ok && m.drilling {
+		return m.updateDrilled(mm)
+	}
 	// The drilled tests view can open an editor (`o`); its close message must reach
 	// that view (to re-read the edited file), not the hidden commit list below.
 	if _, ok := msg.(tui.EditorClosedMsg); ok && m.drilling {
