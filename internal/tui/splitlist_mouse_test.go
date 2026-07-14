@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func testList(items []string) SplitList[string] {
 	cfg := SplitConfig[string]{
@@ -61,5 +64,21 @@ func TestFocusPaneRelayouts(t *testing.T) {
 	}
 	if same, _ := m.focusPane(splitPreviewPane); same.active != splitPreviewPane {
 		t.Error("re-focusing the same pane should be a no-op")
+	}
+}
+
+func TestHighlightRows(t *testing.T) {
+	body := "one\n\x1b[31mtwo\x1b[0m tail\nthree"
+	got := highlightRows(body, 10, 11, 11) // only the middle visible row (line 11)
+	lines := strings.Split(got, "\n")
+	if strings.Contains(lines[0], "\x1b[7m") || strings.Contains(lines[2], "\x1b[7m") {
+		t.Errorf("unselected rows must not be highlighted: %q", got)
+	}
+	if !strings.HasPrefix(lines[1], "\x1b[7m") {
+		t.Errorf("selected row missing reverse video: %q", lines[1])
+	}
+	// The reset inside the styled segment must re-assert reverse video.
+	if !strings.Contains(lines[1], "\x1b[0m\x1b[7m") {
+		t.Errorf("reset inside selected row not re-asserted: %q", lines[1])
 	}
 }

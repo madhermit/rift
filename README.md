@@ -169,7 +169,7 @@ The `menu` launchpad is a plain list: `⏎` selects, `/` filters, and `esc`/`q` 
 
 **Mouse**
 
-The mouse works everywhere the keyboard does: the wheel scrolls the pane under the pointer (over a list it moves the selection), a click selects the row it lands on and focuses the pane it hit, and in the `menu` a click on the selected entry launches it. Set `RIFT_MOUSE=off` if you'd rather keep the terminal's native text selection — and note most terminals bypass mouse tracking with shift-click/drag, so copying out of a diff still works either way.
+The mouse works everywhere the keyboard does: the wheel scrolls the pane under the pointer (over a list it moves the selection), a click selects the row it lands on and focuses the pane it hit, and in the `menu` a click on the selected entry launches it. Drag across a diff preview to select lines — they highlight as you drag, and releasing copies them to the clipboard (ANSI-stripped, no borders or gutters; OSC 52 fallback over SSH). Set `RIFT_MOUSE=off` if you'd rather keep the terminal's native text selection — and note most terminals bypass mouse tracking with shift-click/drag either way.
 
 ### Environment
 

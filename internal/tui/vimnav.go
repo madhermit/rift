@@ -17,6 +17,10 @@ type VimNav struct {
 	lines    []string  // finalized display lines (banners stripped), the render source
 }
 
+// Lines returns the finalized display lines — exactly what the viewport
+// renders, banner-stripped. The mouse selection reads them to copy content.
+func (v *VimNav) Lines() []string { return v.lines }
+
 // section is a file boundary in the preview: the displayed line where the file
 // begins, and its label (path) taken from the non-displayed "── path ──" banner.
 type section struct {

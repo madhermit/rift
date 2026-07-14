@@ -12,9 +12,11 @@ pre-1.0).
 - Mouse support on every screen: the wheel scrolls the pane under the pointer
   (lists scroll by moving the selection), a left click selects the row it
   lands on and focuses the pane it hit, and clicking the menu's selected
-  entry launches it. `RIFT_MOUSE=off` disables tracking for terminals where
-  you prefer native text selection (most terminals also bypass tracking with
-  shift-click/drag).
+  entry launches it. Dragging across a diff preview selects display lines —
+  highlighted as you drag — and releasing copies them to the clipboard,
+  ANSI-stripped and without borders or gutters (OSC 52 fallback over SSH).
+  `RIFT_MOUSE=off` disables tracking for terminals where you prefer native
+  text selection (most terminals also bypass tracking with shift-click/drag).
 
 ### Fixed
 

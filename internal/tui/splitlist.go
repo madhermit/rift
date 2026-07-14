@@ -115,6 +115,13 @@ type SplitList[T any] struct {
 	cache map[string]string // rendered previews, keyed by cfg.CacheKey
 	reqID int               // increments per preview request; stale results are dropped
 
+	// Mouse drag selection over the preview, in display-line indices. anchor is
+	// -1 when no selection is in progress; dragging turns true on the first
+	// motion event, so a plain click never highlights or copies.
+	selAnchor int
+	selEnd    int
+	dragging  bool
+
 	width, height int
 	ready         bool
 }
@@ -122,13 +129,14 @@ type SplitList[T any] struct {
 // NewSplitList builds a SplitList for the given items.
 func NewSplitList[T any](cfg SplitConfig[T], items []T) SplitList[T] {
 	return SplitList[T]{
-		cfg:      cfg,
-		items:    items,
-		filtered: items,
-		viewport: viewport.New(),
-		filter:   NewFilterInput(),
-		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		cache:    map[string]string{},
+		cfg:       cfg,
+		items:     items,
+		filtered:  items,
+		viewport:  viewport.New(),
+		filter:    NewFilterInput(),
+		spinner:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		cache:     map[string]string{},
+		selAnchor: -1,
 	}
 }
 
@@ -155,6 +163,7 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	m.prevErr = nil    // a new selection clears any previous load error
 	m.flash = ""       // and any transient message (e.g. "copied …")
 	m.anchored = false // a new selection re-anchors its preview
+	m.clearDrag()      // and any in-progress mouse selection
 	reqID := m.reqID
 	// Every selection change signals the parent so it cancels the previous item's
 	// stream; CacheHit tells it the content is already shown, so start no new load.
@@ -608,6 +617,7 @@ func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
 		}
 		switch {
 		case inList:
+			m.clearDrag()
 			// Resolve the clicked row against the layout the user clicked on,
 			// then focus — focusing can expand a one-row peek into the full
 			// strip, which would re-window the rows under the pointer.
@@ -615,10 +625,77 @@ func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
 			focused, fcmd := sel.focusPane(splitListPane)
 			return focused, tea.Batch(cmd, fcmd)
 		case inPreview:
+			// Anchor a possible drag selection at the pressed display line. Focus
+			// waits for the release: focusing can collapse the strip and shift
+			// the content under the pointer mid-drag.
+			m.selAnchor = m.previewLineAt(pos.Y, previewTop)
+			m.selEnd = m.selAnchor
+			return m, nil
+		}
+	case tea.MouseMotionMsg:
+		// Cell-motion tracking only reports motion while a button is held, so
+		// this is a drag: extend the selection to the line under the pointer.
+		if m.selAnchor >= 0 && msg.Button == tea.MouseLeft && inPreview {
+			m.dragging = true
+			m.selEnd = m.previewLineAt(pos.Y, previewTop)
+		}
+		return m, nil
+	case tea.MouseReleaseMsg:
+		if m.selAnchor < 0 {
+			return m, nil
+		}
+		if !m.dragging {
+			// A clean click (press + release, no motion): focus the preview.
+			m.clearDrag()
 			return m.focusPane(splitPreviewPane)
 		}
+		a, b := m.selAnchor, m.selEnd
+		m.clearDrag()
+		return m.copySelection(a, b)
 	}
 	return m, nil
+}
+
+// clearDrag abandons any in-progress mouse selection.
+func (m *SplitList[T]) clearDrag() {
+	m.selAnchor, m.selEnd, m.dragging = -1, -1, false
+}
+
+// previewLineAt maps a screen row inside the preview pane to its display-line
+// index (accounting for the panel's top border and the scroll offset), clamped
+// to the content; -1 when there is nothing to select.
+func (m SplitList[T]) previewLineAt(y, previewTop int) int {
+	lines := m.vim.Lines()
+	if len(lines) == 0 {
+		return -1
+	}
+	return clampIndex(m.viewport.YOffset()+y-previewTop-1, len(lines))
+}
+
+// copySelection copies the drag-selected display lines to the clipboard,
+// ANSI-stripped and right-trimmed — the mouse counterpart of `y`, for lifting
+// code out of a diff without the borders and gutters a terminal-native
+// selection would grab.
+func (m SplitList[T]) copySelection(a, b int) (SplitList[T], tea.Cmd) {
+	lines := m.vim.Lines()
+	if len(lines) == 0 || a < 0 || b < 0 {
+		return m, nil
+	}
+	if a > b {
+		a, b = b, a
+	}
+	a, b = clampIndex(a, len(lines)), clampIndex(b, len(lines))
+	stripped := make([]string, 0, b-a+1)
+	for _, l := range lines[a : b+1] {
+		stripped = append(stripped, strings.TrimRight(ansi.Strip(l), " "))
+	}
+	var cmd tea.Cmd
+	_, cmd = YankToClipboard(strings.Join(stripped, "\n"))
+	m.flash = fmt.Sprintf("copied %d lines", b-a+1)
+	if b == a {
+		m.flash = "copied 1 line"
+	}
+	return m, cmd
 }
 
 // focusPane switches the focused pane (a click's equivalent of ⇥) through the
@@ -943,7 +1020,29 @@ func (m SplitList[T]) previewHeader() string {
 // previewBodyView is the viewport content plus its scrollbar. The current file
 // is shown in the legend, not the body — see currentSection / content.
 func (m SplitList[T]) previewBodyView() (string, Scrollbar) {
-	return m.viewport.View(), ScrollbarFor(&m.viewport)
+	body := m.viewport.View()
+	if m.selAnchor >= 0 && m.dragging {
+		body = highlightRows(body, m.viewport.YOffset(), m.selAnchor, m.selEnd)
+	}
+	return body, ScrollbarFor(&m.viewport)
+}
+
+// highlightRows renders the drag selection: visible rows whose display-line
+// index falls in [a, b] get reverse video, re-asserted after any SGR reset
+// inside the line so styled diff content stays highlighted end to end.
+func highlightRows(body string, yOffset, a, b int) string {
+	if a > b {
+		a, b = b, a
+	}
+	lines := strings.Split(body, "\n")
+	for i := range lines {
+		if line := yOffset + i; line >= a && line <= b {
+			l := strings.ReplaceAll(lines[i], "\x1b[0m", "\x1b[0m\x1b[7m")
+			l = strings.ReplaceAll(l, "\x1b[m", "\x1b[m\x1b[7m")
+			lines[i] = "\x1b[7m" + l + "\x1b[27m"
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // footerView renders the bottom bar: a parent-set prompt (e.g. an inline y/n
