@@ -9,6 +9,15 @@ pre-1.0).
 
 ### Added
 
+### Changed
+
+- `r` (mark reviewed) now advances to the next unreviewed file — wrapping
+  past the end, flashing "all changes reviewed" when none remain — so a
+  review pass is `r` `r` `r` instead of `r` `j` `r` `j`. Un-marking stays
+  put. The `U` filter's footer hint now reads "hide reviewed" and the
+  active-filter title "unreviewed only", since "unreviewed" alone read
+  ambiguously as an action.
+
 ### Fixed
 
 - `rift diff --watch` live-reloads the browser as the working tree changes —

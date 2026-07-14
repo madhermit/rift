@@ -136,7 +136,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if !commitDiff {
 		// In a commit diff the files are historical: editing the working-tree copy
 		// (`o`) or reviewing it would be misleading, so those are working-tree only.
-		hints = append(hints, [2]string{"o", "open"}, [2]string{"r", "review"}, [2]string{"U", "unreviewed"})
+		hints = append(hints, [2]string{"o", "open"}, [2]string{"r", "review"}, [2]string{"U", "hide reviewed"})
 	}
 	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
@@ -247,7 +247,7 @@ func (m Model) listTitle() string {
 		title += fmt.Sprintf(" · %d/%d reviewed", n, total)
 	}
 	if m.unreviewedOnly {
-		title += " · unreviewed"
+		title += " · unreviewed only"
 	}
 	return title
 }
@@ -328,21 +328,57 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// toggleReviewed flips the selected file's reviewed mark. In the unreviewed-only
-// view the file then drops out of the list, advancing to the next one.
+// toggleReviewed flips the selected file's reviewed mark. Marking a file
+// advances to the next unreviewed one (wrapping around), so a review pass is
+// r-r-r rather than r-j-r-j; un-marking stays put — going back to a file to
+// unmark it is deliberate. In the unreviewed-only view the file instead drops
+// out of the list, which advances by itself.
 func (m Model) toggleReviewed() (tea.Model, tea.Cmd) {
 	sel, ok := m.list.Selected()
 	if m.marks == nil || !ok || sel.Path == "" {
 		return m, nil
 	}
-	m.marks.state.Toggle(sel.Path, m.marks.hashes[sel.Path])
+	marked := m.marks.state.Toggle(sel.Path, m.marks.hashes[sel.Path])
 	m.list = m.list.SetListTitle(m.listTitle())
 	if m.unreviewedOnly {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.SetItems(m.displayFiles())
 		return m, cmd
 	}
-	return m, nil
+	if !marked {
+		return m, nil
+	}
+	next, ok := nextUnreviewed(m.list.VisibleItems(), sel.Path, m.marks.reviewed)
+	if !ok {
+		m.list = m.list.SetFlash("all changes reviewed")
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.list, cmd = m.list.SelectKey(next)
+	return m, cmd
+}
+
+// nextUnreviewed returns the path of the first file after cur (wrapping) that
+// isn't reviewed, skipping the synthetic All row; ok=false when every file is
+// reviewed.
+func nextUnreviewed(items []git.ChangedFile, cur string, reviewed func(string) bool) (string, bool) {
+	start := 0
+	for i, f := range items {
+		if f.Path == cur {
+			start = i
+			break
+		}
+	}
+	for off := 1; off <= len(items); off++ {
+		f := items[(start+off)%len(items)]
+		if f.Path == "" || f.Path == cur {
+			continue
+		}
+		if !reviewed(f.Path) {
+			return f.Path, true
+		}
+	}
+	return "", false
 }
 
 // toggleUnreviewedOnly switches between showing all changed files and only the

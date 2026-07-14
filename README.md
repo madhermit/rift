@@ -81,7 +81,7 @@ Add `--tests` to `rift diff` or `rift log` to read a change by the _tests_ it to
 
 ### Review tracking
 
-In `rift diff`, press `r` to mark the selected file **reviewed** (a `✓` replaces its status glyph) and `U` to show only the files you haven't reviewed yet — so you can walk a large change file by file and watch the list shrink as you tick each one off. A mark is keyed to the file's content, so it **resets the moment the file changes** (e.g. an agent edits it again) and re-applies on revert, making it easy to re-review only what's new. Marks persist per worktree (in `.git/rift/`, uncommitted); `--unreviewed` narrows `--print` / `--json` / `--name-only` to the not-yet-reviewed files.
+In `rift diff`, press `r` to mark the selected file **reviewed** (a `✓` replaces its status glyph) — the selection then jumps to the next unreviewed file, so a full pass is just `r` `r` `r`; pressing `r` on a reviewed file unmarks it (and stays put). `U` narrows the list to only the files you haven't reviewed yet, and shows it as `unreviewed only` in the title. A mark is keyed to the file's content, so it **resets the moment the file changes** (e.g. an agent edits it again) and re-applies on revert, making it easy to re-review only what's new. Marks persist per worktree (in `.git/rift/`, uncommitted); `--unreviewed` narrows `--print` / `--json` / `--name-only` to the not-yet-reviewed files.
 
 ![rift diff — marking changes reviewed and filtering to what's left](docs/images/reviewed.gif)
 
@@ -159,7 +159,7 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 
 | Screen     | Keys                                                                                                                                                        |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `diff`     | `s` toggle staged · `w` toggle watch · `t` tests lens · `\` diff layout · `e` engine · `o` open in `$EDITOR` · `r` mark reviewed · `U` show only unreviewed |
+| `diff`     | `s` toggle staged · `w` toggle watch · `t` tests lens · `\` diff layout · `e` engine · `o` open in `$EDITOR` · `r` mark reviewed (advances to the next unreviewed) · `U` hide reviewed |
 | `log`      | `⏎` drill into the commit's files (or tests) · `\` layout · `e` engine · `c` cherry-pick · `r` revert                                                       |
 | `stash`    | `a` apply · `p` pop · `x` drop · `\` layout · `e` engine                                                                                                    |
 | `stage`    | `s` stage · `u` unstage · `a` stage all · `o` open in `$EDITOR` · `e` engine (fixed layout, no `\`)                                                         |

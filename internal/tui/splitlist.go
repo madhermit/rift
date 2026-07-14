@@ -382,6 +382,26 @@ func (m SplitList[T]) WithBreadcrumb(screen string) SplitList[T] {
 // gate list-pane-only actions on it (e.g. stash apply/pop/drop).
 func (m SplitList[T]) Reading() bool { return m.active == splitPreviewPane }
 
+// SelectKey moves the selection to the item whose Match value equals key and
+// loads its preview — a no-op when the key isn't in the filtered set or is
+// already selected. Parents use it for programmatic advances (e.g. jumping to
+// the next unreviewed file after a mark).
+func (m SplitList[T]) SelectKey(key string) (SplitList[T], tea.Cmd) {
+	if key == "" || m.cfg.Match == nil {
+		return m, nil
+	}
+	for i, it := range m.filtered {
+		if m.cfg.Match(it) == key {
+			if i == m.selected {
+				return m, nil
+			}
+			m.selected = i
+			return m.requestPreview()
+		}
+	}
+	return m, nil
+}
+
 // SelectedKey returns the Match value of the current selection, or "" when the
 // list is empty. Parents capture it before a reload to restore the selection.
 func (m SplitList[T]) SelectedKey() string {
