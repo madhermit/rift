@@ -101,9 +101,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
-		if delta := tui.WheelDelta(msg); delta != 0 {
-			m.moveSelection(delta)
-		}
+		m.moveSelection(tui.WheelDelta(msg)) // horizontal wheel maps to 0: a no-op
 		return m, nil
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {
@@ -114,8 +112,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// is both real and visible (a border/footer click on a short terminal
 		// must not select, let alone launch, a clipped-away entry).
 		idx := msg.Y - tui.HeaderRows - 1
-		visible := m.height - tui.HeaderRows - tui.FooterRows - 2
-		if idx < 0 || idx >= len(m.filtered) || idx >= visible {
+		if idx < 0 || idx >= len(m.filtered) || idx >= m.contentHeight()-2 {
 			return m, nil
 		}
 		if idx == m.selectedIdx {
@@ -125,6 +122,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// contentHeight is the vertical space between header and footer — the panel's
+// outer height. The render and the click hit-test both derive from it, so the
+// two can't desync.
+func (m Model) contentHeight() int {
+	return m.height - tui.HeaderRows - tui.FooterRows
 }
 
 // activate launches the command at idx — the single path shared by the enter
@@ -235,11 +239,11 @@ func (m *Model) moveSelection(delta int) {
 
 func (m Model) View() tea.View {
 	if !m.ready {
-		return tea.NewView("Loading...")
+		return tui.ScreenView("Loading...")
 	}
 
 	if m.showHelp {
-		contentH := m.height - tui.HeaderRows - tui.FooterRows
+		contentH := m.contentHeight()
 		return tui.ScreenView(tui.HelpView("", "a composable fuzzy git tool", menuHints, menuNavKeys, m.width, contentH))
 	}
 
@@ -255,7 +259,7 @@ func (m Model) View() tea.View {
 		items.WriteString(row + "\n")
 	}
 
-	contentH := m.height - tui.HeaderRows - tui.FooterRows
+	contentH := m.contentHeight()
 	panel := tui.Panel("commands", "", items.String(), m.width, contentH, true, tui.Scrollbar{})
 
 	header := tui.Header("", "a composable fuzzy git tool", m.width)

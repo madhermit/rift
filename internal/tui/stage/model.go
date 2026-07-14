@@ -50,8 +50,9 @@ type Model struct {
 	// hunkCache memoizes rendered hunk sets by path+width so navigation and filter
 	// keystrokes don't re-run the whole difftastic pipeline. Invalidated per path on
 	// stage/unstage and editor close, and wholesale on a width change.
-	hunkCache map[string][]displayHunk
-	diffReqID int // increments per diff load; stale hunkDiffsMsg results are dropped
+	hunkCache  map[string][]displayHunk
+	diffReqID  int                // increments per diff load; stale hunkDiffsMsg results are dropped
+	cancelDiff context.CancelFunc // stops the superseded in-flight diff load's subprocesses
 
 	viewport  viewport.Model
 	filter    textinput.Model
@@ -241,9 +242,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.activePane == filePane {
 		window := m.layout().ContentHeight - 2
 		if next, ok := m.vim.HandleListKey(msg, m.selectedIdx, len(m.filteredFiles), window); ok {
-			if next == m.selectedIdx {
-				return m, nil // consumed with no move (e.g. a pending 'g')
-			}
+			// selectTo no-ops when next == selectedIdx (e.g. a pending 'g').
 			return m.selectTo(next)
 		}
 	}
@@ -264,15 +263,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "tab":
 		if m.activePane == filePane {
-			m.activePane = diffPane
-		} else {
-			m.activePane = filePane
+			return m.focusPane(diffPane)
 		}
-		return m.applyLayout()
+		return m.focusPane(filePane)
 	case "enter":
 		if m.activePane == filePane {
-			m.activePane = diffPane
-			return m.applyLayout()
+			return m.focusPane(diffPane)
 		}
 	case "up", "k":
 		return m.navigate(-1)
@@ -452,10 +448,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
 		if inFiles {
-			if delta := tui.WheelDelta(msg); delta != 0 {
-				return m.moveSelection(delta)
-			}
-			return m, nil
+			// A horizontal wheel maps to delta 0, which selectTo no-ops.
+			return m.moveSelection(tui.WheelDelta(msg))
 		}
 		if inDiff {
 			// The viewport handles wheel messages natively (vertical and
@@ -473,28 +467,34 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case inFiles:
 			target, ok := tui.ClickedRow(pos.Y-tui.HeaderRows-1, l.ContentHeight-2, m.selectedIdx, len(m.filteredFiles))
 			if m.activePane != filePane {
-				m.activePane = filePane
 				if ok {
 					// Apply the selection before the layout's own diff request,
 					// so the pane flip and the new file cost one load, not two.
 					m.selectedIdx = target
 					m.hunkIdx = 0
 				}
-				return m.applyLayout()
+				return m.focusPane(filePane)
 			}
 			if ok {
 				return m.selectTo(target)
 			}
 			return m, nil
 		case inDiff:
-			if m.activePane == diffPane {
-				return m, nil
-			}
-			m.activePane = diffPane
-			return m.applyLayout()
+			return m.focusPane(diffPane)
 		}
 	}
 	return m, nil
+}
+
+// focusPane switches the focused pane and re-lays-out (the split widths depend
+// on focus); a click or key targeting the already-active pane is a no-op, so
+// it can't snap the diff scroll back to the selected hunk.
+func (m Model) focusPane(p pane) (tea.Model, tea.Cmd) {
+	if m.activePane == p {
+		return m, nil
+	}
+	m.activePane = p
+	return m.applyLayout()
 }
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
@@ -600,6 +600,13 @@ func (m *Model) invalidatePath(path string) {
 func (m *Model) requestDiff() tea.Cmd {
 	m.diffReqID++
 	m.flash = "" // a new selection / reload clears any transient message
+	if m.cancelDiff != nil {
+		// A newer selection or layout supersedes the in-flight load: kill its
+		// subprocesses instead of letting them run to a discarded result (a
+		// wheel flick would otherwise pile up concurrent difftastic runs).
+		m.cancelDiff()
+		m.cancelDiff = nil
+	}
 	if len(m.filteredFiles) == 0 {
 		m.setHunks(nil)
 		return nil
@@ -609,7 +616,9 @@ func (m *Model) requestDiff() tea.Cmd {
 		m.setHunks(hunks)
 		return nil
 	}
-	return m.loadSelectedDiff(m.diffReqID)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelDiff = cancel
+	return m.loadSelectedDiff(ctx, m.diffReqID)
 }
 
 // setHunks installs a rendered hunk set and positions the viewport on the
@@ -628,7 +637,7 @@ func (m *Model) setHunks(hunks []displayHunk) {
 	}
 }
 
-func (m Model) loadSelectedDiff(reqID int) tea.Cmd {
+func (m Model) loadSelectedDiff(ctx context.Context, reqID int) tea.Cmd {
 	if len(m.filteredFiles) == 0 {
 		return nil
 	}
@@ -645,23 +654,27 @@ func (m Model) loadSelectedDiff(reqID int) tea.Cmd {
 			raw, err := diff.RawNewFileDiff(repoRoot, f.Path)
 			if err == nil && raw != "" {
 				result = append(result, buildDisplayHunks(
-					engine, raw, f.Path, repoRoot, false, color, width-2,
+					ctx, engine, raw, f.Path, repoRoot, false, color, width-2,
 				)...)
 			}
 		} else {
 			raw, err := diff.RawUnifiedDiff(repoRoot, false, f.Path)
 			if err == nil && raw != "" {
 				result = append(result, buildDisplayHunks(
-					engine, raw, f.Path, repoRoot, false, color, width-2,
+					ctx, engine, raw, f.Path, repoRoot, false, color, width-2,
 				)...)
 			}
 
 			raw, err = diff.RawUnifiedDiff(repoRoot, true, f.Path)
 			if err == nil && raw != "" {
 				result = append(result, buildDisplayHunks(
-					engine, raw, f.Path, repoRoot, true, color, width-2,
+					ctx, engine, raw, f.Path, repoRoot, true, color, width-2,
 				)...)
 			}
+		}
+
+		if ctx.Err() != nil {
+			return nil // superseded mid-load; the result would be dropped anyway
 		}
 
 		// Order by new-side position so staged and unstaged hunks interleave in file
@@ -674,7 +687,7 @@ func (m Model) loadSelectedDiff(reqID int) tea.Cmd {
 	}
 }
 
-func buildDisplayHunks(engine diff.Engine, raw, path, repoRoot string, staged, color bool, width int) []displayHunk {
+func buildDisplayHunks(ctx context.Context, engine diff.Engine, raw, path, repoRoot string, staged, color bool, width int) []displayHunk {
 	fileDiffs := diff.ParseUnifiedDiff(raw)
 	var allHunks []diff.Hunk
 	for _, fd := range fileDiffs {
@@ -684,7 +697,7 @@ func buildDisplayHunks(engine diff.Engine, raw, path, repoRoot string, staged, c
 		return nil
 	}
 	base, _ := diff.BaseContent(repoRoot, staged, path)
-	rendered := engine.DiffHunks(context.Background(), allHunks, path, base, color, width)
+	rendered := engine.DiffHunks(ctx, allHunks, path, base, color, width)
 
 	var result []displayHunk
 	flatIdx := 0

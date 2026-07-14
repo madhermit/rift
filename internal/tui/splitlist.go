@@ -485,12 +485,10 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 
 	switch msg.String() {
 	case "tab":
-		m.active = 1 - m.active
-		return m.relayout()
+		return m.focusPane(1 - m.active)
 	case "enter":
 		if m.active == splitListPane {
-			m.active = splitPreviewPane
-			return m.relayout()
+			return m.focusPane(splitPreviewPane)
 		}
 	case "up", "k":
 		return m.navigate(-1)
@@ -587,16 +585,14 @@ func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
 	pos := msg.Mouse()
 	previewH, navH := m.stackLayout()
 	listTop, previewTop := HeaderRows, HeaderRows+navH
-	inList := navH > 0 && pos.Y >= listTop && pos.Y < previewTop
+	inList := pos.Y >= listTop && pos.Y < previewTop // empty range when there is no strip
 	inPreview := pos.Y >= previewTop && pos.Y < previewTop+previewH
 
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
 		if inList {
-			if delta := WheelDelta(msg); delta != 0 {
-				return m.stepList(delta)
-			}
-			return m, nil
+			// A horizontal wheel maps to delta 0, which stepList no-ops.
+			return m.stepList(WheelDelta(msg))
 		}
 		if inPreview {
 			// The viewport handles wheel messages natively (vertical and
