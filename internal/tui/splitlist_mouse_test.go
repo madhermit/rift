@@ -54,16 +54,30 @@ func TestSelectRow(t *testing.T) {
 func TestFocusPaneRelayouts(t *testing.T) {
 	m := testList([]string{"a", "b", "c"})
 	_, surveyNav := m.stackLayout()
+
+	// A mouse click focuses the preview without entering the peek layout —
+	// re-layouting the screen under the pointer is jarring.
 	m, _ = m.focusPane(splitPreviewPane)
 	if m.active != splitPreviewPane {
 		t.Fatal("focusPane did not switch panes")
 	}
-	_, readNav := m.stackLayout()
-	if readNav >= surveyNav {
-		t.Errorf("reading layout should collapse the strip: %d -> %d", surveyNav, readNav)
+	if _, nav := m.stackLayout(); nav != surveyNav {
+		t.Errorf("click focus must not collapse the strip: %d -> %d", surveyNav, nav)
 	}
-	if same, _ := m.focusPane(splitPreviewPane); same.active != splitPreviewPane {
-		t.Error("re-focusing the same pane should be a no-op")
+
+	// The keyboard gesture (⇥/⏎) sets peek before focusing: that collapses.
+	m.peek = true
+	if _, nav := m.stackLayout(); nav >= surveyNav {
+		t.Errorf("peek layout should collapse the strip: %d -> %d", surveyNav, nav)
+	}
+
+	// Focusing the list (click on the peek row) leaves the peek layout.
+	m, _ = m.focusPane(splitListPane)
+	if m.peek {
+		t.Error("focusing the list should clear the peek layout")
+	}
+	if _, nav := m.stackLayout(); nav != surveyNav {
+		t.Errorf("strip should expand when the list takes focus: got %d, want %d", surveyNav, nav)
 	}
 }
 

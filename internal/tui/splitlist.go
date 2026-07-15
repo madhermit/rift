@@ -107,6 +107,7 @@ type SplitList[T any] struct {
 	anchored bool // the preview has been scrolled to the selection's PreviewLine
 
 	spinner  spinner.Model
+	peek     bool   // reading layout: the strip collapsed to a one-row peek (⇥/⏎)
 	loading  bool   // a preview is being loaded for the current selection
 	showHelp bool   // the keybinding overlay is open
 	flash    string // transient footer message (e.g. "copied …"), cleared on nav
@@ -494,9 +495,12 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 
 	switch msg.String() {
 	case "tab":
-		return m.focusPane(1 - m.active)
+		target := 1 - m.active
+		m.peek = target == splitPreviewPane
+		return m.focusPane(target)
 	case "enter":
 		if m.active == splitListPane {
+			m.peek = true
 			return m.focusPane(splitPreviewPane)
 		}
 	case "up", "k":
@@ -698,11 +702,17 @@ func (m SplitList[T]) copySelection(a, b int) (SplitList[T], tea.Cmd) {
 	return m, cmd
 }
 
-// focusPane switches the focused pane (a click's equivalent of ⇥) through the
-// same relayout path as the keyboard, so the width-keyed-cache contract lives
-// in one place.
+// focusPane switches the focused pane through the same relayout path as the
+// keyboard, so the width-keyed-cache contract lives in one place. Focusing the
+// list always leaves the peek layout (clicking the peek row expands the strip);
+// focusing the preview never enters it — the collapse stays a keyboard gesture
+// (callers set peek for ⇥/⏎).
 func (m SplitList[T]) focusPane(p splitPane) (SplitList[T], tea.Cmd) {
-	if m.active == p {
+	wasPeek := m.peek
+	if p == splitListPane {
+		m.peek = false
+	}
+	if m.active == p && m.peek == wasPeek {
 		return m, nil
 	}
 	m.active = p
@@ -760,9 +770,11 @@ func (m SplitList[T]) stackLayout() (previewH, navH int) {
 	if contentH < 2*panelMin {
 		return contentH, 0
 	}
-	// Reading: the strip shrinks to a one-row peek of the current item, the
-	// focused preview takes the rest.
-	if m.active == splitPreviewPane {
+	// Reading (entered with ⇥/⏎): the strip shrinks to a one-row peek of the
+	// current item, the focused preview takes the rest. A mouse click focuses
+	// without collapsing — re-layouting the screen under the pointer is
+	// jarring — so this keys off peek, not focus.
+	if m.peek {
 		return contentH - panelMin, panelMin
 	}
 	capPct := m.cfg.NavFraction
