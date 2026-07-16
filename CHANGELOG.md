@@ -7,6 +7,8 @@ pre-1.0).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-16
+
 ### Added
 
 - Mouse support on every screen: the wheel scrolls the pane under the pointer
@@ -54,7 +56,6 @@ pre-1.0).
   The tests lens reads a renamed file's old side from its old path, so its
   specs no longer all report as newly added. Working-tree and staged listings
   keep git-status semantics (the stage screen operates on real index paths).
-
 - In a base-ref diff (`rift diff main`), returning from the editor (`o`) no
   longer replaces the file list with the plain worktree-vs-index set — the
   reload now honors the base ref.
@@ -333,7 +334,8 @@ tightened around what it does best.
 
 - The `branch` command. rift no longer manages branches or worktrees.
 
-[Unreleased]: https://github.com/madhermit/rift/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/madhermit/rift/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/madhermit/rift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/madhermit/rift/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/madhermit/rift/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/madhermit/rift/compare/v0.4.1...v0.4.2
