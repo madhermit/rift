@@ -93,6 +93,67 @@ func TestChangedFiles_Staged(t *testing.T) {
 	}
 }
 
+// TestChangedFiles_StagedRename pins that a staged move is one Renamed record,
+// not a delete + an add — matching what `git status` reports. The stage screen
+// keeps the split view via StatusFiles; this is the diff listing's contract.
+func TestChangedFiles_StagedRename(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	wt, err := repo.repo.Worktree()
+	if err != nil {
+		t.Fatalf("get worktree: %v", err)
+	}
+
+	content := "package svc\n\nfunc Alpha() int { return 1 }\nfunc Beta() int { return 2 }\n"
+	writeFile(t, repo.root, "old/svc.go", content)
+	if _, err := wt.Add("old/svc.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	testCommit(t, wt, "add old/svc.go")
+
+	// Stage a pure move: identical content, so git pairs the paths at 100%.
+	writeFile(t, repo.root, "new/svc.go", content)
+	if _, err := wt.Remove("old/svc.go"); err != nil {
+		t.Fatalf("git rm: %v", err)
+	}
+	if _, err := wt.Add("new/svc.go"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+
+	files, err := repo.ChangedFiles(true)
+	if err != nil {
+		t.Fatalf("ChangedFiles(true) error = %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 rename record, got %d: %+v", len(files), files)
+	}
+	if got := files[0]; got != (ChangedFile{Path: "new/svc.go", OldPath: "old/svc.go", Status: "Renamed"}) {
+		t.Errorf("staged rename = %+v, want new/svc.go ← old/svc.go Renamed", got)
+	}
+}
+
+func TestCompactRenamePath(t *testing.T) {
+	tests := []struct {
+		name       string
+		oldP, newP string
+		want       string
+	}{
+		{"inserted dir segment", "web/app/pages/our-prenup/x.vue", "web/app/pages/prenup/our-prenup/x.vue", "web/app/pages/{ → prenup}/our-prenup/x.vue"},
+		{"changed middle dir", "a/b/one/x.go", "a/b/two/x.go", "a/b/{one → two}/x.go"},
+		{"same dir renamed file", "pkg/old.go", "pkg/new.go", "pkg/{old.go → new.go}"},
+		{"nothing in common", "a/b.go", "c/d.go", "{a/b.go → c/d.go}"},
+		{"top-level file rename", "old.go", "new.go", "{old.go → new.go}"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := ChangedFile{Path: tc.newP, OldPath: tc.oldP, Status: "Renamed"}
+			if got := f.DisplayPath(); got != tc.want {
+				t.Errorf("DisplayPath() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDiffBetweenCommits(t *testing.T) {
 	repo := setupTestRepo(t)
 

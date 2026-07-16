@@ -27,11 +27,43 @@ type ChangedFile struct {
 	Deleted int    `json:"deleted"`
 }
 
-// DisplayPath is the human-facing label for the file: its path, or
-// "old → new" for a rename.
+// DisplayPath is the human-facing label for the file: its path, or a compact
+// "old → new" for a rename (see compactRenamePath).
 func (f ChangedFile) DisplayPath() string {
 	if f.OldPath != "" {
-		return f.OldPath + " → " + f.Path
+		return compactRenamePath(f.OldPath, f.Path)
+	}
+	return f.Path
+}
+
+// compactRenamePath renders a rename the way git does: the common leading and
+// trailing path segments are factored out and only the differing middle is shown
+// as {old → new}, so "a/b/one/x.go" → "a/b/two/x.go" reads as "a/b/{one → two}/x.go"
+// rather than two long, near-identical paths. With nothing in common it degrades
+// to "{old → new}".
+func compactRenamePath(oldPath, newPath string) string {
+	o, n := strings.Split(oldPath, "/"), strings.Split(newPath, "/")
+	// Common leading segments, then common trailing segments (not overlapping
+	// what the prefix already claimed).
+	pre := 0
+	for pre < len(o) && pre < len(n) && o[pre] == n[pre] {
+		pre++
+	}
+	suf := 0
+	for suf < len(o)-pre && suf < len(n)-pre && o[len(o)-1-suf] == n[len(n)-1-suf] {
+		suf++
+	}
+	mid := "{" + strings.Join(o[pre:len(o)-suf], "/") + " → " + strings.Join(n[pre:len(n)-suf], "/") + "}"
+	segs := append(append(append([]string{}, o[:pre]...), mid), o[len(o)-suf:]...)
+	return strings.Join(segs, "/")
+}
+
+// OldSidePath is the path the file had on the old side of the diff: its
+// pre-image path when it was renamed, otherwise its current path. Callers read
+// the old-side blob (HEAD, the index, or a base ref) from it.
+func (f ChangedFile) OldSidePath() string {
+	if f.OldPath != "" {
+		return f.OldPath
 	}
 	return f.Path
 }
@@ -46,48 +78,49 @@ func Paths(files []ChangedFile) []string {
 }
 
 // ChangedFiles lists the working-tree files with a staged change (staged=true)
-// or an unstaged/untracked change (staged=false), derived from `git status`.
+// or an unstaged/untracked change (staged=false).
+//
+// The staged set is the index against HEAD, read with rename detection so a
+// staged move reads as a single old → new record instead of a delete + an add
+// (which `git status --no-renames` would report, and which the diff view then
+// showed as two unrelated files). The unstaged set stays status-derived: it must
+// include untracked files, which no `git diff` reports, and an unstaged rename
+// isn't detectable anyway (its new side is an untracked file). The stage screen
+// keeps the split, real-path view through StatusFiles — it operates on the
+// actual index paths, which a rename record would hide.
 func (r *Repo) ChangedFiles(staged bool) ([]ChangedFile, error) {
+	if staged {
+		return changedFilesWithStats(func(format string) (string, error) {
+			return r.runGit("diff", "--staged", format, "--find-renames", "-z")
+		})
+	}
+
 	sf, err := r.statusFiles()
 	if err != nil {
 		return nil, err
 	}
 	var files []ChangedFile
 	for _, f := range sf {
-		var code string
-		if staged {
-			// An untracked file has no staged change; everything else with an
-			// index status (M/A/D/R/C) counts as staged.
-			if f.StagingStatus == "" || f.StagingStatus == "Untracked" {
-				continue
-			}
-			code = f.StagingStatus
-		} else {
-			if f.WorktreeStatus == "" {
-				continue
-			}
-			code = f.WorktreeStatus
+		if f.WorktreeStatus == "" {
+			continue
 		}
-		files = append(files, ChangedFile{Path: f.Path, Status: code})
+		files = append(files, ChangedFile{Path: f.Path, Status: f.WorktreeStatus})
 	}
-	r.addStats(files, staged)
+	r.addStats(files)
 	return files, nil
 }
 
-// addStats fills in per-file added/deleted line counts from git diff --numstat.
-// Best-effort: stats are a display nicety, so failures leave counts at zero.
-// --no-renames matches statusFiles (a rename is a delete + an add on the real
-// paths) so both paths agree, and -z keeps non-ASCII paths verbatim instead of
-// C-quoted — otherwise the quoted key never matches a file's plain path.
-func (r *Repo) addStats(files []ChangedFile, staged bool) {
+// addStats fills in per-file added/deleted line counts for the unstaged worktree
+// listing from git diff --numstat. Best-effort: stats are a display nicety, so
+// failures leave counts at zero. --no-renames matches that listing (a rename
+// there is a delete + an add on the real paths), and -z keeps non-ASCII paths
+// verbatim instead of C-quoted — otherwise the quoted key never matches a file's
+// plain path. The staged listing draws its stats from changedFilesWithStats.
+func (r *Repo) addStats(files []ChangedFile) {
 	if len(files) == 0 {
 		return // nothing to annotate; skip the git subprocess
 	}
-	args := []string{"diff", "--numstat", "--no-renames", "-z"}
-	if staged {
-		args = append(args, "--staged")
-	}
-	out, err := r.runGit(args...)
+	out, err := r.runGit("diff", "--numstat", "--no-renames", "-z")
 	if err != nil {
 		return
 	}

@@ -20,6 +20,14 @@ pre-1.0).
 
 ### Fixed
 
+- Staged renames now list as a single record in `rift diff --staged` (and the
+  working-tree file lens) instead of an unrelated delete plus add, matching what
+  `git status` shows — using git's own rename detection at the same similarity
+  threshold, so a moved-and-heavily-rewritten file still reads as a delete plus
+  add, exactly as `git status` reports it. The row shows the move in git's
+  compact form (`web/app/{old → new}/x.vue`, factoring out the shared path), and
+  a moved file is findable by its old name in the filter. The stage screen keeps
+  the split, real-path view (it operates on actual index paths).
 - `rift diff --watch` live-reloads the browser as the working tree changes —
   built for reviewing while an agent edits in another pane. The file list,
   stats, and diffs refresh in place (the selection survives), the tests lens
