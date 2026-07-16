@@ -84,13 +84,9 @@ func gatherRange(repo *git.Repo, base, target string, paths []string) ([]fileSco
 		if added == nil {
 			added = map[int]bool{}
 		}
-		// A renamed file's old side lives at its old path in the base — without
-		// it every spec in the file would read as added rather than renamed.
-		oldPath := f.Path
-		if f.OldPath != "" {
-			oldPath = f.OldPath
-		}
-		old, _ := diff.ShowFile(root, base, oldPath) // nil old side for a file added in the range
+		// Read the old side from the file's old-side path, so a renamed file's
+		// specs classify against its pre-image instead of all reading as added.
+		old, _ := diff.ShowFile(root, base, f.OldSidePath()) // nil old side for a file added in the range
 		return content, old, added, true
 	}), nil
 }
@@ -134,9 +130,10 @@ func worktreeContent(root string, staged bool, path string) ([]byte, error) {
 }
 
 // worktreeOld returns the old side of a working-tree change for name-change
-// detection: HEAD when staged, the index version otherwise. An untracked file
-// has no old side. A missing old side (nil) just means every touched spec reads
-// as new.
+// detection: HEAD when staged, the index version otherwise. It reads from the
+// file's old-side path, so a renamed file's specs classify against its pre-image
+// rather than all reading as added. An untracked file has no old side; a missing
+// one (nil) just means every touched spec reads as new.
 func worktreeOld(root string, staged bool, f git.ChangedFile) []byte {
 	if f.Status == "Untracked" {
 		return nil
@@ -145,7 +142,7 @@ func worktreeOld(root string, staged bool, f git.ChangedFile) []byte {
 	if staged {
 		ref = "HEAD"
 	}
-	old, _ := diff.ShowFile(root, ref, f.Path)
+	old, _ := diff.ShowFile(root, ref, f.OldSidePath())
 	return old
 }
 

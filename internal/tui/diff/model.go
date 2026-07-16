@@ -148,7 +148,9 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		NavFraction: 30,
 		EmptyStatus: m.emptyStatus(),
 		Hints:       hints,
-		Match:       func(f git.ChangedFile) string { return f.Path },
+		// Match on both sides of a rename, so a moved file is findable by its old
+		// name too (OldPath is empty for everything else).
+		Match: func(f git.ChangedFile) string { return f.Path + " " + f.OldPath },
 		PreviewTitle: func(f git.ChangedFile) string {
 			if f.Path == "" {
 				return "all changes"
@@ -178,7 +180,7 @@ func fileRow(marks *reviewMarks) func(git.ChangedFile, int, bool) string {
 			glyph = reviewedGlyph.Render("\u2713") // standard check (U+2713), font-independent
 		}
 		prefix := glyph + " " + tui.IconField(f.Path)
-		return pathRow(prefix, selected, f.Path, tui.DiffStat(f.Added, f.Deleted), w)
+		return pathRow(prefix, selected, f.DisplayPath(), tui.DiffStat(f.Added, f.Deleted), w)
 	}
 }
 
