@@ -54,8 +54,16 @@ type SplitConfig[T any] struct {
 	// Row renders one item's text; the selection marker is added by SplitList.
 	// width is the available inner width.
 	Row func(item T, width int, selected bool) string
-	// Match returns an item's fuzzy-match target.
+	// Match returns an item's fuzzy-match target (the search haystack). It may be
+	// broader than the item's identity — e.g. a renamed file matches on both its
+	// new and old path, so it's findable by either — which is why identity uses
+	// Key, not Match.
 	Match func(item T) string
+	// Key returns an item's stable identity, used to keep the selection on the
+	// same item across a reload/refilter and to jump the cursor by key. Defaults
+	// to Match when nil; set it when Match is a broader haystack than the identity
+	// (so a caller-supplied key like a bare path still matches).
+	Key func(item T) string
 	// PreviewTitle returns the preview pane's title for an item (may be nil).
 	PreviewTitle func(item T) string
 	// PreviewHeader, when set, labels the preview pane's border with the selected
@@ -303,9 +311,9 @@ func (m SplitList[T]) SetItems(items []T) (SplitList[T], tea.Cmd) {
 	return m.SetItemsSelecting(items, "")
 }
 
-// SetItemsSelecting is SetItems that keeps the selection on the item whose Match
-// value equals key (when it survives the new set/filter), instead of resetting to
-// the top. Used to preserve the user's position across a file-list reload.
+// SetItemsSelecting is SetItems that keeps the selection on the item whose
+// identity key equals key (when it survives the new set/filter), instead of
+// resetting to the top. Used to preserve the user's position across a reload.
 func (m SplitList[T]) SetItemsSelecting(items []T, key string) (SplitList[T], tea.Cmd) {
 	return m.setItems(items, key, nil)
 }
@@ -340,13 +348,10 @@ func (m SplitList[T]) setItems(items []T, key string, stale map[string]bool) (Sp
 	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
 	m.selected = 0
 	kept := false
-	if key != "" && m.cfg.Match != nil {
-		for i, it := range m.filtered {
-			if m.cfg.Match(it) == key {
-				m.selected = i
-				kept = true
-				break
-			}
+	if key != "" {
+		if i := m.indexOfKey(key); i >= 0 {
+			m.selected = i
+			kept = true
 		}
 	}
 	m.resizeViewport()
@@ -392,13 +397,53 @@ func (m SplitList[T]) WithBreadcrumb(screen string) SplitList[T] {
 // gate list-pane-only actions on it (e.g. stash apply/pop/drop).
 func (m SplitList[T]) Reading() bool { return m.active == splitPreviewPane }
 
-// SelectedKey returns the Match value of the current selection, or "" when the
-// list is empty. Parents capture it before a reload to restore the selection.
-func (m SplitList[T]) SelectedKey() string {
-	if it, ok := m.Selected(); ok && m.cfg.Match != nil {
+// key returns an item's stable identity: cfg.Key when set, else cfg.Match (the
+// haystack doubles as identity when they coincide).
+func (m SplitList[T]) key(it T) string {
+	if m.cfg.Key != nil {
+		return m.cfg.Key(it)
+	}
+	if m.cfg.Match != nil {
 		return m.cfg.Match(it)
 	}
 	return ""
+}
+
+// indexOfKey returns the filtered index of the item whose identity key equals
+// key, or -1 if none matches. Callers guard against an empty key themselves (an
+// item may legitimately have an empty key, e.g. the diff "All" row).
+func (m SplitList[T]) indexOfKey(key string) int {
+	for i, it := range m.filtered {
+		if m.key(it) == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// SelectedKey returns the identity key of the current selection, or "" when the
+// list is empty. Parents capture it before a reload to restore the selection.
+func (m SplitList[T]) SelectedKey() string {
+	if it, ok := m.Selected(); ok {
+		return m.key(it)
+	}
+	return ""
+}
+
+// SelectKey moves the selection to the visible item whose identity key equals key
+// and requests its preview (the render derives the scroll offset from the
+// selection, so it comes into view). It's a no-op when key is empty, already
+// selected, or unmatched — so a caller can jump the cursor programmatically
+// (e.g. auto-advancing after an action) without checking first.
+func (m SplitList[T]) SelectKey(key string) (SplitList[T], tea.Cmd) {
+	if key == "" {
+		return m, nil
+	}
+	if i := m.indexOfKey(key); i >= 0 && i != m.selected {
+		m.selected = i
+		return m.requestPreview()
+	}
+	return m, nil
 }
 
 func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
@@ -738,12 +783,9 @@ func (m SplitList[T]) applyFilter() (SplitList[T], tea.Cmd) {
 	prevKey := m.SelectedKey()
 	m.filtered = FuzzyFilter(m.items, m.filter.Value(), m.cfg.Match)
 	m.selected = 0
-	if prevKey != "" && m.cfg.Match != nil {
-		for i, it := range m.filtered {
-			if m.cfg.Match(it) == prevKey {
-				m.selected = i
-				break
-			}
+	if prevKey != "" {
+		if i := m.indexOfKey(prevKey); i >= 0 {
+			m.selected = i
 		}
 	}
 	// The strip height tracks the item count, so the viewport must resize when the

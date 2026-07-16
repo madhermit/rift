@@ -18,6 +18,14 @@ pre-1.0).
   `RIFT_MOUSE=off` disables tracking for terminals where you prefer native
   text selection (most terminals also bypass tracking with shift-click/drag).
 
+### Changed
+
+- Marking a file reviewed with `r` in `rift diff` now advances the cursor to the
+  next unreviewed file (wrapping around), so a review pass is `r`-`r`-`r` rather
+  than `r`-`j`-`r`-`j`. Un-marking stays put — going back to a file to unmark it
+  is deliberate. In the unreviewed-only view (`U`), the marked file drops out and
+  the cursor lands on the next unreviewed file instead of resetting to the top.
+
 ### Fixed
 
 - Staged renames now list as a single record in `rift diff --staged` (and the

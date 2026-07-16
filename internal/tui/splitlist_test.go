@@ -255,6 +255,42 @@ func TestFilterKeepsSelection(t *testing.T) {
 	}
 }
 
+// TestKeySeparateFromMatch verifies that when Match is a broader haystack than
+// the item's identity — as a renamed file matches on both its new and old path —
+// selection uses Key, not Match: a bare identity value selects the item, and the
+// item is still fuzzy-findable by a token that lives only in Match. This is the
+// regression the auto-advance relied on (nextUnreviewed hands back a bare path).
+func TestKeySeparateFromMatch(t *testing.T) {
+	cfg := testCfg()
+	// beta carries an extra "oldbeta" haystack token (its pre-rename path); its
+	// identity stays the bare "beta".
+	cfg.Match = func(s string) string {
+		if s == "beta" {
+			return "beta oldbeta"
+		}
+		return s
+	}
+	cfg.Key = func(s string) string { return s }
+	m := NewSplitList(cfg, []string{"alpha", "beta", "gamma"})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// SelectKey by the bare identity jumps the cursor. Before Key was split out it
+	// compared Match, so "beta" never matched the "beta oldbeta" haystack.
+	m, _ = m.SelectKey("beta")
+	if m.SelectedKey() != "beta" {
+		t.Errorf("SelectKey by identity should select beta, got %q", m.SelectedKey())
+	}
+
+	// The old-path token lives only in Match, so beta stays findable by it.
+	m, _ = m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	for _, r := range "oldbeta" {
+		m, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if len(m.filtered) != 1 || m.filtered[0] != "beta" {
+		t.Errorf("filter on the Match-only token should find beta, got %v", m.filtered)
+	}
+}
+
 // TestListPaneVimJumps covers gg/G and ctrl+d moving the LIST selection while the
 // list pane is focused (as opposed to scrolling the preview).
 func TestListPaneVimJumps(t *testing.T) {

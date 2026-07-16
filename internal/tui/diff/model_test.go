@@ -45,3 +45,28 @@ func TestPreviewFiles(t *testing.T) {
 		t.Errorf("all changes: got %v (should skip the empty All entry)", got)
 	}
 }
+
+// TestNextUnreviewed covers the r auto-advance target: the next visible
+// unreviewed file after the current one, wrapping, skipping the All row.
+func TestNextUnreviewed(t *testing.T) {
+	items := []git.ChangedFile{{Path: ""}, {Path: "a"}, {Path: "b"}, {Path: "c"}}
+	reviewed := func(m map[string]bool) func(string) bool {
+		return func(p string) bool { return m[p] }
+	}
+
+	if next := nextUnreviewed(items, "a", reviewed(map[string]bool{"a": true})); next != "b" {
+		t.Errorf("advance from a: got %q, want b", next)
+	}
+	// b reviewed too: skip to c.
+	if next := nextUnreviewed(items, "a", reviewed(map[string]bool{"a": true, "b": true})); next != "c" {
+		t.Errorf("skip reviewed: got %q, want c", next)
+	}
+	// Wrap around past the All row.
+	if next := nextUnreviewed(items, "c", reviewed(map[string]bool{"b": true, "c": true})); next != "a" {
+		t.Errorf("wrap: got %q, want a", next)
+	}
+	// Everything reviewed: no target.
+	if next := nextUnreviewed(items, "c", reviewed(map[string]bool{"a": true, "b": true, "c": true})); next != "" {
+		t.Errorf("all reviewed should report no next target, got %q", next)
+	}
+}
