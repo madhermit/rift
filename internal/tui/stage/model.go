@@ -36,7 +36,6 @@ type Model struct {
 	repo    *git.Repo
 	engines tui.EngineToggle
 	branch  string
-	hints   [][2]string // footer keybinding hints (engine hint only when toggleable)
 
 	paths         []string // pathspec scope (from `-- path...`), re-applied on reload
 	files         []git.StatusFile
@@ -58,6 +57,7 @@ type Model struct {
 	viewport  viewport.Model
 	filter    textinput.Model
 	filtering bool
+	search    tui.PreviewSearch // `/` with the diff pane focused
 
 	diffErr  error
 	vim      tui.VimNav
@@ -69,14 +69,19 @@ type Model struct {
 	ready  bool
 }
 
-// stageHints builds the footer hints for a model; the engine hint appears only
-// when a second engine is available to toggle to.
-func stageHints(engines tui.EngineToggle) [][2]string {
-	hints := [][2]string{
-		{"↑↓", "nav"}, {"/", "filter"}, {"⇥", "switch"},
-		{"s", "stage"}, {"u", "unstage"}, {"a", "all"}, {"{/}", "hunk"}, {"o", "open"}, {"y", "yank"},
+// hints builds the footer hints for the pane in focus, labelled the way the
+// SplitList screens label theirs; the engine hint appears only when a second
+// engine is available to toggle to. Hunk stepping and `a` act on one pane each,
+// so they show only there.
+func (m Model) hints() [][2]string {
+	var hints [][2]string
+	if m.activePane == diffPane {
+		hints = [][2]string{{"/", "search"}, {"⇥", "list"}, {"{/}", "hunk"}, {"s", "stage hunk"}, {"u", "unstage hunk"}}
+	} else {
+		hints = [][2]string{{"/", "filter"}, {"⇥", "read"}, {"s", "stage"}, {"u", "unstage"}, {"a", "all"}}
 	}
-	if engines.CanToggle() {
+	hints = append(hints, [2]string{"o", "open"}, [2]string{"y", "yank"})
+	if m.engines.CanToggle() {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
 	return append(hints, [2]string{"?", "help"}, [2]string{"q", "quit"})
@@ -88,13 +93,15 @@ func stageHints(engines tui.EngineToggle) [][2]string {
 // keys mirror the SplitList screens: gg/G/ctrl+d/u/f/b navigate the file list
 // (file pane) or scroll the diff (diff pane), and {/} steps between hunks — the
 // same key the SplitList screens use to step between preview sections. esc
-// leaves the current mode (filter / help) and otherwise does nothing — it never
+// leaves the current mode (filter / search / help) and otherwise does nothing — it never
 // quits (that's q / ctrl+c), matching the diff/log/stash screens.
 var stageNavKeys = [][2]string{
-	{"j/k  ↑↓", "move / scroll"},
+	{"j/k  ↑↓", "next / prev file (list) or hunk (diff)"},
 	{"J/K  ⇧↑↓  ]/[", "next / prev file"},
 	{"gg/G", "top / bottom"},
 	{"{/}", "prev / next hunk"},
+	{"/  n/N", "search the diff / next / prev match"},
+	{"!term", "exclude from the list filter"},
 	{"ctrl+d/u", "scroll half-page"},
 	{"ctrl+f/b", "scroll page"},
 	{"esc", "leave mode"},
@@ -127,13 +134,13 @@ func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile, paths []str
 		repo:          repo,
 		engines:       engines,
 		branch:        repo.CurrentBranch(),
-		hints:         stageHints(engines),
 		paths:         paths,
 		files:         files,
 		filteredFiles: files,
 		hunkCache:     map[string][]displayHunk{},
 		viewport:      viewport.New(),
 		filter:        tui.NewFilterInput(),
+		search:        tui.NewPreviewSearch(),
 	}
 }
 
@@ -208,6 +215,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.search.Searching() {
+		if msg.String() == "esc" {
+			m.search.ClearSearch(&m.viewport)
+			return m.followScroll(), nil
+		}
+		cmd := m.search.HandleSearchKey(msg, &m.viewport, m.vim.Lines())
+		return m.followScroll(), cmd
+	}
+
 	if m.activePane == diffPane && !m.filtering {
 		switch msg.String() {
 		case "{", "}":
@@ -225,6 +241,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.filter.Blur()
 			m.filter.SetValue("")
 			m.applyFilter()
+			return m, nil
+		}
+		if m.search.SearchLive() {
+			m.search.ResetSearch()
 			return m, nil
 		}
 		// esc leaves the current mode (help handled above, filter handled here); at
@@ -285,9 +305,24 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "/":
+		// Same gesture as the SplitList screens, scoped to the pane: narrow the list
+		// from the list, find text in the diff from the diff.
+		if m.activePane == diffPane {
+			m.search.OpenSearch(&m.viewport)
+			return m, nil
+		}
 		m.filtering = true
 		m.filter.Focus()
 		return m, nil
+	case "n", "N":
+		if m.activePane == diffPane {
+			dir := 1
+			if msg.String() == "N" {
+				dir = -1
+			}
+			m.search.StepMatch(dir, &m.viewport)
+			return m.followScroll(), nil
+		}
 	case "y":
 		return m.yank()
 	case "e":
@@ -334,6 +369,30 @@ func (m Model) yank() (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.flash, cmd = tui.YankToClipboard(m.filteredFiles[m.selectedIdx].Path)
 	return m, cmd
+}
+
+// followScroll moves the active hunk to wherever a search just put the reader.
+// `s` and `u` act on the active hunk, so it must never be left on one they can no
+// longer see: they would stage something other than the match on screen.
+func (m Model) followScroll() Model {
+	// The match, not the scroll position: near the end of the diff the viewport
+	// clamps, so the match can be on screen without being the top row.
+	y, line, at := m.viewport.YOffset(), m.search.MatchLine(), 0
+	if line < 0 {
+		line = y
+	}
+	for i, off := range m.hunkOffsets {
+		if off > line {
+			break
+		}
+		at = i
+	}
+	if at != m.hunkIdx && at < len(m.displayHunks) {
+		m.hunkIdx = at
+		m.renderHunks() // the gutter bar marks the active hunk
+		m.viewport.SetYOffset(y)
+	}
+	return m
 }
 
 func (m Model) navigateHunk(delta int) (tea.Model, tea.Cmd) {
@@ -601,7 +660,8 @@ func (m *Model) invalidatePath(path string) {
 // previously-selected file can't land over the current one.
 func (m *Model) requestDiff() tea.Cmd {
 	m.diffReqID++
-	m.flash = "" // a new selection / reload clears any transient message
+	m.flash = ""           // a new selection / reload clears any transient message
+	m.search.ResetSearch() // and any search, whose line numbers named the old content
 	if m.cancelDiff != nil {
 		// A newer selection or layout supersedes the in-flight load: kill its
 		// subprocesses instead of letting them run to a discarded result (a
@@ -632,6 +692,7 @@ func (m *Model) setHunks(hunks []displayHunk) {
 		m.hunkIdx = max(0, len(m.displayHunks)-1)
 	}
 	m.renderHunks()
+	m.search.Rescan(m.vim.Lines())
 	if m.hunkIdx < len(m.hunkOffsets) {
 		m.viewport.SetYOffset(m.hunkOffsets[m.hunkIdx])
 	} else {
@@ -798,7 +859,7 @@ func (m Model) View() tea.View {
 	l := m.layout()
 
 	if m.showHelp {
-		return tui.ScreenView(tui.HelpView("stage", tui.HeaderContext(m.branch, m.engines.Name()), m.hints, stageNavKeys, m.width, l.ContentHeight))
+		return tui.ScreenView(tui.HelpView("stage", tui.HeaderContext(m.branch, m.engines.Name()), m.hints(), stageNavKeys, m.width, l.ContentHeight))
 	}
 
 	collapsed := m.activePane == diffPane
@@ -839,7 +900,8 @@ func (m Model) View() tea.View {
 	}
 	diffBar := tui.ScrollbarFor(&m.viewport)
 	listPanel := tui.Panel(listTitle, "", list.String(), l.ListWidth, l.ContentHeight, m.activePane == filePane, listBar)
-	diffPanel := tui.Panel(diffTitle, "", m.viewport.View(), l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane, diffBar)
+	diffBody := m.search.HighlightMatch(m.viewport.View(), m.viewport.YOffset())
+	diffPanel := tui.Panel(diffTitle, m.search.SearchStatus(), diffBody, l.DiffWidth+2, l.ContentHeight, m.activePane == diffPane, diffBar)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listPanel, diffPanel)
 
 	header := tui.Header("stage", tui.HeaderContext(m.branch, m.engines.Name()), m.width)
@@ -848,16 +910,18 @@ func (m Model) View() tea.View {
 	switch {
 	case m.filtering:
 		footer = tui.FooterContent(m.width, m.filter.View())
+	case m.search.Searching():
+		footer = tui.FooterContent(m.width, m.search.SearchInput())
 	case m.diffErr != nil:
 		footer = tui.Footer(m.width, fmt.Sprintf("Error: %v", m.diffErr), nil)
 	case m.flash != "":
-		footer = tui.Footer(m.width, m.flash, m.hints)
+		footer = tui.Footer(m.width, m.flash, m.hints())
 	default:
 		status := "No changes found"
 		if len(m.filteredFiles) > 0 {
 			status = fmt.Sprintf("%d/%d", m.selectedIdx+1, len(m.filteredFiles))
 		}
-		footer = tui.Footer(m.width, status, m.hints)
+		footer = tui.Footer(m.width, status, m.hints())
 	}
 
 	return tui.ScreenView(lipgloss.JoinVertical(lipgloss.Left, header, content, footer))

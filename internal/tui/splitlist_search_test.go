@@ -79,7 +79,7 @@ func TestSearchFindsAndSteps(t *testing.T) {
 	if m.viewport.YOffset() != 5 {
 		t.Errorf("first match should be at the top row, offset = %d", m.viewport.YOffset())
 	}
-	if got := m.searchStatus(); got != "match 1/3" {
+	if got := m.SearchStatus(); got != "match 1/3" {
 		t.Errorf("searchStatus = %q, want %q", got, "match 1/3")
 	}
 
@@ -131,7 +131,7 @@ func TestSearchNoMatch(t *testing.T) {
 	if len(m.matches) != 0 {
 		t.Fatalf("matches = %v, want none", m.matches)
 	}
-	if got := m.searchStatus(); got != "no match" {
+	if got := m.SearchStatus(); got != "no match" {
 		t.Errorf("searchStatus = %q, want %q", got, "no match")
 	}
 	if m.viewport.YOffset() != 0 {
@@ -204,7 +204,7 @@ func TestSearchExtendsWhileStreaming(t *testing.T) {
 	if want := "[0 3]"; fmt.Sprint(m.matches) != want {
 		t.Errorf("matches after the next chunk = %v, want %s", m.matches, want)
 	}
-	if got := m.searchStatus(); got != "match 1/2" {
+	if got := m.SearchStatus(); got != "match 1/2" {
 		t.Errorf("searchStatus = %q, want %q", got, "match 1/2")
 	}
 }

@@ -16,6 +16,7 @@ func newTestModel() Model {
 	m.viewport.SetWidth(40)
 	m.viewport.SetHeight(10)
 	m.filter = tui.NewFilterInput()
+	m.search = tui.NewPreviewSearch()
 	return m
 }
 
@@ -181,5 +182,82 @@ func TestHunkNavCanonicalKey(t *testing.T) {
 	tm, _ = tm.Update(key("n"))
 	if got := tm.(Model).hunkIdx; got != 0 {
 		t.Errorf("n should no longer navigate hunks, got %d", got)
+	}
+}
+
+func keyPress(s string) tea.KeyPressMsg {
+	switch s {
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
+	}
+	return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
+}
+
+// TestSearchMovesActiveHunk: `s` acts on the active hunk, so a search that lands
+// on another hunk must take the active hunk with it — otherwise the keypress
+// stages something other than the match on screen.
+func TestSearchMovesActiveHunk(t *testing.T) {
+	var m tea.Model = newTestModel()
+	sm := m.(Model)
+	sm.activePane = diffPane
+	sm.diffReqID = 5
+	m = sm
+	hunks := []displayHunk{
+		{rendered: "alpha", hunk: diff.Hunk{NewStart: 1}},
+		{rendered: "beta\nbeta2\nbeta3", hunk: diff.Hunk{NewStart: 20}},
+		{rendered: "needle", hunk: diff.Hunk{NewStart: 40}},
+	}
+	m, _ = m.Update(hunkDiffsMsg{reqID: 5, path: "a.go", width: 40, hunks: hunks})
+
+	m, _ = m.Update(keyPress("/"))
+	if !m.(Model).search.Searching() {
+		t.Fatal("/ in the diff pane should open the search, not the list filter")
+	}
+	for _, r := range "needle" {
+		m, _ = m.Update(keyPress(string(r)))
+	}
+	if got := m.(Model).hunkIdx; got != 2 {
+		t.Fatalf("active hunk = %d, want the matched hunk 2", got)
+	}
+
+	// Accepting keeps the query for n/N; esc retires it.
+	m, _ = m.Update(keyPress("enter"))
+	if st := m.(Model).search; st.Searching() || !st.SearchLive() {
+		t.Fatalf("enter should close the box and keep the query")
+	}
+	m, _ = m.Update(keyPress("esc"))
+	if m.(Model).search.SearchLive() {
+		t.Fatal("esc should clear an accepted search")
+	}
+}
+
+func TestSlashInListFilters(t *testing.T) {
+	var m tea.Model = newTestModel()
+	m, _ = m.Update(keyPress("/"))
+	sm := m.(Model)
+	if !sm.filtering || sm.search.Searching() {
+		t.Fatalf("/ in the list pane should filter (filtering=%v searching=%v)", sm.filtering, sm.search.Searching())
+	}
+}
+
+// TestHintsFollowPane: the footer only offers keys that act in the focused pane.
+func TestHintsFollowPane(t *testing.T) {
+	has := func(hints [][2]string, key string) bool {
+		for _, h := range hints {
+			if h[0] == key {
+				return true
+			}
+		}
+		return false
+	}
+	m := New(nil, diff.NewPlainEngine(), nil, nil)
+	if has(m.hints(), "{/}") || !has(m.hints(), "a") {
+		t.Errorf("list pane hints wrong: %v", m.hints())
+	}
+	m.activePane = diffPane
+	if !has(m.hints(), "{/}") || has(m.hints(), "a") {
+		t.Errorf("diff pane hints wrong: %v", m.hints())
 	}
 }

@@ -106,17 +106,7 @@ type SplitList[T any] struct {
 	filter    textinput.Model
 	filtering bool
 
-	// Preview search (`/` with the preview focused): a live query over the
-	// rendered display lines, the lines it matched, and which of them the reader
-	// is on. origin is the offset the box opened at — the fixed point incremental
-	// search steps forward from as you type (so the target doesn't drift under
-	// its own jumps), and where esc puts the reader back if they cancel.
-	search       textinput.Model
-	searching    bool
-	query        string
-	matches      []int
-	matchAt      int
-	searchOrigin int
+	PreviewSearch // `/` with the preview focused
 
 	viewport viewport.Model
 	vim      VimNav
@@ -154,16 +144,15 @@ type SplitList[T any] struct {
 // NewSplitList builds a SplitList for the given items.
 func NewSplitList[T any](cfg SplitConfig[T], items []T) SplitList[T] {
 	return SplitList[T]{
-		cfg:       cfg,
-		items:     items,
-		filtered:  items,
-		viewport:  viewport.New(),
-		filter:    NewFilterInput(),
-		search:    NewFilterInput(),
-		spinner:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		cache:     map[string]string{},
-		selAnchor: -1,
-		matchAt:   -1,
+		cfg:           cfg,
+		items:         items,
+		filtered:      items,
+		viewport:      viewport.New(),
+		filter:        NewFilterInput(),
+		PreviewSearch: NewPreviewSearch(),
+		spinner:       spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		cache:         map[string]string{},
+		selAnchor:     -1,
 	}
 }
 
@@ -191,7 +180,7 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	m.flash = ""       // and any transient message (e.g. "copied …")
 	m.anchored = false // a new selection re-anchors its preview
 	m.clearDrag()      // and any in-progress mouse selection
-	m.resetSearch()    // and any search, whose line numbers named the old content
+	m.ResetSearch()    // and any search, whose line numbers named the old content
 	reqID := m.reqID
 	// Every selection change signals the parent so it cancels the previous item's
 	// stream; CacheHit tells it the content is already shown, so start no new load.
@@ -305,7 +294,7 @@ func (m SplitList[T]) Capturing() bool { return m.filtering || m.searching }
 // the highlight and n/N, and esc should retire that before a parent gets to read
 // esc as "back". Screen keys stay live in that state, which is why the two
 // questions can't share one answer.
-func (m SplitList[T]) InMode() bool { return m.Capturing() || m.query != "" || m.showHelp }
+func (m SplitList[T]) InMode() bool { return m.Capturing() || m.SearchLive() || m.showHelp }
 
 // ShowingHelp reports whether the keybinding overlay is open. Parents check this
 // (like Filtering) to stop intercepting keys while it's up.
@@ -586,8 +575,9 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 	}
 
 	if msg.String() == "esc" {
-		if m.searching || m.query != "" {
-			return m.clearSearch(), nil
+		if m.SearchLive() {
+			m.ClearSearch(&m.viewport)
+			return m, nil
 		}
 		if m.filtering {
 			m.filtering = false
@@ -601,7 +591,8 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 	}
 
 	if m.searching {
-		return m.handleSearchKey(msg)
+		cmd := m.HandleSearchKey(msg, &m.viewport, m.vim.Lines())
+		return m, cmd
 	}
 	if m.filtering {
 		return m.handleFilterKey(msg)
@@ -629,22 +620,18 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 		// `/` means "narrow this list" over the list and "find this in the diff"
 		// over the preview: same gesture, scoped to whichever pane you're in.
 		if m.active == splitPreviewPane {
-			m.searching = true
-			m.searchOrigin = m.viewport.YOffset()
-			m.search.Focus()
+			m.OpenSearch(&m.viewport)
 			return m, nil
 		}
 		m.filtering = true
 		m.filter.Focus()
 		return m, nil
 	case "n":
-		if m.query != "" {
-			return m.stepMatch(1), nil
-		}
+		m.StepMatch(1, &m.viewport)
+		return m, nil
 	case "N":
-		if m.query != "" {
-			return m.stepMatch(-1), nil
-		}
+		m.StepMatch(-1, &m.viewport)
+		return m, nil
 	case "y":
 		return m.yank()
 	case "?":
@@ -672,135 +659,6 @@ func (m SplitList[T]) handleFilterKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cm
 	m.filter, cmd = m.filter.Update(msg)
 	m, fcmd := m.applyFilter()
 	return m, tea.Batch(cmd, fcmd)
-}
-
-func (m SplitList[T]) handleSearchKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
-	if msg.String() == "enter" {
-		// Accept: the box closes but the query stays live, so the highlight holds
-		// and n/N keep stepping. Where the reader ended up becomes the anchor the
-		// next search measures from.
-		m.searching = false
-		m.search.Blur()
-		m.searchOrigin = m.viewport.YOffset()
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.search, cmd = m.search.Update(msg)
-	if q := m.search.Value(); q != m.query {
-		m.query = q
-		m.runSearch()
-	}
-	return m, cmd
-}
-
-// runSearch re-matches the whole preview and moves to the first match at or
-// after the offset the box opened at, wrapping to the top when there is none
-// below. Measuring from that fixed origin rather than the live scroll position
-// is what keeps an incremental search from walking away from the reader as each
-// keystroke narrows the query.
-func (m *SplitList[T]) runSearch() {
-	m.rescan()
-	if len(m.matches) == 0 {
-		return
-	}
-	m.matchAt = 0
-	for i, line := range m.matches {
-		if line >= m.searchOrigin {
-			m.matchAt = i
-			break
-		}
-	}
-	m.scrollToMatch()
-}
-
-// rescan recomputes the active search's matches from scratch — for content that
-// was replaced rather than grown.
-func (m *SplitList[T]) rescan() {
-	m.matches, m.matchAt = nil, -1
-	m.scanMatches(0)
-}
-
-// scanMatches appends the display lines from index from onward that contain the
-// query. Matching is on the ANSI-stripped row, case-insensitively unless the
-// query carries an uppercase letter (vim's smartcase). It searches *rendered
-// rows*, so a match is only findable where it is legible: a source line the
-// hardwrap broke in two won't match across the break, the same bargain as
-// grepping what's on screen.
-func (m *SplitList[T]) scanMatches(from int) {
-	if m.query == "" {
-		return
-	}
-	needle, fold := m.query, m.query == strings.ToLower(m.query)
-	lines := m.vim.Lines()
-	for i := from; i < len(lines); i++ {
-		row := ansi.Strip(lines[i])
-		if fold {
-			row = strings.ToLower(row)
-		}
-		if strings.Contains(row, needle) {
-			m.matches = append(m.matches, i)
-		}
-	}
-}
-
-// stepMatch moves to the next (dir > 0) or previous match, wrapping at both
-// ends. From "no match selected" — a query typed while the preview was still
-// streaming its first hit in — either direction lands on the first.
-func (m SplitList[T]) stepMatch(dir int) SplitList[T] {
-	if len(m.matches) == 0 {
-		return m
-	}
-	if m.matchAt < 0 {
-		m.matchAt = 0
-	} else {
-		m.matchAt = (m.matchAt + dir + len(m.matches)) % len(m.matches)
-	}
-	m.scrollToMatch()
-	return m
-}
-
-// scrollToMatch puts the current match on the preview's top row — the same
-// landing every other jump in the pane uses (a hunk, a test anchor), so a match
-// is always found in the same place on screen.
-func (m *SplitList[T]) scrollToMatch() {
-	if m.matchAt >= 0 && m.matchAt < len(m.matches) {
-		m.viewport.SetYOffset(m.matches[m.matchAt])
-	}
-}
-
-// searchStatus is the preview legend's right-hand text while a search is live.
-func (m SplitList[T]) searchStatus() string {
-	switch {
-	case m.query == "":
-		return ""
-	case len(m.matches) == 0:
-		return "no match"
-	case m.matchAt < 0:
-		return fmt.Sprintf("%d matches", len(m.matches))
-	default:
-		return fmt.Sprintf("match %d/%d", m.matchAt+1, len(m.matches))
-	}
-}
-
-// resetSearch drops the search without moving the reader — for a preview that
-// has been replaced, where the offset it started from names nothing any more.
-func (m *SplitList[T]) resetSearch() {
-	m.searching = false
-	m.search.Blur()
-	m.search.SetValue("")
-	m.query, m.matches, m.matchAt, m.searchOrigin = "", nil, -1, 0
-}
-
-// clearSearch ends the search from the keyboard (esc). Cancelling while still
-// typing returns the reader to where the box opened — incremental search moved
-// them and they just asked for that to be undone; clearing an accepted search
-// leaves them wherever they navigated to.
-func (m SplitList[T]) clearSearch() SplitList[T] {
-	if m.searching {
-		m.viewport.SetYOffset(m.searchOrigin)
-	}
-	m.resetSearch()
-	return m
 }
 
 func clampIndex(i, n int) int {
@@ -1086,7 +944,7 @@ func (m *SplitList[T]) setPreviewContent() []string {
 		content = ansi.Hardwrap(content, w, true)
 	}
 	lines := m.vim.SetContent(&m.viewport, content)
-	m.rescan()
+	m.Rescan(lines)
 	return lines
 }
 
@@ -1114,7 +972,7 @@ func (m *SplitList[T]) appendPreview(chunk string) []string {
 		// Extend an active search over just the rows that were added, so a query
 		// typed against a half-streamed diff keeps finding hits as it fills in
 		// without rescanning the whole buffer per chunk.
-		m.scanMatches(finalized)
+		m.ScanFrom(m.vim.Lines(), finalized)
 	}
 	// The still-growing final line (the segment after the last newline) is shown as
 	// the trailing display row so a full re-wrap of the same buffer looks the same;
@@ -1171,7 +1029,7 @@ func (m SplitList[T]) sectionProgress() string {
 func (m SplitList[T]) previewRightText() string {
 	// A live search outranks the parent's status: it is the mode the reader just
 	// entered, and its match count is the answer they are waiting on.
-	if s := m.searchStatus(); s != "" {
+	if s := m.SearchStatus(); s != "" {
 		return s
 	}
 	if m.previewStatus != "" {
@@ -1237,9 +1095,8 @@ func (m SplitList[T]) previewBodyView() (string, Scrollbar) {
 	switch {
 	case m.selAnchor >= 0 && m.dragging:
 		body = highlightRows(body, m.viewport.YOffset(), m.selAnchor, m.selEnd)
-	case m.matchAt >= 0 && m.matchAt < len(m.matches):
-		line := m.matches[m.matchAt]
-		body = highlightRows(body, m.viewport.YOffset(), line, line)
+	default:
+		body = m.HighlightMatch(body, m.viewport.YOffset())
 	}
 	return body, ScrollbarFor(&m.viewport)
 }
@@ -1273,7 +1130,7 @@ func (m SplitList[T]) footerView() string {
 	case m.filtering:
 		return FooterContent(m.width, m.filter.View())
 	case m.searching:
-		return FooterContent(m.width, m.search.View())
+		return FooterContent(m.width, m.SearchInput())
 	case m.prevErr != nil:
 		return Footer(m.width, fmt.Sprintf("Error: %v", m.prevErr), nil)
 	case m.flash != "":

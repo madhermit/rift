@@ -40,6 +40,9 @@ pre-1.0).
   hides the lockfile. Works on every filterable list — `diff`, `log`, `stash`,
   `stage`, the tests lens, and the menu.
 
+- Search inside the diff in `rift stage`: `/` from the diff pane, `n` / `N` to step
+  matches. The active hunk follows the match, so `s` acts on what you found.
+
 - `rift stage -- <path>` limits staging to part of the tree. It was documented but
   ignored.
 
@@ -50,6 +53,9 @@ pre-1.0).
   immediately painted over.
 
 - `rift stash` and `rift stage` reject stray arguments rather than ignoring them.
+
+- The stage footer shows only the keys that act in the focused pane, labelled like
+  the other screens, and the help overlay names what `{` / `}` step on each screen.
 
 ### Fixed
 
