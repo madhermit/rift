@@ -12,10 +12,15 @@ import (
 // runTestsLens renders the test cases a diff touches as a plain listing or JSON.
 // The interactive view lives in the lens wrapper (internal/tui/lens), which
 // toggles between this and the file view.
-func runTestsLens(mode output.Mode, repo *git.Repo, scope review.DiffScope) error {
+func runTestsLens(mode output.Mode, repo *git.Repo, scope review.DiffScope, unreviewed bool) error {
 	specs, err := review.Collect(repo, scope)
 	if err != nil {
 		return err
+	}
+	if unreviewed {
+		if specs, err = dropReviewedSpecs(repo, scope, specs); err != nil {
+			return err
+		}
 	}
 	if mode == output.JSON {
 		if specs == nil {
@@ -24,6 +29,26 @@ func runTestsLens(mode output.Mode, repo *git.Repo, scope review.DiffScope) erro
 		return output.WriteJSON(os.Stdout, specs)
 	}
 	return output.WritePlain(os.Stdout, renderSpecs(specs))
+}
+
+// dropReviewedSpecs keeps the specs in files not yet marked reviewed, the same set
+// --unreviewed narrows a file listing to.
+func dropReviewedSpecs(repo *git.Repo, scope review.DiffScope, specs []review.Spec) ([]review.Spec, error) {
+	files, err := repo.ListChanged(scope.Staged, scope.Base, scope.Target, scope.Paths...)
+	if err != nil {
+		return nil, err
+	}
+	open := map[string]bool{}
+	for _, f := range filterUnreviewed(repo, files) {
+		open[f.Path] = true
+	}
+	var kept []review.Spec
+	for _, s := range specs {
+		if open[s.File] {
+			kept = append(kept, s)
+		}
+	}
+	return kept, nil
 }
 
 // commitTests is a commit with the test cases it touched, for `log --tests --json`.

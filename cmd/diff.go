@@ -76,13 +76,15 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	// committed range ignores Staged — one literal covers both.
 	scope := review.DiffScope{Staged: staged, Base: base, Target: target, Paths: pathArgs}
 	tests, _ := cmd.Flags().GetBool("tests")
+	unrev, _ := cmd.Flags().GetBool("unreviewed")
+	unrev = unrev && target == "" // reviewing is a working-tree concept
 
 	// The interactive view is a lens that toggles files↔tests, so the tests flag
 	// just chooses which side it opens on. --print/--json render the tests list
 	// directly (no toggle to offer). --name-only is a file-name output, so it
 	// takes precedence over --tests regardless of TTY.
 	if tests && !nameOnly && mode != output.Interactive {
-		return runTestsLens(mode, repo, scope)
+		return runTestsLens(mode, repo, scope, unrev)
 	}
 
 	files, err := repo.ListChanged(staged, base, target, pathArgs...)
@@ -91,13 +93,11 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	// --unreviewed narrows any non-interactive listing to files not yet marked
-	// reviewed (a working-tree concept). --name-only prints a plain listing even
+	// reviewed. --name-only prints a plain listing even
 	// on a TTY, so gate on "emitting a listing" (non-interactive mode or
 	// --name-only) to keep the piped and on-TTY file sets identical. The
 	// interactive view instead keeps the full set and opens with the same live
 	// filter the `U` key toggles, so it can be switched off without restarting.
-	unrev, _ := cmd.Flags().GetBool("unreviewed")
-	unrev = unrev && target == ""
 	if unrev && (mode != output.Interactive || nameOnly) {
 		files = filterUnreviewed(repo, files)
 	}

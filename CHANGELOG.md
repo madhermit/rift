@@ -68,6 +68,9 @@ pre-1.0).
 
 - `rift stash` and `rift stage` reject stray arguments rather than ignoring them.
 
+- `rift diff --tests --unreviewed` narrows `--print` / `--json` to tests in files
+  not yet reviewed. The flag was ignored there.
+
 - The stage footer shows only the keys that act in the focused pane, labelled like
   the other screens, and the help overlay names what `{` / `}` step on each screen.
 
