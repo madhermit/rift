@@ -11,10 +11,21 @@ type StatusFile struct {
 	WorktreeStatus string `json:"worktree_status"`
 }
 
-func (r *Repo) StatusFiles() ([]StatusFile, error) {
+// StatusFiles lists the working tree's changes, limited to the given paths when
+// there are any.
+func (r *Repo) StatusFiles(paths ...string) ([]StatusFile, error) {
 	files, err := r.statusFiles()
 	if err != nil {
 		return nil, err
+	}
+	if len(paths) > 0 {
+		kept := []StatusFile{}
+		for _, f := range files {
+			if matchPath(f.Path, paths) {
+				kept = append(kept, f)
+			}
+		}
+		files = kept
 	}
 	// git status -z emits records in path order; sort to make that a guarantee.
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })

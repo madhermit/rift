@@ -38,6 +38,7 @@ type Model struct {
 	branch  string
 	hints   [][2]string // footer keybinding hints (engine hint only when toggleable)
 
+	paths         []string // pathspec scope (from `-- path...`), re-applied on reload
 	files         []git.StatusFile
 	filteredFiles []git.StatusFile
 	selectedIdx   int
@@ -120,13 +121,14 @@ func (m Model) layout() tui.SplitLayout {
 	return tui.ComputeSplitLayout(m.width, m.height, m.activePane == diffPane, 20, 60)
 }
 
-func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile) Model {
+func New(repo *git.Repo, engine diff.Engine, files []git.StatusFile, paths []string) Model {
 	engines := tui.NewEngineToggle(engine)
 	return Model{
 		repo:          repo,
 		engines:       engines,
 		branch:        repo.CurrentBranch(),
 		hints:         stageHints(engines),
+		paths:         paths,
 		files:         files,
 		filteredFiles: files,
 		hunkCache:     map[string][]displayHunk{},
@@ -419,9 +421,9 @@ func (m Model) stageAll() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) reloadFiles() tea.Cmd {
-	repo := m.repo
+	repo, paths := m.repo, m.paths
 	return func() tea.Msg {
-		files, err := repo.StatusFiles()
+		files, err := repo.StatusFiles(paths...)
 		if err != nil {
 			return filesLoadedMsg{err: err}
 		}

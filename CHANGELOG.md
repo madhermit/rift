@@ -40,6 +40,13 @@ pre-1.0).
   hides the lockfile. Works on every filterable list — `diff`, `log`, `stash`,
   `stage`, the tests lens, and the menu.
 
+- `rift stage -- <path>` limits staging to part of the tree. It was documented but
+  ignored.
+
+### Changed
+
+- `rift stash` and `rift stage` reject stray arguments rather than ignoring them.
+
 ### Fixed
 
 - `rift stash` now shows the untracked files a `stash -u` holds. They were missing
