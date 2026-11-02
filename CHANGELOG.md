@@ -40,6 +40,13 @@ pre-1.0).
   hides the lockfile. Works on every filterable list — `diff`, `log`, `stash`,
   `stage`, the tests lens, and the menu.
 
+- The tests lens in the log and stash. `t` on a commit or stash entry opens its
+  tests, and `t` flips between its files and tests once open — the same view as
+  `rift diff`. `rift log --tests` swaps which side `⏎` and `t` open.
+
+- `rift stash`: `⏎` opens an entry's files as a browsable list. It used to move
+  focus to the preview, which `⇥` still does.
+
 - Search inside the diff in `rift stage`: `/` from the diff pane, `n` / `N` to step
   matches. The active hunk follows the match, so `s` acts on what you found.
 
@@ -68,11 +75,17 @@ pre-1.0).
 - Root commits failed to diff with the git engine (`bad object`), because rift's
   empty-tree constant was mistyped.
 
+- `{` / `}` in a log drilldown stepped files while the footer promised hunks: the
+  hunk index never reached the opened view.
+
 - Added and deleted files in a difftastic diff were headed with a temp or absolute
   path instead of their repo path.
 
 - Pressing `t` before a preview finished left it stuck on a spinner (or cut off
   part-way) when you toggled back. The same could strand the hunk cursor.
+
+- Opening a commit while on the git engine lost the `e` hint and the way back to
+  difftastic.
 
 - The diff preview's scroll-to-line anchor (used by the tests lens) skipped
   rows whose line number had a different digit width from the file's most

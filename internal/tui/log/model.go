@@ -10,8 +10,7 @@ import (
 	"github.com/madhermit/rift/internal/git"
 	"github.com/madhermit/rift/internal/review"
 	"github.com/madhermit/rift/internal/tui"
-	diffui "github.com/madhermit/rift/internal/tui/diff"
-	reviewui "github.com/madhermit/rift/internal/tui/review"
+	lensui "github.com/madhermit/rift/internal/tui/lens"
 )
 
 // Action is a git operation the user chose to run on the selected commit; the
@@ -25,20 +24,16 @@ const (
 )
 
 type Model struct {
-	repo    *git.Repo
-	engines tui.EngineToggle
-	list    tui.SplitList[git.CommitInfo]
-	display diff.Display
-	action  Action
-	confirm tui.Confirm        // pending y/n gate for cherry-pick / revert
-	stream  *tui.PreviewStream // active commit-diff stream; nil otherwise
-
-	drilled    tui.PreviewChild // per-commit view (file diff, or tests) when drilling
-	drilling   bool
-	collecting bool // a tests-lens collect is in flight (between enter and open)
-	tests      bool // the tests lens: drill into a commit's tests, not its files
-	width      int
-	height     int
+	repo     *git.Repo
+	settings tui.ViewSettings
+	list     tui.SplitList[git.CommitInfo]
+	action   Action
+	confirm  tui.Confirm        // pending y/n gate for cherry-pick / revert
+	stream   *tui.PreviewStream // active commit-diff stream; nil otherwise
+	drill    lensui.Drill       // the selected commit's files↔tests view, once opened
+	tests    bool               // `⏎` opens a commit on its tests (--tests); `t` the other side
+	width    int
+	height   int
 }
 
 // Action reports the git operation chosen for the selected commit (NoAction if
@@ -93,17 +88,17 @@ func (m Model) SelectedHash() string {
 }
 
 func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo, tests bool) Model {
-	engines := tui.NewEngineToggle(engine)
+	settings := tui.ViewSettings{Engines: tui.NewEngineToggle(engine)}
 	branch := repo.CurrentBranch()
 
-	drillLabel := "files"
+	enterLabel, otherLabel := "files", "tests"
 	if tests {
-		drillLabel = "tests"
+		enterLabel, otherLabel = otherLabel, enterLabel
 	}
 	hints := [][2]string{
-		{"⏎", drillLabel}, {"/", "filter"}, {"⇥", "read"}, {"\\", "layout"},
+		{"⏎", enterLabel}, {"t", otherLabel}, {"/", "filter"}, {"⇥", "read"}, {"\\", "layout"},
 	}
-	if engines.CanToggle() {
+	if settings.Engines.CanToggle() {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
 	hints = append(hints,
@@ -126,56 +121,44 @@ func New(repo *git.Repo, engine diff.Engine, commits []git.CommitInfo, tests boo
 			return tui.TextStyle(selected).Render(tui.Truncate(c.Hash+"  "+c.Message, w))
 		},
 	}
-	return Model{repo: repo, engines: engines, tests: tests, list: tui.NewSplitList(cfg, commits)}
+	return Model{repo: repo, settings: settings, tests: tests, list: tui.NewSplitList(cfg, commits)}
 }
 
 func (m Model) Init() tea.Cmd { return tui.ThemeInit() }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// The drilled diff view runs its own SplitList with an independent preview
-	// request counter; its async traffic is tagged (drilledMsg) so it routes back
-	// to the drilled view and is never mistaken for the commit list's own
-	// SelectionChangedMsg/PreviewMsg (whose ReqIDs would otherwise collide).
-	if dm, ok := msg.(drilledMsg); ok {
-		if !m.drilling {
-			return m, nil // a stale message from a closed drilldown
+	// Everything but the commit list's own traffic belongs to an open drilldown —
+	// input especially: a mouse event reaching the hidden list would silently move
+	// its selection, and a later cherry-pick/revert would act on the drifted commit.
+	if m.drill.Owns(msg) {
+		next, cmd, closed := m.drill.Update(msg)
+		m.drill = next
+		if closed {
+			m.list, m.settings, cmd = lensui.BackToList(m.drill, m.list, m.settings)
 		}
-		return m.updateDrilled(dm.msg)
+		return m, cmd
 	}
-	// Input (keys, mouse) and editor-close messages belong to whichever view is
-	// visible: while drilled they must reach the drilled view, not the hidden
-	// commit list — a mouse event landing there would silently move its
-	// selection, and a later esc/cherry-pick/revert would act on the drifted
-	// commit.
-	switch msg.(type) {
-	case tea.KeyPressMsg, tea.MouseMsg, tui.EditorClosedMsg:
-		if m.drilling {
-			return m.updateDrilled(msg)
-		}
+	if lensui.Discard(msg) {
+		return m, nil // a late message from a closed drilldown
 	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Resizes go to both the commit list (so it's current when we return) and
-		// the drilled view.
+		// Goes to both, so the commit list is current when we return.
 		m.width, m.height = msg.Width, msg.Height
-		var lc tea.Cmd
+		var lc, dc tea.Cmd
 		m.list, lc = m.list.Update(msg)
-		if !m.drilling {
-			return m, lc
-		}
-		var dc tea.Cmd
-		m, dc = m.sendDrilled(msg)
+		m.drill, dc = m.drill.Resize(msg)
 		return m, tea.Batch(lc, dc)
 	case tui.SelectionChangedMsg:
 		m.stream.Cancel() // stop the previous commit's streaming work
 		m.stream = nil
-		if m.drilling || m.collecting || msg.CacheHit {
-			return m, nil // hidden/about-to-be, or served from cache; don't stream
+		if m.drill.Open() || msg.CacheHit {
+			return m, nil // hidden, or served from cache; don't stream
 		}
 		return m, m.previewCmd(msg.ReqID)
 	case tui.StreamReadyMsg:
-		if m.drilling || m.collecting {
+		if m.drill.Open() {
 			if msg.Cancel != nil {
 				msg.Cancel() // a load that landed after we left the list; drop it
 			}
@@ -188,17 +171,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.list, m.stream, cmd = tui.AdvanceStream(m.list, m.stream, msg)
 		return m, cmd
-	case testsCollectedMsg:
-		// Collected off the event loop (see collectTests); open the tests
-		// drilldown. A collection error surfaces as an empty drilldown, matching
-		// the file drilldown's handling.
-		m.collecting = false
-		m.drilled = reviewui.New(m.repo, m.engines.Engine(), msg.specs, msg.scope, false).
-			SetBreadcrumb(tui.Breadcrumb("log", msg.scope.Target, "tests"))
-		m.drilling = true
-		var cmd tea.Cmd
-		m, cmd = m.sendDrilled(tea.WindowSizeMsg{Width: m.width, Height: m.height})
-		return m, cmd
 	case tea.KeyPressMsg:
 		if m.list.Capturing() || m.list.ShowingHelp() {
 			break
@@ -208,32 +180,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "enter":
-			if c, ok := m.list.Selected(); ok {
-				if m.tests && m.collecting {
-					break // a tests collect is already in flight; ignore re-enter
-				}
-				m.stream.Cancel() // the list preview is hidden once a commit opens
-				m.stream = nil
-				if m.tests {
-					// Collecting a commit's tests parses every changed file and
-					// shells git per file; run it off the event loop, then open.
-					// `collecting` keeps the list from streaming or re-entering
-					// until the specs land, and a footer note shows it's running.
-					m.collecting = true
-					m.list = m.list.SetFlash("collecting tests…")
-					return m, m.collectTests(c)
-				}
-				return m.drillInto(c)
-			}
+			return m.openDrill(m.tests)
+		case "t":
+			return m.openDrill(!m.tests)
 		case "\\":
-			m.display = m.display.Next()
+			m.settings.Display = m.settings.Display.Next()
 			return m.reloadFresh()
 		case "e":
-			if !m.engines.CanToggle() {
+			if !m.settings.Engines.CanToggle() {
 				break // only one engine available; nothing to toggle
 			}
-			m.engines = m.engines.Toggle()
-			m.list = m.list.SetContext(m.engines.Name())
+			m.settings.Engines = m.settings.Engines.Toggle()
+			m.list = m.list.SetContext(m.settings.Engines.Name())
 			return m.reloadFresh()
 		case "c":
 			return m.startAction(CherryPick)
@@ -246,77 +204,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// drilledMsg wraps a message produced by the drilled diff view so the parent can
-// route it back without confusing it with the commit list's own preview traffic.
-type drilledMsg struct{ msg tea.Msg }
-
-// tagDrilled wraps the drilled view's preview messages as drilledMsg so the
-// parent routes them back to it rather than confusing them with the commit
-// list's own preview traffic (their ReqIDs would collide).
-func tagDrilled(cmd tea.Cmd) tea.Cmd {
-	return tui.WrapPreviewCmd(cmd, func(msg tea.Msg) tea.Msg { return drilledMsg{msg} })
-}
-
-// sendDrilled forwards a message to the drilled diff view and tags the commands
-// it returns. Centralizes the one diffui.Model type assertion.
-func (m Model) sendDrilled(msg tea.Msg) (Model, tea.Cmd) {
-	dm, cmd := m.drilled.Update(msg)
-	m.drilled = dm.(tui.PreviewChild)
-	return m, tagDrilled(cmd)
-}
-
-// updateDrilled delegates to the embedded diff view, intercepting esc as "back
-// to the commit list" (but letting esc clear a filter / close help there).
-func (m Model) updateDrilled(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		if key.String() == "esc" && !m.drilled.InMode() {
-			m.drilling = false
-			// Refresh the commit preview, which was frozen (and possibly cut off
-			// mid-stream) while drilled — a cache hit if it had finished.
-			var cmd tea.Cmd
-			m.list, cmd = m.list.Reload()
-			return m, cmd
-		}
+// openDrill opens the selected commit's files↔tests view, on its tests side when
+// tests is set. The list's own preview stream is cancelled: it's hidden now, and
+// shouldn't keep difftastic busy.
+func (m Model) openDrill(tests bool) (tea.Model, tea.Cmd) {
+	commit, ok := m.list.Selected()
+	if !ok {
+		return m, nil
 	}
-	m, cmd := m.sendDrilled(msg)
-	return m, cmd
-}
-
-// drillInto opens the file-level diff view for a commit. The commit-list's own
-// preview stream is cancelled — the drilled view does its own (streamed) diff,
-// and the hidden list preview shouldn't keep difftastic busy.
-func (m Model) drillInto(commit git.CommitInfo) (tea.Model, tea.Cmd) {
+	m.stream.Cancel()
+	m.stream = nil
 	base, files, err := m.repo.CommitFiles(commit.Hash)
-	dv := diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash, false, nil, false).
-		SetBreadcrumb(tui.Breadcrumb("log", commit.Hash))
+	scope := review.DiffScope{Base: base, Target: commit.Hash}
+	lens := lensui.NewDrill(m.repo, m.settings, files, scope, tui.Breadcrumb("log", commit.Hash))
 	if err != nil {
 		// Surface the load failure instead of an indistinguishable "No changes found".
-		dv = dv.SetEmptyStatus(fmt.Sprintf("could not load commit diff: %v", err))
+		lens = lens.SetEmptyStatus(fmt.Sprintf("could not load commit diff: %v", err))
 	}
-	m.drilled = dv
-	m.drilling = true
-	m, cmd := m.sendDrilled(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	var cmd tea.Cmd
+	m.drill, cmd = lensui.OpenDrill(lens, m.width, m.height, tests)
 	return m, cmd
-}
-
-// testsCollectedMsg carries a commit's collected test specs back to the event
-// loop so the tests drilldown can open without blocking on parsing + git. A
-// collection error surfaces as an empty drilldown (like the file drilldown), so
-// it isn't carried here.
-type testsCollectedMsg struct {
-	scope review.DiffScope
-	specs []review.Spec
-}
-
-// collectTests parses the selected commit's touched tests off the event loop.
-func (m Model) collectTests(commit git.CommitInfo) tea.Cmd {
-	repo, hash := m.repo, commit.Hash
-	return func() tea.Msg {
-		base, _, _ := repo.CommitFiles(hash)
-		scope := review.DiffScope{Base: base, Target: hash}
-		specs, _ := review.Collect(repo, scope)
-		return testsCollectedMsg{scope: scope, specs: specs}
-	}
 }
 
 // reloadFresh drops the preview cache and reloads the current selection, after a
@@ -328,8 +235,8 @@ func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View {
-	if m.drilling {
-		return m.drilled.View()
+	if m.drill.Open() {
+		return m.drill.View()
 	}
 	return m.list.TeaView()
 }
@@ -344,8 +251,8 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	repo, engine := m.repo, m.engines.Engine()
-	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
+	repo, engine := m.repo, m.settings.Engines.Engine()
+	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.settings.Display)
 	return func() tea.Msg {
 		base, files, err := repo.CommitFiles(commit.Hash)
 		if err != nil {

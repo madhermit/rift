@@ -6,7 +6,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/madhermit/rift/internal/diff"
 	"github.com/madhermit/rift/internal/git"
+	"github.com/madhermit/rift/internal/review"
 	"github.com/madhermit/rift/internal/tui"
+	lensui "github.com/madhermit/rift/internal/tui/lens"
 )
 
 type StashAction int
@@ -19,24 +21,26 @@ const (
 )
 
 type Model struct {
-	repo    *git.Repo
-	engines tui.EngineToggle
-	list    tui.SplitList[git.StashEntry]
-	action  StashAction
-	confirm tui.Confirm // pending y/n gate for a destructive action (pop/drop)
-	display diff.Display
-	stream  *tui.PreviewStream // active stash-diff stream; nil otherwise
+	repo     *git.Repo
+	settings tui.ViewSettings
+	list     tui.SplitList[git.StashEntry]
+	action   StashAction
+	confirm  tui.Confirm        // pending y/n gate for a destructive action (pop/drop)
+	stream   *tui.PreviewStream // active stash-diff stream; nil otherwise
+	drill    lensui.Drill       // the selected stash's files↔tests view, once opened
+	width    int
+	height   int
 }
 
 func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
-	engines := tui.NewEngineToggle(engine)
+	settings := tui.ViewSettings{Engines: tui.NewEngineToggle(engine)}
 	branch := repo.CurrentBranch()
 
 	hints := [][2]string{
-		{"/", "filter"}, {"⇥", "read"},
+		{"⏎", "files"}, {"t", "tests"}, {"/", "filter"}, {"⇥", "read"},
 		{"a", "apply"}, {"p", "pop"}, {"x", "drop"}, {"\\", "layout"},
 	}
-	if engines.CanToggle() {
+	if settings.Engines.CanToggle() {
 		hints = append(hints, [2]string{"e", "engine"})
 	}
 	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
@@ -50,18 +54,18 @@ func New(repo *git.Repo, engine diff.Engine, stashes []git.StashEntry) Model {
 		EmptyStatus: "No stashes found",
 		Hints:       hints,
 		Match: func(s git.StashEntry) string {
-			return fmt.Sprintf("stash@{%d} %s %s", s.Index, s.Branch, s.Message)
+			return stashRef(s.Index) + " " + s.Branch + " " + s.Message
 		},
 		PreviewTitle: func(s git.StashEntry) string {
-			return fmt.Sprintf("stash@{%d} · %s", s.Index, s.Branch)
+			return stashRef(s.Index) + " · " + s.Branch
 		},
 		CacheKey: func(s git.StashEntry) string { return fmt.Sprintf("%d", s.Index) },
-		Yank:     func(s git.StashEntry) string { return fmt.Sprintf("stash@{%d}", s.Index) },
+		Yank:     func(s git.StashEntry) string { return stashRef(s.Index) },
 		Row: func(s git.StashEntry, w int, selected bool) string {
-			return tui.TextStyle(selected).Render(tui.Truncate(fmt.Sprintf("stash@{%d}  %s", s.Index, s.Message), w))
+			return tui.TextStyle(selected).Render(tui.Truncate(stashRef(s.Index)+"  "+s.Message, w))
 		},
 	}
-	return Model{repo: repo, engines: engines, list: tui.NewSplitList(cfg, stashes)}
+	return Model{repo: repo, settings: settings, list: tui.NewSplitList(cfg, stashes)}
 }
 
 func (m Model) Action() StashAction { return m.action }
@@ -76,15 +80,41 @@ func (m Model) SelectedIndex() int {
 func (m Model) Init() tea.Cmd { return tui.ThemeInit() }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// See logui.Model.Update: an open drilldown takes everything but the stash
+	// list's own traffic, so no input can drift the entry an action would hit.
+	if m.drill.Owns(msg) {
+		next, cmd, closed := m.drill.Update(msg)
+		m.drill = next
+		if closed {
+			m.list, m.settings, cmd = lensui.BackToList(m.drill, m.list, m.settings)
+		}
+		return m, cmd
+	}
+	if lensui.Discard(msg) {
+		return m, nil // a late message from a closed drilldown
+	}
+
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		var lc, dc tea.Cmd
+		m.list, lc = m.list.Update(msg)
+		m.drill, dc = m.drill.Resize(msg)
+		return m, tea.Batch(lc, dc)
 	case tui.SelectionChangedMsg:
 		m.stream.Cancel() // stop the previous stash's streaming work
 		m.stream = nil
-		if msg.CacheHit {
-			return m, nil // preview served from cache; no new load
+		if m.drill.Open() || msg.CacheHit {
+			return m, nil // hidden, or served from cache; no new load
 		}
 		return m, m.previewCmd(msg.ReqID)
 	case tui.StreamReadyMsg:
+		if m.drill.Open() {
+			if msg.Cancel != nil {
+				msg.Cancel() // a load that landed after we left the list; drop it
+			}
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.list, m.stream, cmd = tui.ApplyStream(m.list, m.stream, msg)
 		return m, cmd
@@ -100,15 +130,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.resolveConfirm(msg.String())
 		}
 		switch msg.String() {
+		case "enter":
+			return m.openDrill(false)
+		case "t":
+			return m.openDrill(true)
 		case "\\":
-			m.display = m.display.Next()
+			m.settings.Display = m.settings.Display.Next()
 			return m.reloadFresh()
 		case "e":
-			if !m.engines.CanToggle() {
+			if !m.settings.Engines.CanToggle() {
 				break // only one engine available; nothing to toggle
 			}
-			m.engines = m.engines.Toggle()
-			m.list = m.list.SetContext(m.engines.Name())
+			m.settings.Engines = m.settings.Engines.Toggle()
+			m.list = m.list.SetContext(m.settings.Engines.Name())
 			return m.reloadFresh()
 		}
 		if action, ok := stashAction(msg.String()); ok {
@@ -120,7 +154,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) View() tea.View { return m.list.TeaView() }
+// openDrill opens the selected stash's files↔tests view, on its tests side when
+// tests is set. The list's own preview stream is cancelled: it's hidden now.
+func (m Model) openDrill(tests bool) (tea.Model, tea.Cmd) {
+	entry, ok := m.list.Selected()
+	if !ok {
+		return m, nil
+	}
+	m.stream.Cancel()
+	m.stream = nil
+	base, target := m.repo.StashRange(entry.Index)
+	files, err := m.repo.DiffBetweenCommits(base, target)
+	scope := review.DiffScope{Base: base, Target: target}
+	lens := lensui.NewDrill(m.repo, m.settings, files, scope, tui.Breadcrumb("stash", stashRef(entry.Index)))
+	if err != nil {
+		lens = lens.SetEmptyStatus(fmt.Sprintf("could not load stash diff: %v", err))
+	}
+	var cmd tea.Cmd
+	m.drill, cmd = lensui.OpenDrill(lens, m.width, m.height, tests)
+	return m, cmd
+}
+
+func stashRef(index int) string { return fmt.Sprintf("stash@{%d}", index) }
+
+func (m Model) View() tea.View {
+	if m.drill.Open() {
+		return m.drill.View()
+	}
+	return m.list.TeaView()
+}
 
 // reloadFresh drops the preview cache and reloads the current selection, after a
 // setting (layout/engine) that affects rendering has changed.
@@ -167,7 +229,7 @@ func (m Model) startAction(action StashAction) (tea.Model, tea.Cmd) {
 	if action == Apply {
 		return m, tea.Quit
 	}
-	m.confirm = tui.Ask(fmt.Sprintf("%s stash@{%d}", action.verb(), entry.Index))
+	m.confirm = tui.Ask(action.verb() + " " + stashRef(entry.Index))
 	m.list = m.list.SetPrompt(m.confirm.Prompt())
 	return m, nil
 }
@@ -193,8 +255,8 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	repo, engine := m.repo, m.engines.Engine()
-	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
+	repo, engine := m.repo, m.settings.Engines.Engine()
+	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.settings.Display)
 	return func() tea.Msg {
 		opts.Base, opts.Target = repo.StashRange(entry.Index)
 		files, err := repo.DiffBetweenCommits(opts.Base, opts.Target)
