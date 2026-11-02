@@ -25,7 +25,7 @@ var logCmd = &cobra.Command{
 func init() {
 	logCmd.Flags().IntP("max-count", "n", 200, "Maximum number of commits to show (0 for unlimited)")
 	logCmd.Flags().Bool("all", false, "Show commits from all branches")
-	logCmd.Flags().Bool("tests", false, "Drill into each commit's touched test cases instead of its files")
+	logCmd.Flags().Bool("tests", false, "Show each commit's touched test cases (interactively, open commits on their tests)")
 	rootCmd.AddCommand(logCmd)
 }
 
@@ -69,6 +69,11 @@ func runLogAction(cmd *cobra.Command, args []string) (actionRan bool, err error)
 		return false, err
 	}
 
+	tests, _ := cmd.Flags().GetBool("tests")
+	if tests && mode != output.Interactive {
+		return false, writeCommitTests(mode, repo, commits, pathArgs)
+	}
+
 	switch mode {
 	case output.JSON:
 		return false, output.WriteJSON(os.Stdout, commits)
@@ -80,7 +85,6 @@ func runLogAction(cmd *cobra.Command, args []string) (actionRan bool, err error)
 		return false, output.WritePlain(os.Stdout, lines)
 	default:
 		engine := diff.NewEngine()
-		tests, _ := cmd.Flags().GetBool("tests")
 		m := logui.New(repo, engine, commits, tests)
 		result, err := tui.NewProgram(m).Run()
 		if err != nil {

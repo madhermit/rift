@@ -47,6 +47,10 @@ pre-1.0).
 - `rift stash`: `⏎` opens an entry's files as a browsable list. It used to move
   focus to the preview, which `⇥` still does.
 
+- `rift log --tests` honors `--print` and `--json`. JSON lists every commit with
+  a `tests` array (empty when it touched none); the plain listing shows only the
+  commits that touched tests.
+
 - Search inside the diff in `rift stage`: `/` from the diff pane, `n` / `N` to step
   matches. The active hunk follows the match, so `s` acts on what you found.
 

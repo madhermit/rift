@@ -26,6 +26,51 @@ func runTestsLens(mode output.Mode, repo *git.Repo, scope review.DiffScope) erro
 	return output.WritePlain(os.Stdout, renderSpecs(specs))
 }
 
+// commitTests is a commit with the test cases it touched, for `log --tests --json`.
+type commitTests struct {
+	git.CommitInfo
+	Tests []review.Spec `json:"tests"`
+}
+
+// writeCommitTests renders each commit's touched tests. JSON keeps every commit —
+// a change that touches no tests is itself a finding, and `tests` being empty says
+// so — while the plain listing shows only the commits that have something to list.
+func writeCommitTests(mode output.Mode, repo *git.Repo, commits []git.CommitInfo, paths []string) error {
+	results := make([]commitTests, 0, len(commits))
+	for _, c := range commits {
+		base, _, err := repo.CommitFiles(c.Hash)
+		if err != nil {
+			return err
+		}
+		specs, err := review.Collect(repo, review.DiffScope{Base: base, Target: c.Hash, Paths: paths})
+		if err != nil {
+			return err
+		}
+		if specs == nil {
+			specs = []review.Spec{}
+		}
+		results = append(results, commitTests{CommitInfo: c, Tests: specs})
+	}
+	if mode == output.JSON {
+		return output.WriteJSON(os.Stdout, results)
+	}
+	var lines []string
+	for _, r := range results {
+		if len(r.Tests) == 0 {
+			continue
+		}
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, r.Hash+" "+r.Message)
+		lines = append(lines, renderSpecs(r.Tests)...)
+	}
+	if len(lines) == 0 {
+		lines = renderSpecs(nil)
+	}
+	return output.WritePlain(os.Stdout, lines)
+}
+
 // renderSpecs groups specs by file into a plain indented listing for --print.
 func renderSpecs(specs []review.Spec) []string {
 	if len(specs) == 0 {
