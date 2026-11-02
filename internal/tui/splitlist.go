@@ -258,10 +258,14 @@ func (m SplitList[T]) ClearCacheAndReload() (SplitList[T], tea.Cmd) {
 	return m.requestPreview()
 }
 
+// Loading reports whether the selection's preview hasn't started arriving yet.
+func (m SplitList[T]) Loading() bool { return m.loading }
+
 // Reload re-requests the current selection's preview (a cache hit when it's
 // already loaded, otherwise a fresh load). Used to refresh a preview whose
 // stream was interrupted — e.g. returning from a drilldown.
 func (m SplitList[T]) Reload() (SplitList[T], tea.Cmd) {
+	m.loading = false // the interrupted load's spinner chain has died; start a new one
 	return m.requestPreview()
 }
 

@@ -25,6 +25,11 @@ func NewEngineToggle(engine diff.Engine) EngineToggle {
 // Engine is the active engine — what previews are rendered with.
 func (e EngineToggle) Engine() diff.Engine { return e.engines[e.idx] }
 
+// Primary is the engine the ring started from. A view built over an existing ring
+// is constructed with it and then handed the ring (see ViewSettings), since a view
+// seeded with the alternate would conclude there is nothing to toggle to.
+func (e EngineToggle) Primary() diff.Engine { return e.engines[0] }
+
 // Name is the active engine's name, used as the header context label.
 func (e EngineToggle) Name() string { return e.Engine().Name() }
 
@@ -39,4 +44,19 @@ func (e EngineToggle) Toggle() EngineToggle {
 		e.idx = (e.idx + 1) % len(e.engines)
 	}
 	return e
+}
+
+// ViewSettings is how previews are rendered: the engine ring and the layout. A
+// screen hands them to the views it hosts and takes them back, so `e` and `\\`
+// mean the same thing across a lens toggle or a drilldown. The whole ring travels
+// (not just the active engine) so a view opened on the alternate can still cycle
+// back.
+type ViewSettings struct {
+	Engines EngineToggle
+	Display diff.Display
+}
+
+// Same reports whether two settings render identically.
+func (s ViewSettings) Same(o ViewSettings) bool {
+	return s.Display == o.Display && s.Engines.Name() == o.Engines.Name()
 }

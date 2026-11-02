@@ -28,10 +28,12 @@ type Model struct {
 	engines tui.EngineToggle
 	list    tui.SplitList[review.Spec]
 
-	scope    review.DiffScope
-	display  diff.Display
-	stream   *tui.PreviewStream // active spec-diff stream; nil otherwise
-	watching bool               // show the live-watch indicator in the header context
+	scope       review.DiffScope
+	display     diff.Display
+	stream      *tui.PreviewStream // active spec-diff stream; nil otherwise
+	interrupted bool               // CancelPreview stopped the stream before it finished
+	watching    bool               // show the live-watch indicator in the header context
+	drilled     bool               // embedded under a breadcrumb that already names the target
 }
 
 // New builds the tests lens for a diff. The scope decides whether it reads the
@@ -218,13 +220,39 @@ func (m Model) SetWatching(on bool) Model {
 }
 
 func (m Model) contextLabel() string {
-	return tui.ContextLabel(m.scope.Target, m.engines.Name(), m.watching)
+	target := m.scope.Target
+	if m.drilled {
+		target = "" // the breadcrumb already names it
+	}
+	return tui.ContextLabel(target, m.engines.Name(), m.watching)
+}
+
+// Settings reports the engine and layout this view renders with.
+func (m Model) Settings() tui.ViewSettings {
+	return tui.ViewSettings{Engines: m.engines, Display: m.display}
+}
+
+// WithSettings sets the engine and layout on a view that hasn't rendered yet.
+func (m Model) WithSettings(s tui.ViewSettings) Model {
+	m.engines, m.display = s.Engines, s.Display
+	m.list = m.list.SetContext(m.contextLabel())
+	return m
+}
+
+// ApplySettings brings an already-rendered view in line with s, re-rendering
+// only if that changes anything.
+func (m Model) ApplySettings(s tui.ViewSettings) (tea.Model, tea.Cmd) {
+	if m.Settings().Same(s) {
+		return m, nil
+	}
+	return m.WithSettings(s).reloadFresh()
 }
 
 // SetBreadcrumb marks this view as an embedded drilldown: it sets the header
 // breadcrumb (e.g. "log ❯ a1b2c3d ❯ tests") and adds an "esc back" footer hint.
 func (m Model) SetBreadcrumb(screen string) Model {
-	m.list = m.list.WithBreadcrumb(screen)
+	m.drilled = true
+	m.list = m.list.WithBreadcrumb(screen).SetContext(m.contextLabel())
 	return m
 }
 
@@ -238,12 +266,27 @@ func (m Model) SetFlash(s string) Model {
 // CancelPreview stops this model's in-flight diff stream — used by the lens
 // wrapper before hiding it, so a backgrounded difftastic run doesn't linger.
 func (m Model) CancelPreview() tea.Model {
+	m.interrupted = m.stream != nil
 	m.stream.Cancel()
 	m.stream = nil
 	return m
 }
 
+// ResumePreview reloads a preview that being hidden cut short — a load that never
+// answered, or a stream stopped part-way. A finished one is left alone, so the
+// reader comes back to the place they left.
+func (m Model) ResumePreview() (tea.Model, tea.Cmd) {
+	if !m.interrupted && !m.list.Loading() {
+		return m, nil
+	}
+	m.interrupted = false
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Reload()
+	return m, cmd
+}
+
 func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
+	m.interrupted = false // this reload replaces whatever was cut short
 	var cmd tea.Cmd
 	m.list, cmd = m.list.ClearCacheAndReload()
 	return m, cmd

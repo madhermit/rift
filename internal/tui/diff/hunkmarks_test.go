@@ -219,7 +219,7 @@ func TestHunkMarkThroughKeys(t *testing.T) {
 	}
 	m = send(m, tea.KeyPressMsg{Code: tea.KeyTab}) // focus the preview
 	m = send(m, tui.PreviewMsg{Content: preview, ReqID: reqID})
-	m = send(m, hunksLoadedMsg{
+	m = send(m, HunksLoadedMsg{
 		hunks: map[string][]diff.Hunk{"a.go": hunks},
 		keys:  map[string][]string{"a.go": {review.HunkKey(hunks[0]), review.HunkKey(hunks[1])}},
 	})

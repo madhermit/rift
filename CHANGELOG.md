@@ -48,6 +48,9 @@ pre-1.0).
 
 ### Changed
 
+- The engine (`e`) and layout (`\`) now carry across the files↔tests toggle and
+  in and out of an opened commit or stash, instead of resetting.
+
 - `rift stash` and `rift stage` open their empty screen when there's nothing to
   show, like `rift diff`, rather than printing a line and exiting — which the menu
   immediately painted over.
@@ -67,6 +70,9 @@ pre-1.0).
 
 - Added and deleted files in a difftastic diff were headed with a temp or absolute
   path instead of their repo path.
+
+- Pressing `t` before a preview finished left it stuck on a spinner (or cut off
+  part-way) when you toggled back. The same could strand the hunk cursor.
 
 - The diff preview's scroll-to-line anchor (used by the tests lens) skipped
   rows whose line number had a different digit width from the file's most

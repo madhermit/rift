@@ -52,11 +52,13 @@ func (rm *reviewMarks) partlyReviewed(path string) bool {
 	return n > 0
 }
 
-// hunksLoadedMsg carries the scope's hunk index, read off the event loop. It
+// HunksLoadedMsg carries the scope's hunk index, read off the event loop. It
 // names the scope it was read for so a load in flight when the scope changed
 // (the `s` staged toggle rebuilds this model) is dropped rather than applied to
-// the wrong side of the index.
-type hunksLoadedMsg struct {
+// the wrong side of the index. It is exported so a host can route it back here
+// when another view is showing: losing it would strand the cursor, since the
+// read is only ever started once.
+type HunksLoadedMsg struct {
 	staged bool
 	base   string
 	target string
@@ -100,18 +102,20 @@ type Model struct {
 	engines tui.EngineToggle
 	list    tui.SplitList[git.ChangedFile]
 
-	staged     bool
-	base       string
-	target     string
-	commitDiff bool
-	display    diff.Display
-	stream     *tui.PreviewStream // active "all changes" stream; nil otherwise
+	staged      bool
+	base        string
+	target      string
+	commitDiff  bool
+	display     diff.Display
+	stream      *tui.PreviewStream // active "all changes" stream; nil otherwise
+	interrupted bool               // CancelPreview stopped the stream before it finished
 
 	files          []git.ChangedFile // the full changed set; the list shows a (filtered) view of it
 	paths          []string          // pathspec scope (from `-- path...`), re-applied on reload
 	marks          *reviewMarks      // nil for a commit diff — historical files don't get reviewed
 	unreviewedOnly bool
 	watching       bool // show the live-watch indicator in the header context
+	drilled        bool // embedded under a breadcrumb that already names the target
 	hunk           hunkCursor
 }
 
@@ -276,7 +280,32 @@ func (m Model) SetWatching(on bool) Model {
 }
 
 func (m Model) contextLabel() string {
-	return tui.ContextLabel(m.target, m.engines.Name(), m.watching)
+	target := m.target
+	if m.drilled {
+		target = "" // the breadcrumb already names it
+	}
+	return tui.ContextLabel(target, m.engines.Name(), m.watching)
+}
+
+// Settings reports the engine and layout this view renders with.
+func (m Model) Settings() tui.ViewSettings {
+	return tui.ViewSettings{Engines: m.engines, Display: m.display}
+}
+
+// WithSettings sets the engine and layout on a view that hasn't rendered yet.
+func (m Model) WithSettings(s tui.ViewSettings) Model {
+	m.engines, m.display = s.Engines, s.Display
+	m.list = m.list.SetContext(m.contextLabel())
+	return m
+}
+
+// ApplySettings brings an already-rendered view in line with s, re-rendering
+// only if that changes anything.
+func (m Model) ApplySettings(s tui.ViewSettings) (tea.Model, tea.Cmd) {
+	if m.Settings().Same(s) {
+		return m, nil
+	}
+	return m.WithSettings(s).reloadFresh()
 }
 
 // SetEmptyStatus overrides the footer text shown when the list is empty (e.g. a
@@ -290,7 +319,8 @@ func (m Model) SetEmptyStatus(s string) Model {
 // breadcrumb (e.g. "log ❯ a1b2c3d") and adds an "esc back" footer hint. Used by
 // the log drilldown so the header names its origin and the way back shows.
 func (m Model) SetBreadcrumb(screen string) Model {
-	m.list = m.list.WithBreadcrumb(screen)
+	m.drilled = true
+	m.list = m.list.WithBreadcrumb(screen).SetContext(m.contextLabel())
 	return m
 }
 
@@ -361,7 +391,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.indexHunks()
 		}
 		return m.refreshHunkCursor(), cmd
-	case hunksLoadedMsg:
+	case HunksLoadedMsg:
 		m.hunk.loading = false
 		if msg.staged != m.staged || msg.base != m.base || msg.target != m.target {
 			return m, nil // read for a scope this model has since left
@@ -567,7 +597,7 @@ func (m *Model) loadHunksIfNeeded() tea.Cmd {
 			}
 			keys[path] = ks
 		}
-		return hunksLoadedMsg{staged: opts.Staged, base: opts.Base, target: opts.Target, hunks: byPath, keys: keys}
+		return HunksLoadedMsg{staged: opts.Staged, base: opts.Base, target: opts.Target, hunks: byPath, keys: keys}
 	}
 }
 
@@ -758,6 +788,7 @@ func (m Model) toggleUnreviewedOnly() (tea.Model, tea.Cmd) {
 // reloadFresh drops the preview cache and reloads the current selection, after a
 // setting (layout/engine) that affects rendering has changed.
 func (m Model) reloadFresh() (tea.Model, tea.Cmd) {
+	m.interrupted = false // this reload replaces whatever was cut short
 	var cmd tea.Cmd
 	m.list, cmd = m.list.ClearCacheAndReload()
 	return m, cmd
@@ -851,9 +882,23 @@ func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
 // CancelPreview stops this model's in-flight diff stream — used by the lens
 // wrapper before hiding it, so a backgrounded difftastic run doesn't linger.
 func (m Model) CancelPreview() tea.Model {
+	m.interrupted = m.stream != nil
 	m.stream.Cancel()
 	m.stream = nil
 	return m
+}
+
+// ResumePreview reloads a preview that being hidden cut short — a load that never
+// answered, or a stream stopped part-way. A finished one is left alone, so the
+// reader comes back to the place they left.
+func (m Model) ResumePreview() (tea.Model, tea.Cmd) {
+	if !m.interrupted && !m.list.Loading() {
+		return m, nil
+	}
+	m.interrupted = false
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Reload()
+	return m, cmd
 }
 
 // previewCmd streams the selected files' diffs: the selected file, or every file

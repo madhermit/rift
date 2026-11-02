@@ -24,10 +24,15 @@ import (
 // would otherwise collide. The first switch to tests parses the diff off the
 // event loop (collectTests) rather than blocking.
 type Model struct {
-	repo   *git.Repo
-	engine diff.Engine
-	scope  review.DiffScope
-	files  []git.ChangedFile
+	repo     *git.Repo
+	settings tui.ViewSettings // engine + layout for lenses built later; see captureSettings
+	scope    review.DiffScope
+	files    []git.ChangedFile
+	origin   string // breadcrumb when embedded under another screen; "" at top level
+	// owner identifies this lens in its tagged messages. A drilldown opens a fresh
+	// lens per item, all starting at gen 0, so gen alone can't tell a message from
+	// a lens that has since been closed.
+	owner *byte
 
 	filesLens  tui.PreviewChild // built lazily / at New; nil until first shown
 	testsLens  tui.PreviewChild
@@ -43,7 +48,8 @@ type Model struct {
 }
 
 func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope review.DiffScope, showTests, unreviewed, watch bool) Model {
-	m := Model{repo: repo, engine: engine, scope: scope, files: files, showTests: showTests, unreviewed: unreviewed, watch: watch, collectGen: -1}
+	settings := tui.ViewSettings{Engines: tui.NewEngineToggle(engine)}
+	m := Model{repo: repo, settings: settings, owner: new(byte), scope: scope, files: files, showTests: showTests, unreviewed: unreviewed, watch: watch, collectGen: -1}
 	if showTests {
 		m.testsLens = m.buildTests() // sync at startup is fine
 	} else {
@@ -52,9 +58,31 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, scope revi
 	return m
 }
 
+// NewDrill builds a lens over a committed scope for embedding under another
+// screen: origin is the breadcrumb it opens under (e.g. "log ❯ a1b2c3d"), and it
+// renders with the host's settings. It opens on the files; see Drill.
+func NewDrill(repo *git.Repo, settings tui.ViewSettings, files []git.ChangedFile, scope review.DiffScope, origin string) Model {
+	m := Model{repo: repo, settings: settings, owner: new(byte), scope: scope, files: files, origin: origin, collectGen: -1}
+	m.filesLens = m.buildFiles()
+	return m
+}
+
+// SetEmptyStatus overrides what an empty file lens says (e.g. a load failure,
+// distinct from "No changes found").
+func (m Model) SetEmptyStatus(status string) Model {
+	if d, ok := m.filesLens.(diffui.Model); ok {
+		m.filesLens = d.SetEmptyStatus(status)
+	}
+	return m
+}
+
 func (m Model) buildFiles() tui.PreviewChild {
-	lens := diffui.New(m.repo, m.engine, m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true, m.scope.Paths, m.unreviewed)
-	return lens.SetWatching(m.watch)
+	lens := diffui.New(m.repo, m.settings.Engines.Primary(), m.files, m.scope.Staged, m.scope.Base, m.scope.Target, true, m.scope.Paths, m.unreviewed).
+		WithSettings(m.settings).SetWatching(m.watch)
+	if m.origin != "" {
+		lens = lens.SetBreadcrumb(m.origin)
+	}
+	return lens
 }
 
 func (m Model) buildTests() tui.PreviewChild {
@@ -65,7 +93,12 @@ func (m Model) buildTests() tui.PreviewChild {
 // newTests builds the tests lens over already-collected specs, tagged with the
 // current watch state.
 func (m Model) newTests(specs []review.Spec) tui.PreviewChild {
-	return reviewui.New(m.repo, m.engine, specs, m.scope, true).SetWatching(m.watch)
+	lens := reviewui.New(m.repo, m.settings.Engines.Primary(), specs, m.scope, true).
+		WithSettings(m.settings).SetWatching(m.watch)
+	if m.origin != "" {
+		lens = lens.SetBreadcrumb(tui.Breadcrumb(m.origin, "tests"))
+	}
+	return lens
 }
 
 func (m Model) Init() tea.Cmd {
@@ -81,22 +114,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case watchTickMsg, watchStateMsg:
 		return m.watchUpdate(msg)
+	case diffui.HunksLoadedMsg:
+		// Belongs to the file lens whichever one is showing: it may have toggled
+		// away while the read was in flight, and the read won't be started again.
+		if m.filesLens == nil {
+			return m, nil
+		}
+		nm, cmd := m.filesLens.Update(msg)
+		m.filesLens = nm.(tui.PreviewChild)
+		return m, tagLens(m.owner, m.gen, cmd)
 	case lensMsg:
-		if msg.gen != m.gen {
-			// A stale message from a superseded generation. A stream that had just
-			// started never got its cancel registered — invoke it here, or its
-			// difftastic subprocesses would run to completion unmanaged.
-			if sr, ok := msg.msg.(tui.StreamReadyMsg); ok && sr.Cancel != nil {
-				sr.Cancel()
-			}
+		if msg.owner != m.owner || msg.gen != m.gen {
+			Discard(msg)
 			return m, nil
 		}
 		return m.delegate(msg.msg)
 	case lensCollectedMsg:
-		if msg.gen != m.gen {
+		if msg.owner != m.owner || msg.gen != m.gen {
 			return m, nil // a superseded tests build (toggled again before it landed)
 		}
 		m.collectGen = -1
+		m = m.captureSettings()
 		m = m.clearCollecting() // the specs landed; drop the "collecting…" note
 		if msg.apply && m.showTests {
 			// A watch refresh: apply the fresh specs to the shown lens in place,
@@ -149,7 +187,25 @@ func (m *Model) shownPtr() *tui.PreviewChild {
 
 func (m Model) shown() tui.PreviewChild { return *m.shownPtr() }
 
+// ShowTests switches to the tests lens, as `t` does; a no-op if it's showing.
+func (m Model) ShowTests() (tea.Model, tea.Cmd) {
+	if m.showTests {
+		return m, nil
+	}
+	return m.toggle()
+}
+
+// captureSettings records the shown lens's engine and layout, so whichever lens
+// shows or gets built next renders the same way.
+func (m Model) captureSettings() Model {
+	if shown := m.shown(); shown != nil {
+		m.settings = shown.Settings()
+	}
+	return m
+}
+
 func (m Model) toggle() (tea.Model, tea.Cmd) {
+	m = m.captureSettings()
 	if m.showTests {
 		if m.filesLens == nil {
 			m.filesLens = m.buildFiles()
@@ -201,6 +257,7 @@ func (m Model) clearCollecting() Model {
 // toggle. The file lens is cheap to rebuild now; the tests lens re-parses off the
 // event loop (like the first switch to tests) so `s` doesn't block the UI.
 func (m Model) toggleStaged() (tea.Model, tea.Cmd) {
+	m = m.captureSettings()
 	m.scope.Staged = !m.scope.Staged
 	m.files, _ = scopeFiles(m.repo, m.scope) // best-effort, like the reload paths
 	var rearm tea.Cmd
@@ -250,9 +307,26 @@ func (m Model) show(tests bool) (tea.Model, tea.Cmd) {
 		// showing stale specs indefinitely.
 		m.testsLens = nil
 	}
+	m = m.captureSettings()
 	m.showTests = tests
 	m.gen++
-	return m.delegate(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	model, sized := m.delegate(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	m = model.(Model)
+	// A retained lens may have rendered under other settings than the one just
+	// left, or been hidden with its preview unfinished; bring it up to date now
+	// that it has its size.
+	p := m.shownPtr()
+	var (
+		nm      tea.Model
+		settled tea.Cmd
+	)
+	if (*p).Settings().Same(m.settings) {
+		nm, settled = (*p).ResumePreview()
+	} else {
+		nm, settled = (*p).ApplySettings(m.settings)
+	}
+	*p = nm.(tui.PreviewChild)
+	return m, tea.Batch(sized, tagLens(m.owner, m.gen, settled))
 }
 
 // cancelShown stops the currently-shown lens's in-flight diff stream.
@@ -267,16 +341,41 @@ func (m Model) delegate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	p := m.shownPtr()
 	nm, cmd := (*p).Update(msg)
 	*p = nm.(tui.PreviewChild)
-	return m, tagLens(m.gen, cmd)
+	return m, tagLens(m.owner, m.gen, cmd)
 }
 
 func (m Model) View() tea.View { return m.shown().View() }
 
+// InMode reports whether esc has something to leave in the shown lens.
+func (m Model) InMode() bool { return m.shown().InMode() }
+
+// CancelPreview stops the shown lens's in-flight stream.
+func (m Model) CancelPreview() tea.Model { return m.cancelShown() }
+
+// Settings reports the shown lens's engine and layout.
+func (m Model) Settings() tui.ViewSettings { return m.shown().Settings() }
+
+// Discard settles a message tagged by a lens that is gone, reporting whether msg
+// was one: a stream that had just started never got its cancel registered, so
+// it's invoked here or its difftastic subprocesses would run on unmanaged.
+func Discard(msg tea.Msg) bool {
+	switch msg := msg.(type) {
+	case lensMsg:
+		if sr, ok := msg.msg.(tui.StreamReadyMsg); ok && sr.Cancel != nil {
+			sr.Cancel()
+		}
+		return true
+	case lensCollectedMsg:
+		return true
+	}
+	return false
+}
+
 func (m Model) collectTests(gen int, apply bool) tea.Cmd {
-	repo, scope := m.repo, m.scope
+	repo, scope, owner := m.repo, m.scope, m.owner
 	return func() tea.Msg {
 		specs, _ := review.Collect(repo, scope)
-		return lensCollectedMsg{gen: gen, apply: apply, specs: specs}
+		return lensCollectedMsg{owner: owner, gen: gen, apply: apply, specs: specs}
 	}
 }
 
@@ -291,6 +390,7 @@ func scopeFiles(repo *git.Repo, scope review.DiffScope) ([]git.ChangedFile, erro
 // lensCollectedMsg delivers the parsed tests for the first switch to the tests
 // lens, tagged with the generation that requested it.
 type lensCollectedMsg struct {
+	owner *byte
 	gen   int
 	apply bool // apply the specs to the shown lens in place (a watch refresh)
 	specs []review.Spec
@@ -299,12 +399,13 @@ type lensCollectedMsg struct {
 // lensMsg wraps a shown lens's async preview messages with the generation they
 // were emitted under, so a stale message from a toggled-away lens is dropped.
 type lensMsg struct {
-	gen int
-	msg tea.Msg
+	owner *byte
+	gen   int
+	msg   tea.Msg
 }
 
 // tagLens tags the shown lens's preview messages with the current generation so
 // a stale message from a toggled-away lens (an older gen) is dropped.
-func tagLens(gen int, cmd tea.Cmd) tea.Cmd {
-	return tui.WrapPreviewCmd(cmd, func(msg tea.Msg) tea.Msg { return lensMsg{gen: gen, msg: msg} })
+func tagLens(owner *byte, gen int, cmd tea.Cmd) tea.Cmd {
+	return tui.WrapPreviewCmd(cmd, func(msg tea.Msg) tea.Msg { return lensMsg{owner: owner, gen: gen, msg: msg} })
 }

@@ -2,11 +2,12 @@ package tui
 
 import tea "charm.land/bubbletea/v2"
 
-// PreviewChild is a SplitList-backed model embedded in a parent that hosts and
-// routes to it — the diff lens (files↔tests) and the log drilldown. The parent
+// PreviewChild is a SplitList-backed model hosted by the files↔tests lens. The parent
 // uses Capturing/ShowingHelp to know when not to run its own key handlers,
 // InMode to know when not to take esc for itself, and CancelPreview to stop the
-// child's stream before hiding it.
+// child's stream before hiding it (ResumePreview picks it back up on return, as
+// the messages it was waiting on are dropped while hidden). Settings and ApplySettings carry the engine
+// and layout across a switch between children.
 type PreviewChild interface {
 	Update(tea.Msg) (tea.Model, tea.Cmd)
 	View() tea.View
@@ -14,6 +15,9 @@ type PreviewChild interface {
 	ShowingHelp() bool
 	InMode() bool
 	CancelPreview() tea.Model
+	ResumePreview() (tea.Model, tea.Cmd)
+	Settings() ViewSettings
+	ApplySettings(ViewSettings) (tea.Model, tea.Cmd)
 }
 
 // WrapPreviewCmd wraps the async preview messages a child's command emits (and
