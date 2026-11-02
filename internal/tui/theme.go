@@ -346,6 +346,7 @@ var PreviewHelpKeys = [][2]string{
 	{"J/K  ⇧↑↓  ]/[", "next / prev item"},
 	{"gg/G", "top / bottom"},
 	{"{/}", "prev / next section"},
+	{"!term", "exclude from the list filter"},
 	{"ctrl+d/u", "scroll half-page"},
 	{"ctrl+f/b", "scroll page"},
 	{"esc", "leave mode"},

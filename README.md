@@ -150,6 +150,7 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 | `ctrl-f`/`ctrl-b`           | page down / up                                                               |
 | `⇥`                         | switch between the list and preview panes                                    |
 | `/`                         | fuzzy-filter (`⏎` accept, `esc` clear)                                       |
+| `!term`                     | inside a filter, drop anything matching `term` (e.g. `/ model !test`)        |
 | `y`                         | yank the selection (path, commit hash, or stash ref)                         |
 | `?`                         | keybinding overlay                                                           |
 | `q`, `ctrl-c`               | quit                                                                         |

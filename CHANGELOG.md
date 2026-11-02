@@ -7,6 +7,13 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Added
+
+- Exclusions in the fuzzy filter. A `!`-prefixed term drops anything matching
+  it, so `/ model !test` finds the model files without their tests and `/ !lock`
+  hides the lockfile. Works on every filterable list — `diff`, `log`, `stash`,
+  `stage`, the tests lens, and the menu.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added
