@@ -185,7 +185,11 @@ func (s *PreviewSearch) ClearSearch(vp *viewport.Model) {
 // HighlightMatch renders the current match in a viewport body in reverse video.
 func (s PreviewSearch) HighlightMatch(body string, yOffset int) string {
 	if line := s.MatchLine(); line >= 0 {
-		return highlightRows(body, yOffset, line, line)
+		rows := strings.Split(body, "\n")
+		if i := line - yOffset; i >= 0 && i < len(rows) {
+			rows[i] = reverseVideo(rows[i])
+		}
+		return strings.Join(rows, "\n")
 	}
 	return body
 }

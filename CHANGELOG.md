@@ -76,6 +76,13 @@ pre-1.0).
 
 ### Fixed
 
+- Dragging across a diff preview now selects text, not whole lines: start and
+  stop anywhere in a line to copy just that part, in either direction. Holding
+  the drag past the pane's top or bottom edge keeps scrolling so a selection can
+  outgrow the screen, the wheel extends it mid-drag, and a click that wobbles
+  back to where it began, or a drag over only blanks, no longer overwrites the
+  clipboard.
+
 - `rift stash` now shows the untracked files a `stash -u` holds. They were missing
   from the preview, so a stash could look smaller than what popping brings back.
 

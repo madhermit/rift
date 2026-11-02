@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -133,12 +135,10 @@ type SplitList[T any] struct {
 	cache map[string]string // rendered previews, keyed by cfg.CacheKey
 	reqID int               // increments per preview request; stale results are dropped
 
-	// Mouse drag selection over the preview, in display-line indices. anchor is
-	// -1 when no selection is in progress; dragging turns true on the first
-	// motion event, so a plain click never highlights or copies.
-	selAnchor int
-	selEnd    int
-	dragging  bool
+	// Mouse drag selection over the preview, and the scrolling it does while the
+	// pointer is held past the pane's edge.
+	drag     dragSelect
+	edgeDrag edgeScroll
 
 	width, height int
 	ready         bool
@@ -155,7 +155,6 @@ func NewSplitList[T any](cfg SplitConfig[T], items []T) SplitList[T] {
 		PreviewSearch: NewPreviewSearch(),
 		spinner:       spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		cache:         map[string]string{},
-		selAnchor:     -1,
 	}
 }
 
@@ -505,6 +504,20 @@ func (m SplitList[T]) SelectKey(key string) (SplitList[T], tea.Cmd) {
 	return m, nil
 }
 
+// edgeScroll is the state of a drag held past the preview's edge: dir is which way
+// (-1 above, 1 below, 0 inside) and x, y where the pointer last was, since a
+// stationary pointer reports nothing.
+type edgeScroll struct {
+	dir, x, y int
+	ticking   bool
+}
+
+// dragScrollEvery paces the preview's scrolling while a drag is held past its edge.
+const dragScrollEvery = 50 * time.Millisecond
+
+// dragScrollMsg is one tick of that scrolling.
+type dragScrollMsg struct{}
+
 func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
@@ -537,6 +550,8 @@ func (m SplitList[T]) Update(msg tea.Msg) (SplitList[T], tea.Cmd) {
 		m.viewport.GotoTop()
 		m.applyAnchor(lines)
 		return m, nil
+	case dragScrollMsg:
+		return m.dragScroll()
 	case spinner.TickMsg:
 		if !m.loading {
 			return m, nil // let the tick chain die once loading finishes
@@ -736,6 +751,10 @@ func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
 			// horizontal), same as the keyboard scrolling path.
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
+			if m.drag.pressed {
+				// The content moved under a held pointer: it now points elsewhere.
+				return m, tea.Batch(cmd, m.extendDrag(pos.X, pos.Y))
+			}
 			return m, cmd
 		}
 		return m, nil
@@ -753,75 +772,113 @@ func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
 			focused, fcmd := sel.focusPane(splitListPane)
 			return focused, tea.Batch(cmd, fcmd)
 		case inPreview:
-			// Anchor a possible drag selection at the pressed display line. Focus
-			// waits for the release: focusing can collapse the strip and shift
-			// the content under the pointer mid-drag.
-			m.selAnchor = m.previewLineAt(pos.Y, previewTop)
-			m.selEnd = m.selAnchor
+			// Anchor a possible drag selection at the pressed cell. Focus waits
+			// for the release: focusing can collapse the strip and shift the
+			// content under the pointer mid-drag.
+			m.clearDrag()
+			m.flash = "" // a new gesture retires the last "copied …"
+			if len(m.vim.Lines()) > 0 {
+				p, _ := m.previewCellAt(pos.X, pos.Y)
+				m.drag.press(p)
+			}
 			return m, nil
 		}
 	case tea.MouseMotionMsg:
 		// Cell-motion tracking only reports motion while a button is held, so
-		// this is a drag: extend the selection to the line under the pointer.
-		if m.selAnchor >= 0 && msg.Button == tea.MouseLeft && inPreview {
-			m.dragging = true
-			m.selEnd = m.previewLineAt(pos.Y, previewTop)
+		// this is a drag: extend the selection to the cell under the pointer,
+		// wherever on screen it is — past the pane's edge it scrolls.
+		if m.drag.pressed && msg.Button == tea.MouseLeft {
+			return m, m.extendDrag(pos.X, pos.Y)
 		}
 		return m, nil
 	case tea.MouseReleaseMsg:
-		if m.selAnchor < 0 {
+		if !m.drag.pressed {
 			return m, nil
 		}
-		if !m.dragging {
-			// A clean click (press + release, no motion): focus the preview.
-			m.clearDrag()
+		text := ""
+		if m.drag.anchor != m.drag.end {
+			text = m.drag.text(m.vim.Lines())
+		}
+		m.clearDrag()
+		if text == "" {
+			// A click, or a drag that came back to where it began or crossed
+			// only blanks: focus the preview and leave the clipboard alone.
 			return m.focusPane(splitPreviewPane)
 		}
-		a, b := m.selAnchor, m.selEnd
-		m.clearDrag()
-		return m.copySelection(a, b)
+		return m.copySelection(text)
 	}
 	return m, nil
 }
 
 // clearDrag abandons any in-progress mouse selection.
 func (m *SplitList[T]) clearDrag() {
-	m.selAnchor, m.selEnd, m.dragging = -1, -1, false
+	m.drag = dragSelect{}
+	m.edgeDrag = edgeScroll{}
 }
 
-// previewLineAt maps a screen row inside the preview pane to its display-line
-// index (accounting for the panel's top border and the scroll offset), clamped
-// to the content; -1 when there is nothing to select.
-func (m SplitList[T]) previewLineAt(y, previewTop int) int {
-	lines := m.vim.Lines()
-	if len(lines) == 0 {
-		return -1
+// previewTop is the screen row of the preview panel's top border.
+func (m SplitList[T]) previewTop() int {
+	_, navH := m.stackLayout()
+	return HeaderRows + navH
+}
+
+// previewCellAt maps a screen position to the preview cell it lands on, clamped
+// to the pane's content. dir says which way the row fell outside the pane: -1
+// above, 1 below, 0 inside.
+func (m SplitList[T]) previewCellAt(x, y int) (p cellPos, dir int) {
+	row := y - m.previewTop() - 1 // the panel's top border
+	switch h := m.viewport.Height(); {
+	case row < 0:
+		row, dir = 0, -1
+	case row >= h:
+		row, dir = h-1, 1
 	}
-	return clampIndex(m.viewport.YOffset()+y-previewTop-1, len(lines))
+	return cellPos{
+		Line: clampIndex(m.viewport.YOffset()+row, len(m.vim.Lines())),
+		Col:  clampIndex(x-1, m.viewport.Width()) + m.viewport.XOffset(), // left border
+	}, dir
 }
 
-// copySelection copies the drag-selected display lines to the clipboard,
-// ANSI-stripped and right-trimmed — the mouse counterpart of `y`, for lifting
-// code out of a diff without the borders and gutters a terminal-native
-// selection would grab.
-func (m SplitList[T]) copySelection(a, b int) (SplitList[T], tea.Cmd) {
-	lines := m.vim.Lines()
-	if len(lines) == 0 || a < 0 || b < 0 {
+// extendDrag moves the selection's end to the cell at a screen position, starting
+// the edge-scroll tick if the pointer is past the pane.
+func (m *SplitList[T]) extendDrag(x, y int) tea.Cmd {
+	p, dir := m.previewCellAt(x, y)
+	m.drag.extend(p)
+	m.edgeDrag.x, m.edgeDrag.y, m.edgeDrag.dir = x, y, dir
+	if dir == 0 || m.edgeDrag.ticking {
+		return nil
+	}
+	m.edgeDrag.ticking = true
+	return tea.Tick(dragScrollEvery, func(time.Time) tea.Msg { return dragScrollMsg{} })
+}
+
+// dragScroll advances the preview a line while the pointer is held past its edge.
+// The tick chain dies when the drag ends, the pointer returns, or the content runs
+// out; further motion starts it again.
+func (m SplitList[T]) dragScroll() (SplitList[T], tea.Cmd) {
+	m.edgeDrag.ticking = false
+	switch {
+	case !m.drag.pressed:
+		return m, nil
+	case m.edgeDrag.dir < 0 && !m.viewport.AtTop():
+		m.viewport.ScrollUp(1)
+	case m.edgeDrag.dir > 0 && !m.viewport.AtBottom():
+		m.viewport.ScrollDown(1)
+	default:
 		return m, nil
 	}
-	if a > b {
-		a, b = b, a
-	}
-	a, b = clampIndex(a, len(lines)), clampIndex(b, len(lines))
-	stripped := make([]string, 0, b-a+1)
-	for _, l := range lines[a : b+1] {
-		stripped = append(stripped, strings.TrimRight(ansi.Strip(l), " "))
-	}
-	var cmd tea.Cmd
-	_, cmd = YankToClipboard(strings.Join(stripped, "\n"))
-	m.flash = fmt.Sprintf("copied %d lines", b-a+1)
-	if b == a {
-		m.flash = "copied 1 line"
+	return m, m.extendDrag(m.edgeDrag.x, m.edgeDrag.y)
+}
+
+// copySelection copies drag-selected text — the mouse counterpart of `y`, for
+// lifting code out of a diff without the borders a terminal-native selection
+// would grab.
+func (m SplitList[T]) copySelection(text string) (SplitList[T], tea.Cmd) {
+	_, cmd := YankToClipboard(text)
+	if n := strings.Count(text, "\n") + 1; n > 1 {
+		m.flash = fmt.Sprintf("copied %d lines", n)
+	} else {
+		m.flash = fmt.Sprintf("copied %d characters", utf8.RuneCountInString(text))
 	}
 	return m, cmd
 }
@@ -1100,30 +1157,12 @@ func (m SplitList[T]) previewHeader() string {
 func (m SplitList[T]) previewBodyView() (string, Scrollbar) {
 	body := m.viewport.View()
 	switch {
-	case m.selAnchor >= 0 && m.dragging:
-		body = highlightRows(body, m.viewport.YOffset(), m.selAnchor, m.selEnd)
+	case m.drag.dragging:
+		body = m.drag.highlight(body, m.viewport.YOffset(), m.viewport.XOffset())
 	default:
 		body = m.HighlightMatch(body, m.viewport.YOffset())
 	}
 	return body, ScrollbarFor(&m.viewport)
-}
-
-// highlightRows renders the drag selection: visible rows whose display-line
-// index falls in [a, b] get reverse video, re-asserted after any SGR reset
-// inside the line so styled diff content stays highlighted end to end.
-func highlightRows(body string, yOffset, a, b int) string {
-	if a > b {
-		a, b = b, a
-	}
-	lines := strings.Split(body, "\n")
-	for i := range lines {
-		if line := yOffset + i; line >= a && line <= b {
-			l := strings.ReplaceAll(lines[i], "\x1b[0m", "\x1b[0m\x1b[7m")
-			l = strings.ReplaceAll(l, "\x1b[m", "\x1b[m\x1b[7m")
-			lines[i] = "\x1b[7m" + l + "\x1b[27m"
-		}
-	}
-	return strings.Join(lines, "\n")
 }
 
 // footerView renders the bottom bar: a parent-set prompt (e.g. an inline y/n
