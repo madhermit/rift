@@ -57,11 +57,6 @@ func runStage(cmd *cobra.Command, args []string) error {
 		}
 		return output.WritePlain(os.Stdout, lines)
 	default:
-		if len(files) == 0 {
-			fmt.Println("No changes found.")
-			return nil
-		}
-
 		engine := diff.NewEngine()
 		m := stageui.New(repo, engine, files, paths)
 		_, err := tui.NewProgram(m).Run()

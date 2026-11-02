@@ -57,11 +57,6 @@ func runStashAction(cmd *cobra.Command, args []string) (actionRan bool, err erro
 		}
 		return false, output.WritePlain(os.Stdout, lines)
 	default:
-		if len(stashes) == 0 {
-			fmt.Println("No stashes found.")
-			return false, nil
-		}
-
 		engine := diff.NewEngine()
 		m := stashui.New(repo, engine, stashes)
 		result, err := tui.NewProgram(m).Run()

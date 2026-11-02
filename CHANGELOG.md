@@ -45,6 +45,10 @@ pre-1.0).
 
 ### Changed
 
+- `rift stash` and `rift stage` open their empty screen when there's nothing to
+  show, like `rift diff`, rather than printing a line and exiting — which the menu
+  immediately painted over.
+
 - `rift stash` and `rift stage` reject stray arguments rather than ignoring them.
 
 ### Fixed
