@@ -27,7 +27,7 @@ rift is **worktree-aware** — every command reads correctly inside bare-repo an
 
 [forgit](https://github.com/wfxr/forgit) and [git-fuzzy](https://github.com/bigH/git-fuzzy) proved that fuzzy search over git objects is a massive UX win. But they're shell scripts piping strings through fzf — every diff is flat text, and you can't pipe the output into anything.
 
-[lazygit](https://github.com/jesseduffield/lazygit) is the gold standard for git TUIs, but it's a resident app you live inside, with no composable output and line-based diffs.
+[lazygit](https://github.com/jesseduffield/lazygit) is the gold standard for git TUIs, but it's a resident app you live inside, with no composable output and line-based diffs by default.
 
 rift occupies the space between them: **transient** (invoke, act, return to shell), **structural** (diffs understand your code's syntax), and **composable** (every command has `--print` and `--json` modes).
 
@@ -39,21 +39,21 @@ A new cohort of review-first diff viewers — [hunk](https://github.com/modem-de
 
 | Capability                               | rift | [hunk](https://github.com/modem-dev/hunk) | [lazygit](https://github.com/jesseduffield/lazygit) | [forgit](https://github.com/wfxr/forgit) | [delta](https://github.com/dandavison/delta) | [difftastic](https://difftastic.wilfred.me.uk/) |
 | ---------------------------------------- | :--: | :---------------------------------------: | :-------------------------------------------------: | :--------------------------------------: | :------------------------------------------: | :---------------------------------------------: |
-| Structural (syntax-aware) diffs          |  ✅  |                    ❌                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ✅                        |
+| Structural (syntax-aware) diffs          |  ✅  |                    ❌                     |                         ◐                           |                    ❌                    |                      ❌                      |                       ✅                        |
 | Interactive multi-file review            |  ✅  |                    ✅                     |                         ✅                          |                    ✅                    |                      ❌                      |                       ❌                        |
 | Review tracking (content-keyed marks)    |  ✅  |                    ❌                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ❌                        |
 | Test-impact lens (`--tests`)             |  ✅  |                    ❌                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ❌                        |
 | Interactive hunk staging                 |  ✅  |                    ❌                     |                         ✅                          |                    ✅                    |                      ❌                      |                       ❌                        |
 | Log & stash browsing                     |  ✅  |                    ❌                     |                         ✅                          |                    ✅                    |                      ❌                      |                       ❌                        |
 | `--print` / `--json` on every command    |  ✅  |                    ❌                     |                         ❌                          |                    ❌                    |                      —                       |                       ❌                        |
-| Watch mode (live reload)                 |  ✅  |                    ✅                     |                         ✅                          |                    ❌                    |                      —                       |                       ❌                        |
+| Watch mode (live reload)                 |  ✅  |                    ✅                     |                         ◐                           |                    ❌                    |                      —                       |                       ❌                        |
 | Moved-line detection                     |  🔜  |                    ✅                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ❌                        |
 | Transient — invoke, act, return to shell |  ✅  |                    ✅                     |                         ❌                          |                    ✅                    |                      —                       |                        —                        |
 | Single static binary                     |  ✅  |                    ❌                     |                         ✅                          |                    ❌                    |                      ✅                      |                       ✅                        |
 | Hunk notes shared with an agent          |  🔜  |                    ✅                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ❌                        |
 | Mouse support                            |  ✅  |                    ✅                     |                         ✅                          |                    ❌                    |                      —                       |                        —                        |
 
-✅ yes · ❌ no · — not applicable · 🔜 planned. delta and difftastic are diff renderers/pagers rather than browsers, so several rows don't apply — rift uses difftastic as its diff engine and falls back to a built-in line diff without it.
+✅ yes · ◐ partial · ❌ no · — not applicable · 🔜 planned. lazygit can render diffs through difftastic with a custom external diff, but doesn't by default, and it refreshes periodically (every 10s by default) rather than reloading live. delta and difftastic are diff renderers/pagers rather than browsers, so several rows don't apply — rift uses difftastic as its diff engine and falls back to a built-in line diff without it.
 
 ## Key Features
 
@@ -238,7 +238,7 @@ Tell your agent: _"Run `rift skill path` and follow that skill to review this ch
 
 ## Status
 
-The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.7.0**), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, and hunk notes — marking a hunk of concern for an agent to flesh out, and an agent annotating its own changes for you, file-based in the same store as reviewed marks (no daemon). The diff preview's hunk cursor (`{` / `}`) is the first piece of that.
+The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.7.0**; hunk-level review marks are unreleased and arrive in the next release), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, and hunk notes — marking a hunk of concern for an agent to flesh out, and an agent annotating its own changes for you, file-based in the same store as reviewed marks (no daemon). The diff preview's hunk cursor (`{` / `}`) is the first piece of that.
 
 Worktree and branch _management_ are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
 
