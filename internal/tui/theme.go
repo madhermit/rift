@@ -338,21 +338,27 @@ func FooterContent(width int, content string) string {
 }
 
 // PreviewHelpKeys is the shared navigation and filtering reference shown (in
-// full) in every preview screen's help overlay, including alternate keys. In the list pane gg/G jump to
-// the ends and ctrl+d/u/f/b step the selection; in the preview pane they scroll,
-// and {/} steps through the diff — by hunk on the diff screen, by file section
-// where hunks aren't resolved. / is pane-sensitive: it narrows the list from the
-// list pane and searches the rendered diff from the preview.
-var PreviewHelpKeys = [][2]string{
-	{"j/k  ↑↓", "move / scroll"},
-	{"J/K  ⇧↑↓  ]/[", "next / prev item"},
-	{"gg/G", "top / bottom"},
-	{"{/}", "prev / next hunk / file"},
-	{"/  n/N", "search the diff / next / prev match"},
-	{"!term", "exclude from the list filter"},
-	{"ctrl+d/u", "scroll half-page"},
-	{"ctrl+f/b", "scroll page"},
-	{"esc", "leave mode"},
+// full) in every preview screen's help overlay, including alternate keys. In the
+// list pane gg/G jump to the ends and ctrl+d/u/f/b step the selection; in the
+// preview pane they scroll. / is pane-sensitive: it narrows the list from the
+// list pane and searches the rendered diff from the preview. hunks says whether
+// {/} steps hunks on this screen or files.
+func PreviewHelpKeys(hunks bool) [][2]string {
+	step := "prev / next file"
+	if hunks {
+		step = "prev / next hunk"
+	}
+	return [][2]string{
+		{"j/k  ↑↓", "move / scroll"},
+		{"J/K  ⇧↑↓  ]/[", "next / prev item"},
+		{"gg/G", "top / bottom"},
+		{"{/}", step},
+		{"/  n/N", "search the diff / next / prev match"},
+		{"!term", "exclude from the list filter"},
+		{"ctrl+d/u", "scroll half-page"},
+		{"ctrl+f/b", "scroll page"},
+		{"esc", "leave mode"},
+	}
 }
 
 // HelpView renders a keybinding overlay: header + a panel listing the screen's

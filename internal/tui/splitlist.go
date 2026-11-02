@@ -80,6 +80,9 @@ type SplitConfig[T any] struct {
 	// pressed (e.g. a commit hash or file path). Return "" or leave nil to
 	// disable yanking.
 	Yank func(item T) string
+	// HunkNav says {/} steps hunks in this screen's preview rather than files, so
+	// the help overlay can name what the keys actually do.
+	HunkNav bool
 	// PreviewLine returns the source line an item maps to; when selected the
 	// preview scrolls to the first shown row at or past it (e.g. a test, so the
 	// diff lands on it). Return 0 or leave nil to disable anchoring.
@@ -1186,7 +1189,7 @@ func (m SplitList[T]) View() string {
 	contentH := m.height - HeaderRows - FooterRows
 	context := HeaderContext(m.cfg.Branch, m.cfg.Context)
 	if m.showHelp {
-		return HelpView(m.cfg.Screen, context, m.cfg.Hints, PreviewHelpKeys, m.width, contentH)
+		return HelpView(m.cfg.Screen, context, m.cfg.Hints, PreviewHelpKeys(m.cfg.HunkNav), m.width, contentH)
 	}
 
 	header := Header(m.cfg.Screen, context, m.width)

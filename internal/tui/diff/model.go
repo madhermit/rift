@@ -207,6 +207,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		NavFraction: 30,
 		EmptyStatus: m.emptyStatus(),
 		Hints:       hints,
+		HunkNav:     true,
 		// Match on both sides of a rename, so a moved file is findable by its old
 		// name too (OldPath is empty for everything else); identity stays the
 		// new-side path, so a plain path (e.g. from nextUnreviewed) selects it.
