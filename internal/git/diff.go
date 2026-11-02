@@ -17,7 +17,7 @@ func SortByPath(files []ChangedFile) {
 
 // EmptyTree is git's well-known empty-tree object, used as the base when
 // diffing a root commit (which has no parent).
-const EmptyTree = "4b825dc642cb6eb9a060e54bf899d69f82cf7207"
+const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 type ChangedFile struct {
 	Path    string `json:"path"`

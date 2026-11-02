@@ -42,6 +42,9 @@ pre-1.0).
 
 ### Fixed
 
+- Root commits failed to diff with the git engine (`bad object`), because rift's
+  empty-tree constant was mistyped.
+
 - The diff preview's scroll-to-line anchor (used by the tests lens) skipped
   rows whose line number had a different digit width from the file's most
   common one — difftastic's inline layout left-aligns line numbers while

@@ -1,6 +1,8 @@
 package git
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -479,5 +481,17 @@ func TestStagedBlobHashes(t *testing.T) {
 	restaged := repo.StagedBlobHashes([]string{"f.go"})
 	if restaged["f.go"] == staged["f.go"] {
 		t.Errorf("index hash should change after re-staging, still %q", staged["f.go"])
+	}
+}
+
+// TestEmptyTreeConstant pins the constant to what git itself computes: a mistyped
+// hash fails every diff against it, and only root commits ever take that path.
+func TestEmptyTreeConstant(t *testing.T) {
+	out, err := exec.Command("git", "hash-object", "-t", "tree", os.DevNull).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(out)); got != EmptyTree {
+		t.Errorf("EmptyTree = %s, git says %s", EmptyTree, got)
 	}
 }
