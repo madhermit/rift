@@ -70,7 +70,28 @@ func (d *difftasticEngine) diffDirect(ctx context.Context, repoRoot string, file
 		oldFile = file.OldPath
 	}
 	oldPath := showOrNull(ctx, repoRoot, oldRef, oldFile, filepath.Join(tmpDir, "a", file.Path))
-	return d.diffFiles(ctx, oldPath, newPath, opts.Color, opts.Width, opts.Display)
+	out, err := d.diffFiles(ctx, oldPath, newPath, opts.Color, opts.Width, opts.Display)
+	if err != nil {
+		return "", err
+	}
+	sep := string(filepath.Separator)
+	return relabelHeader(out, filepath.Join(tmpDir, "a")+sep, filepath.Join(tmpDir, "b")+sep, repoRoot+sep), nil
+}
+
+// relabelHeader strips prefixes from the header line of difftastic's output. With
+// both sides present difft labels a file by their shared relative path, but an
+// added or deleted file has /dev/null on one side, so it prints the other side's
+// full path — a temp file nobody should see. Only the first line is touched: the
+// same text further down is the file's own content.
+func relabelHeader(out string, prefixes ...string) string {
+	header, rest, found := strings.Cut(out, "\n")
+	for _, p := range prefixes {
+		header = strings.ReplaceAll(header, p, "")
+	}
+	if !found {
+		return header
+	}
+	return header + "\n" + rest
 }
 
 // diffFiles calls difft directly in 2-arg mode. Note: difft ignores --width

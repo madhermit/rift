@@ -171,3 +171,21 @@ func TestFallbackEngineUntracked(t *testing.T) {
 		t.Errorf("unchanged tracked file should stay empty, got %q", out)
 	}
 }
+
+func TestRelabelHeader(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"temp path on an added file", "/tmp/x/b/dir/a.go --- Go\n1 code\n", "dir/a.go --- Go\n1 code\n"},
+		{"the same text in the body is content", "/tmp/x/b/a.go --- Go\n/tmp/x/b/kept\n", "a.go --- Go\n/tmp/x/b/kept\n"},
+		{"clean label untouched", "a.go --- Go\n", "a.go --- Go\n"},
+		{"no newline", "/tmp/x/b/a.go", "a.go"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := relabelHeader(tt.in, "/tmp/x/a/", "/tmp/x/b/"); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
