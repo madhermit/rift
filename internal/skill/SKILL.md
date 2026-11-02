@@ -18,8 +18,8 @@ Ground rules:
 - rift only reads and presents git state — it never mutates the working tree,
   and the only writes it can make happen through human keypresses in the TUI
   (stage, stash apply, cherry-pick). Running the commands below is always safe.
-- All commands accept a trailing `-- <path>...` to scope to files or
-  directories.
+- `diff`, `log`, and `stage` accept a trailing `-- <path>...` to scope to files
+  or directories.
 
 ## Inspect a changeset
 
@@ -49,6 +49,7 @@ usually much less text than `git diff` for the same change.
 ```bash
 rift diff --tests --json           # the test cases the diff touches
 rift diff HEAD~5 HEAD --tests --json  # same, for a commit range
+rift log --tests --json -n 20      # each commit, with the tests it touched under `tests`
 ```
 
 Output: `[{file, language, name, line, status, path?, old_path?, ticket?}, ...]` where
@@ -67,6 +68,7 @@ state to know what still needs attention:
 ```bash
 rift diff --unreviewed --name-only   # files the human has not (re-)reviewed
 rift diff --unreviewed --json
+rift diff --tests --unreviewed --json  # the touched tests in those files
 ```
 
 If you edit a file that was already marked reviewed, its mark resets — that is

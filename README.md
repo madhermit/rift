@@ -65,17 +65,17 @@ Powered by difftastic: reformatting noise disappears and you see what actually c
 
 ### Split-pane browsing
 
-`rift diff` and `rift log` are two-panel browsers: a fuzzy-filterable list on the left, a structural diff preview on the right. Navigate with vim keys, jump hunk-to-hunk, search the diff with `/` (`n`/`N` to step matches), and keep your place with a scrollbar and a sticky file header. Colored file-type icons and dimmed directories make the list scan fast. In the log, press `⏎` to drill into a commit's files, or `c` / `r` to cherry-pick / revert the selected commit.
+`rift diff` and `rift log` are two-panel browsers: a fuzzy-filterable list on the left, a structural diff preview on the right. Navigate with vim keys, jump hunk-to-hunk, search the diff with `/` (`n`/`N` to step matches), and keep your place with a scrollbar and a sticky file header. Colored file-type icons and dimmed directories make the list scan fast. In the log, press `⏎` to open a commit's files or `t` its tests — the same view as `rift diff`, with hunk stepping and the `t` toggle — or `c` / `r` to cherry-pick / revert the selected commit.
 
 ![rift log — commit explorer with a live diff preview](docs/images/log.png)
 
-`rift stash` shares the same browser for stash entries and their diffs:
+`rift stash` shares the same browser for stash entries and their diffs, including the untracked files a `stash -u` holds; `⏎` and `t` open an entry's files and tests like the log's:
 
 ![rift stash — stash manager](docs/images/stash.png)
 
 ### Test lens
 
-Add `--tests` to `rift diff` or `rift log` to read a change by the _tests_ it touches instead of its files — handy for reviewing agent-generated code. Each spec is marked by how the diff changed it: `+` added, `→` renamed, `~` modified (the `~` cases, where an assertion can be quietly weakened under an unchanged name, are the ones worth a close read). The preview scrolls to the selected test and names it in the border. Toggle live between the file view and the tests view with `t`; works on the working tree, `--staged`, or a commit range, and supports `--print` / `--json`. Tests are extracted across Go, JavaScript/TypeScript, Ruby, Python, and Rust — including `t.Run` subtests and table-driven cases.
+Add `--tests` to `rift diff` or `rift log` to read a change by the _tests_ it touches instead of its files — handy for reviewing agent-generated code. Each spec is marked by how the diff changed it: `+` added, `→` renamed, `~` modified (the `~` cases, where an assertion can be quietly weakened under an unchanged name, are the ones worth a close read). The preview scrolls to the selected test and names it in the border. Toggle live between the file view and the tests view with `t`, in `rift diff` and in any commit or stash you open; works on the working tree, `--staged`, or a commit range, and supports `--print` / `--json` (`rift log --tests --json` lists each commit with the tests it touched). Tests are extracted across Go, JavaScript/TypeScript, Ruby, Python, and Rust — including `t.Run` subtests and table-driven cases.
 
 ![rift diff --tests — the tests a change added, renamed, or modified](docs/images/tests.gif)
 
@@ -93,7 +93,7 @@ Review also goes finer than the file. With the preview focused, `R` marks the **
 
 ### Interactive staging
 
-`rift stage` replaces `git add -p` with a two-panel TUI: a file list with structural diff preview and hunk-level staging, the active hunk clearly marked in the gutter.
+`rift stage` replaces `git add -p` with a two-panel TUI: a file list with structural diff preview and hunk-level staging, the active hunk clearly marked in the gutter. `/` searches the diff from the diff pane, and the active hunk follows the match, so `s` stages what you found. `rift stage -- <path>` limits it to part of the tree.
 
 ![rift stage — interactive hunk staging](docs/images/stage.gif)
 
@@ -103,18 +103,18 @@ Every command is interactive by default but never traps you — each supports `-
 
 ```bash
 rift log                              # interactive TUI
-rift log --print                      # one commit hash per line
+rift log --print                      # one commit per line: hash and subject
 rift log --json                       # structured JSON
 rift version --json                   # {"version":"v0.5.0"} — pin tooling in scripts
 
 # pipe into anything
-rift diff --print | xargs -r "$EDITOR"          # open every changed file
-rift log --json | jq '.[] | select(.files_changed > 10)'
+rift diff --name-only | xargs -r "$EDITOR"      # open every changed file
+rift log --json | jq -r '.[] | select(.author == "me") | .hash'
 ```
 
 ### Scoping to paths and history
 
-`rift diff` and `rift log` both take a trailing `-- <path>...` to scope to specific files or directories, and both accept refs — `rift diff` takes one or two commits, `rift log` a ref or a commit range:
+`rift diff`, `rift log`, and `rift stage` take a trailing `-- <path>...` to scope to specific files or directories, and `diff` and `log` accept refs — `rift diff` takes one or two commits, `rift log` a ref or a commit range:
 
 ```bash
 rift diff -- internal/git            # only the changes under internal/git
@@ -144,10 +144,10 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 
 | Key                         | Action                                                                       |
 | --------------------------- | ---------------------------------------------------------------------------- |
-| `j`/`k`, `↑`/`↓`            | move selection / scroll the preview                                          |
+| `j`/`k`, `↑`/`↓`            | move selection / scroll the preview (`stage`'s diff pane: step hunks) |
 | `J`/`K`, `⇧↑`/`⇧↓`, `]`/`[` | step to the next / previous item (even while reading)                        |
 | `gg`/`G`                    | jump to first / last                                                         |
-| `{`/`}`                     | previous / next hunk (`diff`, `stage`); previous / next file elsewhere       |
+| `{`/`}`                     | previous / next hunk (`diff`, `stage`, an opened commit or stash); file elsewhere |
 | `ctrl-d`/`ctrl-u`           | half-page down / up                                                          |
 | `ctrl-f`/`ctrl-b`           | page down / up                                                               |
 | `⇥`                         | switch between the list and preview panes                                    |
@@ -164,16 +164,18 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 | Screen     | Keys                                                                                                                                                        |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `diff`     | `s` toggle staged · `w` toggle watch · `t` tests lens · `\` diff layout · `e` engine · `o` open in `$EDITOR` · `r` mark file reviewed · `R` mark hunk reviewed · `U` show only unreviewed |
-| `log`      | `⏎` drill into the commit's files (or tests) · `\` layout · `e` engine · `c` cherry-pick · `r` revert                                                       |
-| `stash`    | `a` apply · `p` pop · `x` drop · `\` layout · `e` engine                                                                                                    |
+| `log`      | `⏎` open the commit's files · `t` its tests (swapped by `--tests`) · `\` layout · `e` engine · `c` cherry-pick · `r` revert |
+| `stash`    | `⏎` open the entry's files · `t` its tests · `a` apply · `p` pop · `x` drop · `\` layout · `e` engine |
 | `stage`    | `s` stage · `u` unstage · `a` stage all · `o` open in `$EDITOR` · `e` engine (fixed layout, no `\`)                                                         |
 | tests lens | `t` back to files · `s` toggle staged · `w` toggle watch · `\` layout · `e` engine · `o` open the test                                                      |
+
+The engine and layout you pick carry across `t` and in and out of an opened commit or stash.
 
 The `menu` launchpad is a plain list: `⏎` selects, `/` filters, and `esc`/`q` quit. Destructive actions (`stash` pop/drop, `log` cherry-pick/revert) confirm inline with `y`/`n`.
 
 **Mouse**
 
-The mouse works everywhere the keyboard does: the wheel scrolls the pane under the pointer (over a list it moves the selection), a click selects the row it lands on and focuses the pane it hit, and in the `menu` a click on the selected entry launches it. Drag across a diff preview to select lines — they highlight as you drag, and releasing copies them to the clipboard (ANSI-stripped, no borders or gutters; OSC 52 fallback over SSH). Set `RIFT_MOUSE=off` if you'd rather keep the terminal's native text selection — and note most terminals bypass mouse tracking with shift-click/drag either way.
+The mouse works on every screen: the wheel scrolls the pane under the pointer (over a list it moves the selection), a click selects the row it lands on and focuses the pane it hit, and in the `menu` a click on the selected entry launches it. Drag across a diff preview (everywhere but `stage`) to select lines — they highlight as you drag, and releasing copies them to the clipboard (ANSI-stripped, no borders or gutters; OSC 52 fallback over SSH). Set `RIFT_MOUSE=off` if you'd rather keep the terminal's native text selection — and note most terminals bypass mouse tracking with shift-click/drag either way.
 
 ### Environment
 
@@ -220,6 +222,9 @@ rift diff --json | jq '.[] | select(.status == "Modified")'
 # the tests a change added, renamed, or modified
 rift diff --tests --json
 
+# the tests each recent commit touched
+rift log --tests --json -n 10
+
 # the files a human hasn't (re-)reviewed yet
 rift diff --unreviewed --name-only
 
@@ -238,7 +243,7 @@ Tell your agent: _"Run `rift skill path` and follow that skill to review this ch
 
 ## Status
 
-The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.7.0**; hunk-level review marks are unreleased and arrive in the next release), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, and hunk notes — marking a hunk of concern for an agent to flesh out, and an agent annotating its own changes for you, file-based in the same store as reviewed marks (no daemon). The diff preview's hunk cursor (`{` / `}`) is the first piece of that.
+The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.7.0**; anything under `[Unreleased]` in the changelog arrives in the next release), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, and hunk notes — marking a hunk of concern for an agent to flesh out, and an agent annotating its own changes for you, file-based in the same store as reviewed marks (no daemon). The diff preview's hunk cursor (`{` / `}`) is the first piece of that.
 
 Worktree and branch _management_ are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
 
