@@ -282,23 +282,11 @@ func (m Model) updateDrilled(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// commitFiles returns the files a commit changed, plus the base ref to diff it
-// against — the commit's parent, or the empty tree for a root commit.
-func commitFiles(repo *git.Repo, hash string) (base string, files []git.ChangedFile, err error) {
-	base = hash + "~1"
-	files, err = repo.DiffBetweenCommits(base, hash)
-	if err != nil {
-		base = git.EmptyTree // root commit: diff against the empty tree
-		files, err = repo.DiffBetweenCommits(base, hash)
-	}
-	return base, files, err
-}
-
 // drillInto opens the file-level diff view for a commit. The commit-list's own
 // preview stream is cancelled — the drilled view does its own (streamed) diff,
 // and the hidden list preview shouldn't keep difftastic busy.
 func (m Model) drillInto(commit git.CommitInfo) (tea.Model, tea.Cmd) {
-	base, files, err := commitFiles(m.repo, commit.Hash)
+	base, files, err := m.repo.CommitFiles(commit.Hash)
 	dv := diffui.New(m.repo, m.engines.Engine(), files, false, base, commit.Hash, false, nil, false).
 		SetBreadcrumb(tui.Breadcrumb("log", commit.Hash))
 	if err != nil {
@@ -324,7 +312,7 @@ type testsCollectedMsg struct {
 func (m Model) collectTests(commit git.CommitInfo) tea.Cmd {
 	repo, hash := m.repo, commit.Hash
 	return func() tea.Msg {
-		base, _, _ := commitFiles(repo, hash)
+		base, _, _ := repo.CommitFiles(hash)
 		scope := review.DiffScope{Base: base, Target: hash}
 		specs, _ := review.Collect(repo, scope)
 		return testsCollectedMsg{scope: scope, specs: specs}
@@ -359,7 +347,7 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	repo, engine := m.repo, m.engines.Engine()
 	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
 	return func() tea.Msg {
-		base, files, err := commitFiles(repo, commit.Hash)
+		base, files, err := repo.CommitFiles(commit.Hash)
 		if err != nil {
 			return tui.PreviewMsg{Err: err, ReqID: reqID}
 		}

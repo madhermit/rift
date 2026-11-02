@@ -300,6 +300,18 @@ func (r *Repo) DiffBetweenCommits(baseRef, targetRef string) ([]ChangedFile, err
 	})
 }
 
+// CommitFiles returns the files a commit changed, plus the base to diff it
+// against — the commit's parent, or the empty tree for a root commit.
+func (r *Repo) CommitFiles(hash string) (base string, files []ChangedFile, err error) {
+	base = hash + "~1"
+	files, err = r.DiffBetweenCommits(base, hash)
+	if err != nil {
+		base = EmptyTree // root commit: diff against the empty tree
+		files, err = r.DiffBetweenCommits(base, hash)
+	}
+	return base, files, err
+}
+
 // changedFilesWithStats runs the same NUL-separated diff twice — once for
 // --name-status (path + change kind), once for --numstat (line counts) — and
 // merges them into ChangedFiles. run selects the revisions; only the format flag
