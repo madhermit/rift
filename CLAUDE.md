@@ -51,7 +51,7 @@ design intent only — do not assume the packages or tools exist:
 - **Syntax-aware merge / conflict resolution:** mergiraf (`internal/merge`)
 - **Checkpoints:** shadow-commit snapshots on hidden refs (`internal/checkpoint`)
 - **Risk classification** in review — today `internal/review` only tracks reviewed marks and extracts test cases
-- **Inline agent annotations:** `rift annotate` writing to a JSON store next to the reviewed marks (`.git/rift/annotations.json`), rendered in the diff preview and picked up by `--watch`. File-based on purpose — no daemon/socket (see the design doc's Future Considerations)
+- **Hunk notes, both directions:** `rift note` over a JSON store next to the reviewed marks (`.git/rift/notes.json`) — a human marking a hunk of concern for an agent to flesh out, and an agent annotating its own changes for the human — rendered in the diff preview and picked up by `--watch`. File-based on purpose: no daemon/socket. Anchored per hunk by body hash, and non-destructive (a rewritten hunk goes `stale`, it isn't dropped — unlike reviewed marks). rift never posts to a forge or models comment lifecycle; that's the agent's job (see the design doc's Future Considerations). The hunk cursor in the diff preview (`{`/`}`) is the shipped foundation for this
 - **Moved-line diff view:** a config option swapping the git engine's flags to `--color-moved=zebra --color-moved-ws=allow-indentation-change` (mutually exclusive with the default `--word-diff=color` — git silently ignores `--color-moved` under word-diff, so it can't be a combined default; see `displayFlags` in `internal/diff`)
 
 ## Workflow
