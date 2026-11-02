@@ -16,7 +16,7 @@ import (
 var stashCmd = &cobra.Command{
 	Use:   "stash",
 	Short: "Stash manager with preview",
-	Long:  "Browse and manage stashes with syntax-aware diff preview.",
+	Long:  "Browse and manage stashes with syntax-aware diff preview, including the untracked files a `stash -u` holds.",
 	RunE:  runStash,
 }
 

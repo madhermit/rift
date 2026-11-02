@@ -185,8 +185,8 @@ func (m Model) resolveConfirm(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// previewCmd streams the selected stash's diff: its files (between the stash and
-// its parent) are diffed in parallel and streamed in order, like the log's commit
+// previewCmd streams the selected stash's diff: its files (see StashRange) are
+// diffed in parallel and streamed in order, like the log's commit
 // preview. The full result is cached per stash.
 func (m Model) previewCmd(reqID int) tea.Cmd {
 	entry, ok := m.list.Selected()
@@ -196,9 +196,8 @@ func (m Model) previewCmd(reqID int) tea.Cmd {
 	repo, engine := m.repo, m.engines.Engine()
 	opts := tui.PreviewDiffOpts(m.list.PreviewWidth(), m.display)
 	return func() tea.Msg {
-		ref := fmt.Sprintf("stash@{%d}", entry.Index)
-		opts.Base, opts.Target = ref+"^", ref
-		files, err := repo.DiffBetweenCommits(opts.Base, ref)
+		opts.Base, opts.Target = repo.StashRange(entry.Index)
+		files, err := repo.DiffBetweenCommits(opts.Base, opts.Target)
 		if err != nil {
 			return tui.PreviewMsg{Err: err, ReqID: reqID}
 		}

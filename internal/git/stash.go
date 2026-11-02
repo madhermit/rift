@@ -1,6 +1,10 @@
 package git
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -47,6 +51,58 @@ func (r *Repo) ListStashes() ([]StashEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// StashRange is the pair of tree-ishes whose diff is everything a stash holds. A
+// stash's commit only records tracked changes; `stash -u` keeps untracked files
+// in a third parent, which a plain ref^..ref diff would never show. When there is
+// one, the target is a tree overlaying those files on the stash's own, so they
+// read as additions and a reader sees what popping would bring back. If building
+// that tree fails it degrades to the tracked changes.
+func (r *Repo) StashRange(index int) (base, target string) {
+	ref := fmt.Sprintf("stash@{%d}", index)
+	base = ref + "^"
+	if _, err := r.runGit("rev-parse", "--verify", "--quiet", ref+"^3"); err != nil {
+		return base, ref
+	}
+	tree, err := r.overlayTree(ref, ref+"^3")
+	if err != nil {
+		return base, ref
+	}
+	return base, tree
+}
+
+// overlayTree writes a tree holding top's files laid over base's, using a
+// throwaway index so the real one is never touched. The only trace it leaves is
+// an unreferenced object, which git prunes.
+func (r *Repo) overlayTree(base, top string) (string, error) {
+	dir, err := os.MkdirTemp("", "rift-stash-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	env := append(os.Environ(), "GIT_INDEX_FILE="+filepath.Join(dir, "index"))
+	run := func(stdin string, args ...string) (string, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir, cmd.Env, cmd.Stdin = r.root, env, strings.NewReader(stdin)
+		out, err := cmd.Output()
+		if err != nil {
+			return "", gitErr("git "+strings.Join(args, " "), err)
+		}
+		return string(out), nil
+	}
+	if _, err := run("", "read-tree", base); err != nil {
+		return "", err
+	}
+	listing, err := r.runGit("ls-tree", "-r", "-z", top)
+	if err != nil {
+		return "", err
+	}
+	if _, err := run(listing, "update-index", "-z", "--index-info"); err != nil {
+		return "", err
+	}
+	tree, err := run("", "write-tree")
+	return strings.TrimSpace(tree), err
 }
 
 // parseStashIndex extracts N from "stash@{N}".

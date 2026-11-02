@@ -42,6 +42,9 @@ pre-1.0).
 
 ### Fixed
 
+- `rift stash` now shows the untracked files a `stash -u` holds. They were missing
+  from the preview, so a stash could look smaller than what popping brings back.
+
 - Root commits failed to diff with the git engine (`bad object`), because rift's
   empty-tree constant was mistyped.
 
