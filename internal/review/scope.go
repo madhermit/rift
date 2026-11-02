@@ -41,7 +41,7 @@ func gatherWorktree(repo *git.Repo, staged bool, paths []string) ([]fileScope, e
 	// rename detection on (a per-file pathspec defeats it, so a renamed test file
 	// reads as 100% added and floods the lens) and spends a single subprocess for
 	// the whole changeset instead of one per file.
-	addedByPath := addedLinesByPath(orEmpty(diff.RawWorktreeDiff(root, staged)))
+	addedByPath := addedLinesByPath(orEmpty(diff.RawScopeDiff(root, diff.DiffOpts{Staged: staged})))
 	return collect(git.FilterByPaths(files, paths), func(f git.ChangedFile) ([]byte, []byte, map[int]bool, bool) {
 		content, err := worktreeContent(root, staged, f.Path)
 		if err != nil {
@@ -70,7 +70,7 @@ func gatherRange(repo *git.Repo, base, target string, paths []string) ([]fileSco
 	// rename-detecting range diff by path (see gatherWorktree).
 	var addedByPath map[string]map[int]bool
 	if base != git.EmptyTree {
-		addedByPath = addedLinesByPath(orEmpty(diff.RawRangeDiffAll(root, base, target)))
+		addedByPath = addedLinesByPath(orEmpty(diff.RawScopeDiff(root, diff.DiffOpts{Base: base, Target: target})))
 	}
 	return collect(git.FilterByPaths(files, paths), func(f git.ChangedFile) ([]byte, []byte, map[int]bool, bool) {
 		content, err := diff.ShowFile(root, target, f.Path)

@@ -70,3 +70,33 @@ func TestNextUnreviewed(t *testing.T) {
 		t.Errorf("all reviewed should report no next target, got %q", next)
 	}
 }
+
+// The hunk readout and {/} both ask the same question of a scroll position:
+// which hunk is the reader inside? It's the last one starting at or above the
+// top row — never the nearest, so scrolling into a hunk's body keeps reporting
+// that hunk rather than jumping ahead to the next one. Hunks are numbered from
+// 1 so that "none" is 0, and a freshly reset cursor needs no sentinel.
+func TestHunkAt(t *testing.T) {
+	spots := []hunkSpot{{line: 3}, {line: 20}, {line: 44}}
+	tests := []struct {
+		name string
+		y    int
+		want int
+	}{
+		{"above the first hunk (a file header)", 0, 0},
+		{"exactly at a hunk's start", 3, 1},
+		{"inside a hunk's body", 19, 1},
+		{"at the next hunk", 20, 2},
+		{"past the last hunk's start", 99, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hunkAt(spots, tt.y); got != tt.want {
+				t.Errorf("hunkAt(%v, %d) = %d, want %d", spots, tt.y, got, tt.want)
+			}
+		})
+	}
+	if got := hunkAt(nil, 5); got != 0 {
+		t.Errorf("no hunks should report none, got %d", got)
+	}
+}

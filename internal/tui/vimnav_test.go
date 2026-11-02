@@ -31,7 +31,7 @@ func TestBannerLabel(t *testing.T) {
 
 func TestVimNav_CurrentSection(t *testing.T) {
 	// First section at offset 3 to exercise the "before the first file" case.
-	v := VimNav{sections: []section{{offset: 3, label: "a.go"}, {offset: 10, label: "b.go"}}}
+	v := VimNav{sections: []PreviewSection{{Offset: 3, Label: "a.go"}, {Offset: 10, Label: "b.go"}}}
 	tests := []struct {
 		y    int
 		want string
@@ -154,7 +154,7 @@ func TestVimNav_SetContent(t *testing.T) {
 	if strings.Contains(vp.View(), "──") {
 		t.Errorf("banner not stripped from displayed content:\n%s", vp.View())
 	}
-	want := []section{{offset: 1, label: "a.go"}, {offset: 2, label: "b.go"}}
+	want := []PreviewSection{{Offset: 1, Label: "a.go"}, {Offset: 2, Label: "b.go"}}
 	if !slices.Equal(v.sections, want) {
 		t.Errorf("sections = %v, want %v", v.sections, want)
 	}

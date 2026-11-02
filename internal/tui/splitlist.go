@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/spinner"
@@ -107,6 +106,18 @@ type SplitList[T any] struct {
 	filter    textinput.Model
 	filtering bool
 
+	// Preview search (`/` with the preview focused): a live query over the
+	// rendered display lines, the lines it matched, and which of them the reader
+	// is on. origin is the offset the box opened at — the fixed point incremental
+	// search steps forward from as you type (so the target doesn't drift under
+	// its own jumps), and where esc puts the reader back if they cancel.
+	search       textinput.Model
+	searching    bool
+	query        string
+	matches      []int
+	matchAt      int
+	searchOrigin int
+
 	viewport viewport.Model
 	vim      VimNav
 	preview  string
@@ -120,6 +131,11 @@ type SplitList[T any] struct {
 	showHelp bool   // the keybinding overlay is open
 	flash    string // transient footer message (e.g. "copied …"), cleared on nav
 	prompt   string // when set, replaces the footer (e.g. an inline y/n confirmation)
+
+	// previewStatus overrides the preview legend's right side while reading — a
+	// position the parent tracks (the diff screen's hunk cursor) in place of the
+	// component's own file position. Empty means use the file position.
+	previewStatus string
 
 	cache map[string]string // rendered previews, keyed by cfg.CacheKey
 	reqID int               // increments per preview request; stale results are dropped
@@ -143,9 +159,11 @@ func NewSplitList[T any](cfg SplitConfig[T], items []T) SplitList[T] {
 		filtered:  items,
 		viewport:  viewport.New(),
 		filter:    NewFilterInput(),
+		search:    NewFilterInput(),
 		spinner:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		cache:     map[string]string{},
 		selAnchor: -1,
+		matchAt:   -1,
 	}
 }
 
@@ -173,6 +191,7 @@ func (m SplitList[T]) requestPreview() (SplitList[T], tea.Cmd) {
 	m.flash = ""       // and any transient message (e.g. "copied …")
 	m.anchored = false // a new selection re-anchors its preview
 	m.clearDrag()      // and any in-progress mouse selection
+	m.resetSearch()    // and any search, whose line numbers named the old content
 	reqID := m.reqID
 	// Every selection change signals the parent so it cancels the previous item's
 	// stream; CacheHit tells it the content is already shown, so start no new load.
@@ -276,8 +295,17 @@ func (m SplitList[T]) Selected() (T, bool) {
 // VisibleItems returns the currently filtered items.
 func (m SplitList[T]) VisibleItems() []T { return m.filtered }
 
-// Filtering reports whether the filter input is active.
-func (m SplitList[T]) Filtering() bool { return m.filtering }
+// Capturing reports whether a text input has the keyboard — the list filter or
+// the preview search. Parents check it (with ShowingHelp) before acting on their
+// own keys, so typing a query never fires a screen action.
+func (m SplitList[T]) Capturing() bool { return m.filtering || m.searching }
+
+// InMode reports whether esc has something to leave here. It is deliberately
+// wider than Capturing: an accepted search has closed its input but still holds
+// the highlight and n/N, and esc should retire that before a parent gets to read
+// esc as "back". Screen keys stay live in that state, which is why the two
+// questions can't share one answer.
+func (m SplitList[T]) InMode() bool { return m.Capturing() || m.query != "" || m.showHelp }
 
 // ShowingHelp reports whether the keybinding overlay is open. Parents check this
 // (like Filtering) to stop intercepting keys while it's up.
@@ -285,6 +313,41 @@ func (m SplitList[T]) ShowingHelp() bool { return m.showHelp }
 
 // PreviewWidth is the inner width of the preview pane, for wrapping content.
 func (m SplitList[T]) PreviewWidth() int { return m.viewport.Width() }
+
+// PreviewIndex returns the preview's finalized display lines together with its
+// file-section boundaries, so a parent can resolve a source position inside
+// content the component rendered — the diff screen locates each hunk this way.
+// The component deliberately doesn't interpret the content itself: it knows
+// where the files start, the parent knows what it wants to find in them.
+func (m SplitList[T]) PreviewIndex() ([]string, []PreviewSection) {
+	return m.vim.Lines(), m.vim.Sections()
+}
+
+// PreviewOffset is the display line at the top of the preview — the reader's
+// position, which parents resolve their own markers against.
+func (m SplitList[T]) PreviewOffset() int { return m.viewport.YOffset() }
+
+// PreviewHeight is how many display lines the preview shows at once. With
+// PreviewOffset it bounds what the reader can currently see, which a parent
+// needs because scrolling clamps at the end of the content: a position it asked
+// for may be on screen without being the top row.
+func (m SplitList[T]) PreviewHeight() int { return m.viewport.Height() }
+
+// ScrollPreviewTo scrolls the preview so display line n is its top row. The
+// viewport clamps overshoot, so a parent may pass a position resolved against a
+// preview that has since grown or shrunk.
+func (m SplitList[T]) ScrollPreviewTo(n int) SplitList[T] {
+	m.viewport.SetYOffset(maxInt(0, n))
+	return m
+}
+
+// SetPreviewStatus overrides the preview legend's right-hand text while reading
+// (e.g. "hunk 2/5"); "" restores the default file position. Parents set it for a
+// position they track themselves and the component can't derive.
+func (m SplitList[T]) SetPreviewStatus(s string) SplitList[T] {
+	m.previewStatus = s
+	return m
+}
 
 // SetListTitle updates the list-pane title.
 func (m SplitList[T]) SetListTitle(title string) SplitList[T] {
@@ -505,13 +568,13 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 		return m, nil
 	}
 
-	if m.active == splitPreviewPane && !m.filtering && m.vim.HandleKey(&m.viewport, msg) {
+	if m.active == splitPreviewPane && !m.Capturing() && m.vim.HandleKey(&m.viewport, msg) {
 		return m, nil
 	}
 
 	// List pane: the same vim jump keys move the selection (gg/G to the ends,
 	// ctrl+d/u by half the visible window) instead of scrolling the preview.
-	if m.active == splitListPane && !m.filtering {
+	if m.active == splitListPane && !m.Capturing() {
 		_, navH := m.stackLayout()
 		if next, ok := m.vim.HandleListKey(msg, m.selected, len(m.filtered), navH-2); ok {
 			if next == m.selected {
@@ -523,6 +586,9 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 	}
 
 	if msg.String() == "esc" {
+		if m.searching || m.query != "" {
+			return m.clearSearch(), nil
+		}
 		if m.filtering {
 			m.filtering = false
 			m.filter.Blur()
@@ -534,6 +600,9 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 		return m, nil
 	}
 
+	if m.searching {
+		return m.handleSearchKey(msg)
+	}
 	if m.filtering {
 		return m.handleFilterKey(msg)
 	}
@@ -557,9 +626,25 @@ func (m SplitList[T]) handleKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
 	case "K", "shift+up", "[":
 		return m.stepList(-1)
 	case "/":
+		// `/` means "narrow this list" over the list and "find this in the diff"
+		// over the preview: same gesture, scoped to whichever pane you're in.
+		if m.active == splitPreviewPane {
+			m.searching = true
+			m.searchOrigin = m.viewport.YOffset()
+			m.search.Focus()
+			return m, nil
+		}
 		m.filtering = true
 		m.filter.Focus()
 		return m, nil
+	case "n":
+		if m.query != "" {
+			return m.stepMatch(1), nil
+		}
+	case "N":
+		if m.query != "" {
+			return m.stepMatch(-1), nil
+		}
 	case "y":
 		return m.yank()
 	case "?":
@@ -587,6 +672,135 @@ func (m SplitList[T]) handleFilterKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cm
 	m.filter, cmd = m.filter.Update(msg)
 	m, fcmd := m.applyFilter()
 	return m, tea.Batch(cmd, fcmd)
+}
+
+func (m SplitList[T]) handleSearchKey(msg tea.KeyPressMsg) (SplitList[T], tea.Cmd) {
+	if msg.String() == "enter" {
+		// Accept: the box closes but the query stays live, so the highlight holds
+		// and n/N keep stepping. Where the reader ended up becomes the anchor the
+		// next search measures from.
+		m.searching = false
+		m.search.Blur()
+		m.searchOrigin = m.viewport.YOffset()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.search, cmd = m.search.Update(msg)
+	if q := m.search.Value(); q != m.query {
+		m.query = q
+		m.runSearch()
+	}
+	return m, cmd
+}
+
+// runSearch re-matches the whole preview and moves to the first match at or
+// after the offset the box opened at, wrapping to the top when there is none
+// below. Measuring from that fixed origin rather than the live scroll position
+// is what keeps an incremental search from walking away from the reader as each
+// keystroke narrows the query.
+func (m *SplitList[T]) runSearch() {
+	m.rescan()
+	if len(m.matches) == 0 {
+		return
+	}
+	m.matchAt = 0
+	for i, line := range m.matches {
+		if line >= m.searchOrigin {
+			m.matchAt = i
+			break
+		}
+	}
+	m.scrollToMatch()
+}
+
+// rescan recomputes the active search's matches from scratch — for content that
+// was replaced rather than grown.
+func (m *SplitList[T]) rescan() {
+	m.matches, m.matchAt = nil, -1
+	m.scanMatches(0)
+}
+
+// scanMatches appends the display lines from index from onward that contain the
+// query. Matching is on the ANSI-stripped row, case-insensitively unless the
+// query carries an uppercase letter (vim's smartcase). It searches *rendered
+// rows*, so a match is only findable where it is legible: a source line the
+// hardwrap broke in two won't match across the break, the same bargain as
+// grepping what's on screen.
+func (m *SplitList[T]) scanMatches(from int) {
+	if m.query == "" {
+		return
+	}
+	needle, fold := m.query, m.query == strings.ToLower(m.query)
+	lines := m.vim.Lines()
+	for i := from; i < len(lines); i++ {
+		row := ansi.Strip(lines[i])
+		if fold {
+			row = strings.ToLower(row)
+		}
+		if strings.Contains(row, needle) {
+			m.matches = append(m.matches, i)
+		}
+	}
+}
+
+// stepMatch moves to the next (dir > 0) or previous match, wrapping at both
+// ends. From "no match selected" — a query typed while the preview was still
+// streaming its first hit in — either direction lands on the first.
+func (m SplitList[T]) stepMatch(dir int) SplitList[T] {
+	if len(m.matches) == 0 {
+		return m
+	}
+	if m.matchAt < 0 {
+		m.matchAt = 0
+	} else {
+		m.matchAt = (m.matchAt + dir + len(m.matches)) % len(m.matches)
+	}
+	m.scrollToMatch()
+	return m
+}
+
+// scrollToMatch puts the current match on the preview's top row — the same
+// landing every other jump in the pane uses (a hunk, a test anchor), so a match
+// is always found in the same place on screen.
+func (m *SplitList[T]) scrollToMatch() {
+	if m.matchAt >= 0 && m.matchAt < len(m.matches) {
+		m.viewport.SetYOffset(m.matches[m.matchAt])
+	}
+}
+
+// searchStatus is the preview legend's right-hand text while a search is live.
+func (m SplitList[T]) searchStatus() string {
+	switch {
+	case m.query == "":
+		return ""
+	case len(m.matches) == 0:
+		return "no match"
+	case m.matchAt < 0:
+		return fmt.Sprintf("%d matches", len(m.matches))
+	default:
+		return fmt.Sprintf("match %d/%d", m.matchAt+1, len(m.matches))
+	}
+}
+
+// resetSearch drops the search without moving the reader — for a preview that
+// has been replaced, where the offset it started from names nothing any more.
+func (m *SplitList[T]) resetSearch() {
+	m.searching = false
+	m.search.Blur()
+	m.search.SetValue("")
+	m.query, m.matches, m.matchAt, m.searchOrigin = "", nil, -1, 0
+}
+
+// clearSearch ends the search from the keyboard (esc). Cancelling while still
+// typing returns the reader to where the box opened — incremental search moved
+// them and they just asked for that to be undone; clearing an accepted search
+// leaves them wherever they navigated to.
+func (m SplitList[T]) clearSearch() SplitList[T] {
+	if m.searching {
+		m.viewport.SetYOffset(m.searchOrigin)
+	}
+	m.resetSearch()
+	return m
 }
 
 func clampIndex(i, n int) int {
@@ -871,7 +1085,9 @@ func (m *SplitList[T]) setPreviewContent() []string {
 	if w := m.viewport.Width(); w > 0 && content != "" {
 		content = ansi.Hardwrap(content, w, true)
 	}
-	return m.vim.SetContent(&m.viewport, content)
+	lines := m.vim.SetContent(&m.viewport, content)
+	m.rescan()
+	return lines
 }
 
 // appendPreview grows a streamed preview by one chunk without re-hardwrapping the
@@ -889,11 +1105,16 @@ func (m *SplitList[T]) appendPreview(chunk string) []string {
 	}
 	complete, tail := splitLastLine(m.rawTail + chunk)
 	m.rawTail = tail
+	finalized := len(m.vim.Lines())
 	if complete != "" {
 		// complete ends in "\n"; drop it so the wrap doesn't yield a phantom line,
 		// then hardwrap the block (line-independent, so this matches a full re-wrap)
 		// and finalize the resulting lines into the section-tracked display slice.
 		m.vim.AppendContent(ansi.Hardwrap(strings.TrimSuffix(complete, "\n"), w, true))
+		// Extend an active search over just the rows that were added, so a query
+		// typed against a half-streamed diff keeps finding hits as it fills in
+		// without rescanning the whole buffer per chunk.
+		m.scanMatches(finalized)
 	}
 	// The still-growing final line (the segment after the last newline) is shown as
 	// the trailing display row so a full re-wrap of the same buffer looks the same;
@@ -924,88 +1145,11 @@ func (m *SplitList[T]) applyAnchor(lines []string) {
 	if !ok {
 		return
 	}
-	target := m.cfg.PreviewLine(it)
-	if target <= 0 {
-		return
+	stripped := stripAll(lines)
+	if i := firstRowAtOrPast(stripped, 0, findGutter(stripped), m.cfg.PreviewLine(it)); i >= 0 {
+		m.viewport.SetYOffset(i)
+		m.anchored = true
 	}
-	stripped := make([]string, len(lines))
-	for i, line := range lines {
-		stripped[i] = ansi.Strip(line)
-	}
-	gutter := newGutterEnd(stripped)
-	if gutter < 0 {
-		return
-	}
-	for i, s := range stripped {
-		if n := newLineNum(s, gutter); n >= target {
-			m.viewport.SetYOffset(i)
-			m.anchored = true
-			return
-		}
-	}
-}
-
-// newGutterEnd finds the column at which difftastic's new-side line-number
-// gutter ends, or -1 if the preview carries no such gutter. It works for both
-// layouts: inline prints the new number in a left-indented gutter (old-side
-// rows sit at the margin), side-by-side prints it in a right gutter past the
-// old pane. In both, a new gutter is a digit run that starts past column 0 (the
-// old gutter owns the margin) and is followed by padding spaces, landing at the
-// same end column on every new-side row — so the most frequent such end column
-// is the gutter. Keying on the end, not the start, tolerates right-aligned
-// numbers of differing widths (e.g. line 9 vs line 168 in one file).
-func newGutterEnd(stripped []string) int {
-	counts := map[int]int{}
-	for _, s := range stripped {
-		for i := 0; i < len(s); {
-			if s[i] < '0' || s[i] > '9' {
-				i++
-				continue
-			}
-			start := i
-			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-				i++
-			}
-			if start > 0 && s[start-1] == ' ' && i < len(s) && s[i] == ' ' {
-				counts[i]++ // i is the exclusive end: the first padding space
-			}
-		}
-	}
-	best, bestN := -1, 0
-	for col, n := range counts {
-		// Tie-break on the larger column for a stable result: map iteration order
-		// is randomized, so without it the anchor could pick a different gutter
-		// (and scroll differently) across runs of the same diff.
-		if n > bestN || (n == bestN && col > best) {
-			best, bestN = col, n
-		}
-	}
-	return best
-}
-
-// newLineNum reads the new-side line number of a row whose gutter ends at end,
-// or -1 if the row has no new-side number there: an old-side/removed row, a
-// wrapped continuation, or a header. The digits must end exactly at end (the
-// gutter is right-aligned to a fixed column) and be preceded by a space.
-func newLineNum(s string, end int) int {
-	if end <= 0 || end > len(s) {
-		return -1
-	}
-	if end < len(s) && s[end] != ' ' {
-		return -1
-	}
-	if s[end-1] < '0' || s[end-1] > '9' {
-		return -1
-	}
-	start := end
-	for start > 0 && s[start-1] >= '0' && s[start-1] <= '9' {
-		start--
-	}
-	if start > 0 && s[start-1] != ' ' {
-		return -1
-	}
-	n, _ := strconv.Atoi(s[start:end])
-	return n
 }
 
 // currentSection is the file the preview is currently showing, for the panel
@@ -1019,6 +1163,21 @@ func (m SplitList[T]) currentSection() string {
 // right of the panel legend.
 func (m SplitList[T]) sectionProgress() string {
 	return m.vim.SectionProgress(m.viewport.YOffset())
+}
+
+// previewRightText is the right of the preview legend while reading, in
+// precedence order: a live search's match count, then a parent-set status (the
+// diff screen's hunk position), then the file position within the preview.
+func (m SplitList[T]) previewRightText() string {
+	// A live search outranks the parent's status: it is the mode the reader just
+	// entered, and its match count is the answer they are waiting on.
+	if s := m.searchStatus(); s != "" {
+		return s
+	}
+	if m.previewStatus != "" {
+		return m.previewStatus
+	}
+	return m.sectionProgress()
 }
 
 // clearPreview blanks the preview pane and stops the spinner.
@@ -1075,8 +1234,12 @@ func (m SplitList[T]) previewHeader() string {
 // is shown in the legend, not the body — see currentSection / content.
 func (m SplitList[T]) previewBodyView() (string, Scrollbar) {
 	body := m.viewport.View()
-	if m.selAnchor >= 0 && m.dragging {
+	switch {
+	case m.selAnchor >= 0 && m.dragging:
 		body = highlightRows(body, m.viewport.YOffset(), m.selAnchor, m.selEnd)
+	case m.matchAt >= 0 && m.matchAt < len(m.matches):
+		line := m.matches[m.matchAt]
+		body = highlightRows(body, m.viewport.YOffset(), line, line)
 	}
 	return body, ScrollbarFor(&m.viewport)
 }
@@ -1109,6 +1272,8 @@ func (m SplitList[T]) footerView() string {
 		return Footer(m.width, m.prompt, nil)
 	case m.filtering:
 		return FooterContent(m.width, m.filter.View())
+	case m.searching:
+		return FooterContent(m.width, m.search.View())
 	case m.prevErr != nil:
 		return Footer(m.width, fmt.Sprintf("Error: %v", m.prevErr), nil)
 	case m.flash != "":
@@ -1118,8 +1283,9 @@ func (m SplitList[T]) footerView() string {
 	}
 }
 
-// hints are the footer keybinding hints, with the ⇥ hint relabeled "list" while
-// reading — there tab expands the one-row peek back to the full navigable list.
+// hints are the footer keybinding hints, relabeled for the pane in focus: while
+// reading, ⇥ expands the one-row peek back to the full navigable list, and / finds
+// text in the diff rather than narrowing the list.
 func (m SplitList[T]) hints() [][2]string {
 	if m.active != splitPreviewPane {
 		return m.cfg.Hints
@@ -1127,8 +1293,11 @@ func (m SplitList[T]) hints() [][2]string {
 	out := make([][2]string, len(m.cfg.Hints))
 	copy(out, m.cfg.Hints)
 	for i := range out {
-		if out[i][0] == "⇥" {
+		switch out[i][0] {
+		case "⇥":
 			out[i][1] = "list"
+		case "/":
+			out[i][1] = "search"
 		}
 	}
 	return out
@@ -1182,7 +1351,7 @@ func (m SplitList[T]) content() string {
 		// via previewTitleView) plus the file position while reading.
 		right := ""
 		if reading {
-			right = m.sectionProgress()
+			right = m.previewRightText()
 		}
 		return Panel(m.previewTitleView(), right, previewBody, m.width, previewH, reading, previewBar)
 	}
@@ -1201,7 +1370,7 @@ func (m SplitList[T]) content() string {
 		previewTitle = m.spinner.View()
 	case reading:
 		previewTitle = m.currentSection()
-		previewRight = m.sectionProgress()
+		previewRight = m.previewRightText()
 	}
 	if h := m.previewHeader(); h != "" && !m.loading {
 		previewTitle = h

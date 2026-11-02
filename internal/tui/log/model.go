@@ -200,7 +200,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, cmd = m.sendDrilled(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 		return m, cmd
 	case tea.KeyPressMsg:
-		if m.list.Filtering() || m.list.ShowingHelp() {
+		if m.list.Capturing() || m.list.ShowingHelp() {
 			break
 		}
 		if m.confirm.Active() {
@@ -269,7 +269,7 @@ func (m Model) sendDrilled(msg tea.Msg) (Model, tea.Cmd) {
 // to the commit list" (but letting esc clear a filter / close help there).
 func (m Model) updateDrilled(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
-		if key.String() == "esc" && !m.drilled.Filtering() && !m.drilled.ShowingHelp() {
+		if key.String() == "esc" && !m.drilled.InMode() {
 			m.drilling = false
 			// Refresh the commit preview, which was frozen (and possibly cut off
 			// mid-stream) while drilled — a cache hit if it had finished.

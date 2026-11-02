@@ -93,7 +93,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list, m.stream, cmd = tui.AdvanceStream(m.list, m.stream, msg)
 		return m, cmd
 	case tea.KeyPressMsg:
-		if m.list.Filtering() || m.list.ShowingHelp() {
+		if m.list.Capturing() || m.list.ShowingHelp() {
 			break
 		}
 		if m.confirm.Active() {

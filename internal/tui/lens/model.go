@@ -116,7 +116,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m.delegate(msg)
 	case tea.KeyPressMsg:
-		if m.shown().Filtering() || m.shown().ShowingHelp() {
+		if m.shown().Capturing() || m.shown().ShowingHelp() {
 			break // let the child handle keys while filtering / in help
 		}
 		switch msg.String() {

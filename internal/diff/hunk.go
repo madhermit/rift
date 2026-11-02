@@ -297,15 +297,47 @@ func ShowFile(repoRoot, ref, file string) ([]byte, error) {
 	return out, nil
 }
 
-// RawRangeDiffAll returns the whole-repo unified diff between two commits — no
-// pathspec, and --find-renames forced, so rename detection is on even under
+// RawScopeDiff returns the whole-repo unified diff for a scope — working tree,
+// staged, working tree vs a base ref, or a committed range — with no pathspec
+// and --find-renames forced, so rename detection is on even under
 // diff.renames=false config (a per-file pathspec or a config-disabled detection
 // would render a renamed file as 100% added, disagreeing with the listing).
-// Callers parse it once and index by path.
-func RawRangeDiffAll(repoRoot, base, target string) (string, error) {
-	cmd := exec.Command("git", "diff", "--no-color", "--find-renames", base, target)
+// One subprocess covers every file; callers parse it once and index by path.
+// Untracked files aren't included (git diff omits them) and are handled
+// separately via RawNewFileDiff.
+func RawScopeDiff(repoRoot string, opts DiffOpts) (string, error) {
+	args := []string{"diff", "--no-color", "--find-renames"}
+	if opts.Staged {
+		args = append(args, "--staged")
+	}
+	if opts.Base != "" {
+		args = append(args, opts.Base)
+		if opts.Target != "" {
+			args = append(args, opts.Target)
+		}
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Dir = repoRoot
-	return runGitDiff(cmd, "git diff range")
+	return runGitDiff(cmd, "git diff scope")
+}
+
+// ScopeHunks indexes a scope's hunks by new-side path, for callers that need to
+// address a change at hunk granularity (the diff preview's hunk cursor). A diff
+// that can't be produced yields an empty index rather than an error: hunk
+// addressing is an enhancement over the rendered preview, never a precondition
+// for showing it.
+func ScopeHunks(repoRoot string, opts DiffOpts) map[string][]Hunk {
+	raw, err := RawScopeDiff(repoRoot, opts)
+	if err != nil {
+		return map[string][]Hunk{}
+	}
+	byPath := make(map[string][]Hunk)
+	for _, fd := range ParseUnifiedDiff(raw) {
+		if len(fd.Hunks) > 0 {
+			byPath[fd.Path] = fd.Hunks
+		}
+	}
+	return byPath
 }
 
 // rawRender is the plain header + body of a hunk, used as the graceful-degradation
@@ -332,21 +364,6 @@ func RawUnifiedDiff(repoRoot string, staged bool, file string) (string, error) {
 		args = append(args, "--staged")
 	}
 	args = append(args, "--", file)
-	cmd := exec.Command("git", args...)
-	cmd.Dir = repoRoot
-	return runGitDiff(cmd, "git diff raw")
-}
-
-// RawWorktreeDiff returns the whole working-tree (or staged) unified diff — no
-// pathspec, and --find-renames forced (see RawRangeDiffAll), so rename
-// detection stays on and one subprocess covers every file. Callers parse it
-// once and index by path. Untracked files aren't included (git diff omits
-// them); those are handled separately.
-func RawWorktreeDiff(repoRoot string, staged bool) (string, error) {
-	args := []string{"diff", "--no-color", "--find-renames"}
-	if staged {
-		args = append(args, "--staged")
-	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoRoot
 	return runGitDiff(cmd, "git diff raw")

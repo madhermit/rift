@@ -157,7 +157,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SpecsChangedMsg:
 		return m.applySpecs(msg.Specs)
 	case tea.KeyPressMsg:
-		if m.list.Filtering() || m.list.ShowingHelp() {
+		if m.list.Capturing() || m.list.ShowingHelp() {
 			break
 		}
 		switch msg.String() {
@@ -184,9 +184,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View { return m.list.TeaView() }
 
-// Filtering and ShowingHelp expose the embedded list's modal state so a parent
-// embedding this model (the log drilldown) knows when not to intercept esc.
-func (m Model) Filtering() bool   { return m.list.Filtering() }
+// Capturing, ShowingHelp, and InMode expose the embedded list's modal state to
+// a parent hosting this model (the log drilldown, the files↔tests lens): when
+// not to run its own key handlers, and when not to take esc for itself.
+func (m Model) Capturing() bool   { return m.list.Capturing() }
+func (m Model) InMode() bool      { return m.list.InMode() }
 func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
 
 // SpecsChangedMsg tells the tests lens its specs were re-collected externally

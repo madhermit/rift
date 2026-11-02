@@ -50,7 +50,7 @@ A new cohort of review-first diff viewers — [hunk](https://github.com/modem-de
 | Moved-line detection                     |  🔜  |                    ✅                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ❌                        |
 | Transient — invoke, act, return to shell |  ✅  |                    ✅                     |                         ❌                          |                    ✅                    |                      —                       |                        —                        |
 | Single static binary                     |  ✅  |                    ❌                     |                         ✅                          |                    ❌                    |                      ✅                      |                       ✅                        |
-| Inline agent annotations                 |  🔜  |                    ✅                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ❌                        |
+| Hunk notes shared with an agent          |  🔜  |                    ✅                     |                         ❌                          |                    ❌                    |                      ❌                      |                       ❌                        |
 | Mouse support                            |  ✅  |                    ✅                     |                         ✅                          |                    ❌                    |                      —                       |                        —                        |
 
 ✅ yes · ❌ no · — not applicable · 🔜 planned. delta and difftastic are diff renderers/pagers rather than browsers, so several rows don't apply — rift uses difftastic as its diff engine and falls back to a built-in line diff without it.
@@ -65,7 +65,7 @@ Powered by difftastic: reformatting noise disappears and you see what actually c
 
 ### Split-pane browsing
 
-`rift diff` and `rift log` are two-panel browsers: a fuzzy-filterable list on the left, a structural diff preview on the right. Navigate with vim keys, jump hunk-to-hunk, and keep your place with a scrollbar and a sticky file header. Colored file-type icons and dimmed directories make the list scan fast. In the log, press `⏎` to drill into a commit's files, or `c` / `r` to cherry-pick / revert the selected commit.
+`rift diff` and `rift log` are two-panel browsers: a fuzzy-filterable list on the left, a structural diff preview on the right. Navigate with vim keys, jump hunk-to-hunk, search the diff with `/` (`n`/`N` to step matches), and keep your place with a scrollbar and a sticky file header. Colored file-type icons and dimmed directories make the list scan fast. In the log, press `⏎` to drill into a commit's files, or `c` / `r` to cherry-pick / revert the selected commit.
 
 ![rift log — commit explorer with a live diff preview](docs/images/log.png)
 
@@ -82,6 +82,8 @@ Add `--tests` to `rift diff` or `rift log` to read a change by the _tests_ it to
 ### Review tracking
 
 In `rift diff`, press `r` to mark the selected file **reviewed** (a `✓` replaces its status glyph) and `U` to show only the files you haven't reviewed yet — so you can walk a large change file by file and watch the list shrink as you tick each one off. A mark is keyed to the file's content, so it **resets the moment the file changes** (e.g. an agent edits it again) and re-applies on revert, making it easy to re-review only what's new. Marks persist per worktree (in `.git/rift/`, uncommitted); `--unreviewed` narrows `--print` / `--json` / `--name-only` to the not-yet-reviewed files.
+
+Review also goes finer than the file. With the preview focused, `R` marks the **hunk** under the cursor and steps to the next one still needing eyes — so a 900-line file is a `R`-`R`-`R` pass rather than one all-or-nothing tick. The list pane reviews files, the preview reviews hunks. Marking a file's last open hunk marks the file, so it ticks out of the `U` view like any other; reopening a hunk reopens its file; and a file part-way through wears the reviewed color on its status letter, so a started file reads differently from an untouched one. Hunk marks are keyed to the hunk's body rather than its `@@` header, so unrelated edits above it don't wipe them — only rewriting that hunk does.
 
 ![rift diff — marking changes reviewed and filtering to what's left](docs/images/reviewed.gif)
 
@@ -145,11 +147,12 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 | `j`/`k`, `↑`/`↓`            | move selection / scroll the preview                                          |
 | `J`/`K`, `⇧↑`/`⇧↓`, `]`/`[` | step to the next / previous item (even while reading)                        |
 | `gg`/`G`                    | jump to first / last                                                         |
-| `{`/`}`                     | previous / next diff section (previous / next hunk in `stage`)               |
+| `{`/`}`                     | previous / next hunk (`diff`, `stage`); previous / next file elsewhere       |
 | `ctrl-d`/`ctrl-u`           | half-page down / up                                                          |
 | `ctrl-f`/`ctrl-b`           | page down / up                                                               |
 | `⇥`                         | switch between the list and preview panes                                    |
-| `/`                         | fuzzy-filter (`⏎` accept, `esc` clear)                                       |
+| `/`                         | fuzzy-filter the list — or search the diff when the preview is focused       |
+| `n`/`N`                     | next / previous search match (wraps)                                         |
 | `!term`                     | inside a filter, drop anything matching `term` (e.g. `/ model !test`)        |
 | `y`                         | yank the selection (path, commit hash, or stash ref)                         |
 | `?`                         | keybinding overlay                                                           |
@@ -160,7 +163,7 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 
 | Screen     | Keys                                                                                                                                                        |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `diff`     | `s` toggle staged · `w` toggle watch · `t` tests lens · `\` diff layout · `e` engine · `o` open in `$EDITOR` · `r` mark reviewed · `U` show only unreviewed |
+| `diff`     | `s` toggle staged · `w` toggle watch · `t` tests lens · `\` diff layout · `e` engine · `o` open in `$EDITOR` · `r` mark file reviewed · `R` mark hunk reviewed · `U` show only unreviewed |
 | `log`      | `⏎` drill into the commit's files (or tests) · `\` layout · `e` engine · `c` cherry-pick · `r` revert                                                       |
 | `stash`    | `a` apply · `p` pop · `x` drop · `\` layout · `e` engine                                                                                                    |
 | `stage`    | `s` stage · `u` unstage · `a` stage all · `o` open in `$EDITOR` · `e` engine (fixed layout, no `\`)                                                         |
@@ -235,7 +238,7 @@ Tell your agent: _"Run `rift skill path` and follow that skill to review this ch
 
 ## Status
 
-The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.7.0**), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, and inline agent annotations (file-based, in the same store as reviewed marks — no daemon).
+The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.7.0**), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, and hunk notes — marking a hunk of concern for an agent to flesh out, and an agent annotating its own changes for you, file-based in the same store as reviewed marks (no daemon). The diff preview's hunk cursor (`{` / `}`) is the first piece of that.
 
 Worktree and branch _management_ are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
 

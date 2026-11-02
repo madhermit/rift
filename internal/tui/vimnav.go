@@ -13,19 +13,25 @@ import (
 // Embed in any TUI model with a scrollable viewport.
 type VimNav struct {
 	pendingG bool
-	sections []section // file boundaries within the displayed content
-	lines    []string  // finalized display lines (banners stripped), the render source
+	sections []PreviewSection // file boundaries within the displayed content
+	lines    []string         // finalized display lines (banners stripped), the render source
 }
 
 // Lines returns the finalized display lines — exactly what the viewport
 // renders, banner-stripped. The mouse selection reads them to copy content.
 func (v *VimNav) Lines() []string { return v.lines }
 
-// section is a file boundary in the preview: the displayed line where the file
-// begins, and its label (path) taken from the non-displayed "── path ──" banner.
-type section struct {
-	offset int
-	label  string
+// Sections returns the file boundaries within the displayed content, in display
+// order. Parents read them to resolve a position inside the file it belongs to
+// (line numbers restart per file, so a whole-preview scan would mis-locate).
+func (v *VimNav) Sections() []PreviewSection { return v.sections }
+
+// PreviewSection is a file boundary in the preview: the displayed line where the
+// file begins, and its label (path) taken from the non-displayed "── path ──"
+// banner.
+type PreviewSection struct {
+	Offset int
+	Label  string
 }
 
 // HandleKey processes vim navigation keys on the viewport.
@@ -148,7 +154,7 @@ func (v *VimNav) RenderStreaming(vp *viewport.Model, tail string) []string {
 func (v *VimNav) appendLines(wrapped []string) {
 	for _, line := range wrapped {
 		if label, ok := bannerLabel(line); ok {
-			v.sections = append(v.sections, section{offset: len(v.lines), label: label})
+			v.sections = append(v.sections, PreviewSection{Offset: len(v.lines), Label: label})
 			continue
 		}
 		v.lines = append(v.lines, line)
@@ -168,7 +174,7 @@ func bannerLabel(line string) (string, bool) {
 func (v *VimNav) currentIndex(y int) int {
 	cur := -1
 	for i, s := range v.sections {
-		if s.offset > y {
+		if s.Offset > y {
 			break
 		}
 		cur = i
@@ -180,7 +186,7 @@ func (v *VimNav) currentIndex(y int) int {
 // the panel legend. Empty before the first section or when there are none.
 func (v *VimNav) CurrentSection(y int) string {
 	if cur := v.currentIndex(y); cur >= 0 {
-		return v.sections[cur].label
+		return v.sections[cur].Label
 	}
 	return ""
 }
@@ -201,22 +207,22 @@ func ScrollbarFor(vp *viewport.Model) Scrollbar {
 	return Scrollbar{Total: vp.TotalLineCount(), Visible: vp.Height(), Offset: vp.YOffset()}
 }
 
-func jumpToSection(vp *viewport.Model, sections []section, dir int) {
+func jumpToSection(vp *viewport.Model, sections []PreviewSection, dir int) {
 	if len(sections) == 0 {
 		return
 	}
 	current := vp.YOffset()
 	if dir > 0 {
 		for _, s := range sections {
-			if s.offset > current {
-				vp.SetYOffset(s.offset)
+			if s.Offset > current {
+				vp.SetYOffset(s.Offset)
 				return
 			}
 		}
 	} else {
 		for i := len(sections) - 1; i >= 0; i-- {
-			if sections[i].offset < current {
-				vp.SetYOffset(sections[i].offset)
+			if sections[i].Offset < current {
+				vp.SetYOffset(sections[i].Offset)
 				return
 			}
 		}

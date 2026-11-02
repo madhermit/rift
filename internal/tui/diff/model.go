@@ -26,16 +26,73 @@ type FilesChangedMsg struct {
 }
 
 // reviewMarks is the reviewed-state lookup the row renderer reads: the persisted
-// marks plus each file's current blob hash. Both are mutated in place — Toggle on
-// the store, a fresh hash map after an edit — so the row closure that captures
-// the *reviewMarks always reflects the current state.
+// file and hunk marks, each file's current blob hash, and its hunks' content
+// keys. All are mutated in place — a toggle on a store, a fresh hash map after
+// an edit, a fresh key index when the scope's hunks land — so the row closure
+// that captures the *reviewMarks always reflects the current state.
 type reviewMarks struct {
 	state  *review.Reviewed
+	hunks  *review.Hunks
 	hashes map[string]string
+	keys   map[string][]string // file path → its hunks' content keys, in diff order
 }
 
 func (rm *reviewMarks) reviewed(path string) bool {
 	return rm != nil && rm.state.IsReviewed(path, rm.hashes[path])
+}
+
+// partlyReviewed reports whether some of a file's hunks are marked. It doesn't
+// need to exclude "all of them": completing a file's hunks marks the file too
+// (see toggleHunkReviewed), and the row renderer checks that first.
+func (rm *reviewMarks) partlyReviewed(path string) bool {
+	if rm == nil {
+		return false
+	}
+	n, _ := rm.hunks.Reviewed(path, rm.keys[path])
+	return n > 0
+}
+
+// hunksLoadedMsg carries the scope's hunk index, read off the event loop. It
+// names the scope it was read for so a load in flight when the scope changed
+// (the `s` staged toggle rebuilds this model) is dropped rather than applied to
+// the wrong side of the index.
+type hunksLoadedMsg struct {
+	staged bool
+	base   string
+	target string
+	hunks  map[string][]diff.Hunk
+	// keys are the hunks' content identities, hashed alongside the read rather
+	// than in the renderer: the row for a file with hunk marks asks about every
+	// one of them, every frame, and hashing hunk bodies there would put the diff
+	// through sha256 on each repaint.
+	keys map[string][]string
+}
+
+// hunkCursor is the diff's hunk-granular position: the scope's hunks by path,
+// and the display line where each hunk of the *current preview* begins. The
+// preview shows an engine's rendering, not the unified diff it came from, so
+// positions have to be resolved against the finished content (see indexHunks) —
+// which is also why they're a cache rather than something the render carries.
+type hunkCursor struct {
+	byPath  map[string][]diff.Hunk // scope hunks by path; nil until loaded
+	loaded  bool
+	loading bool       // a read is in flight; keeps a reset and a reselect from racing two
+	spots   []hunkSpot // the current preview's hunks, in display order
+	// at is the hunk the reader is on, numbered from 1 — 0 means none, which is
+	// also the state before a preview resolves, so the zero value is correct and
+	// a reset never has to remember a sentinel.
+	at int
+}
+
+// hunkSpot is one hunk's place in the current preview: the display line it
+// begins at, plus what addresses its reviewed mark. path is the file's real
+// path, not the display path a rename's section is labelled with, because that
+// is what the mark store is keyed by; key is empty where rift couldn't identify
+// the hunk, which makes the spot navigable but not markable.
+type hunkSpot struct {
+	line int
+	path string
+	key  string
 }
 
 type Model struct {
@@ -55,6 +112,7 @@ type Model struct {
 	marks          *reviewMarks      // nil for a commit diff — historical files don't get reviewed
 	unreviewedOnly bool
 	watching       bool // show the live-watch indicator in the header context
+	hunk           hunkCursor
 }
 
 // prependAllEntry adds a synthetic "All" row (carrying the totals) that previews
@@ -103,6 +161,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if !commitDiff {
 		marks = &reviewMarks{
 			state:  review.LoadReviewed(repo),
+			hunks:  review.LoadHunks(repo),
 			hashes: review.ContentHashes(repo, files),
 		}
 	}
@@ -122,7 +181,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 		unreviewedOnly: unreviewed && !commitDiff,
 	}
 
-	hints := [][2]string{{"/", "filter"}, {"⇥", "read"}}
+	hints := [][2]string{{"/", "filter"}, {"⇥", "read"}, {"{/}", "hunk"}}
 	if lensToggle {
 		hints = append(hints, [2]string{"t", "tests"})
 	}
@@ -136,7 +195,7 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 	if !commitDiff {
 		// In a commit diff the files are historical: editing the working-tree copy
 		// (`o`) or reviewing it would be misleading, so those are working-tree only.
-		hints = append(hints, [2]string{"o", "open"}, [2]string{"r", "review"}, [2]string{"U", "hide reviewed"})
+		hints = append(hints, [2]string{"o", "open"}, [2]string{"r/R", "review file/hunk"}, [2]string{"U", "hide reviewed"})
 	}
 	hints = append(hints, [2]string{"y", "yank"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 
@@ -172,14 +231,20 @@ func New(repo *git.Repo, engine diff.Engine, files []git.ChangedFile, staged boo
 
 // fileRow renders a file row: a status glyph (or ✓ when reviewed), file-type
 // icon, path, and +/- stat. The synthetic "All" entry renders its own banner.
+// A file part-way through a hunk-by-hunk pass keeps its status letter — there is
+// still something there to read — but wears the reviewed color, so it reads at a
+// glance as started rather than untouched.
 func fileRow(marks *reviewMarks) func(git.ChangedFile, int, bool) string {
 	return func(f git.ChangedFile, w int, selected bool) string {
 		if f.Path == "" {
 			return rowWithStat(tui.TextStyle(selected).Render("∗ All changes"), tui.DiffStat(f.Added, f.Deleted), w)
 		}
 		glyph := tui.StatusStyle(f.Status).Render(git.StatusChar(f.Status))
-		if marks.reviewed(f.Path) {
+		switch {
+		case marks.reviewed(f.Path):
 			glyph = reviewedGlyph.Render("\u2713") // standard check (U+2713), font-independent
+		case marks.partlyReviewed(f.Path):
+			glyph = reviewedGlyph.Render(git.StatusChar(f.Status))
 		}
 		prefix := glyph + " " + tui.IconField(f.Path)
 		return pathRow(prefix, selected, f.DisplayPath(), tui.DiffStat(f.Added, f.Deleted), w)
@@ -270,18 +335,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SelectionChangedMsg:
 		m.stream.Cancel()
 		m.stream = nil
+		load := m.loadHunksIfNeeded()
 		if msg.CacheHit {
-			return m, nil // preview served from cache; no new load
+			// Cached content is final, so the new selection's hunks resolve now.
+			m.indexHunks()
+			return m.refreshHunkCursor(), load
 		}
-		return m, m.previewCmd(msg.ReqID)
+		m.hunk.spots, m.hunk.at = nil, 0 // the outgoing preview's positions no longer apply
+		return m.refreshHunkCursor(), tea.Batch(load, m.previewCmd(msg.ReqID))
 	case tui.StreamReadyMsg:
 		var cmd tea.Cmd
 		m.list, m.stream, cmd = tui.ApplyStream(m.list, m.stream, msg)
-		return m, cmd
+		if msg.Ch == nil {
+			m.indexHunks() // header-only/empty preview: nothing more will arrive
+		}
+		return m.refreshHunkCursor(), cmd
 	case tui.ChunkMsg:
+		done := m.stream.Owns(msg) && !msg.More
 		var cmd tea.Cmd
 		m.list, m.stream, cmd = tui.AdvanceStream(m.list, m.stream, msg)
-		return m, cmd
+		if done {
+			// The last chunk landed: the rendered rows are stable, so hunk
+			// positions resolved against them stay valid until the next load.
+			m.indexHunks()
+		}
+		return m.refreshHunkCursor(), cmd
+	case hunksLoadedMsg:
+		m.hunk.loading = false
+		if msg.staged != m.staged || msg.base != m.base || msg.target != m.target {
+			return m, nil // read for a scope this model has since left
+		}
+		m.hunk.byPath, m.hunk.loaded = msg.hunks, true
+		if m.marks != nil {
+			m.marks.keys = msg.keys
+		}
+		m.indexHunks()
+		return m.refreshHunkCursor(), nil
 	case tui.EditorClosedMsg:
 		// The edit may have changed the file's diff (even reverting it entirely), and
 		// can flip its reviewed state — so reload the file list (recomputing hashes),
@@ -293,7 +382,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.applyFiles(msg.Files, msg.Hashes)
 	case tea.KeyPressMsg:
-		if m.list.Filtering() || m.list.ShowingHelp() {
+		if m.list.Capturing() || m.list.ShowingHelp() {
 			break
 		}
 		switch msg.String() {
@@ -321,15 +410,198 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.marks != nil {
 				return m.toggleReviewed()
 			}
+		case "R":
+			// The hunk cursor is a reading-mode position, so `R` acts where it is
+			// visible: the list pane reviews files (`r`), the preview reviews hunks.
+			if m.marks != nil && m.canNavigateHunks() {
+				return m.toggleHunkReviewed()
+			}
 		case "U":
 			if m.marks != nil {
 				return m.toggleUnreviewedOnly()
+			}
+		case "}":
+			if m.canNavigateHunks() {
+				return m.navigateHunk(1)
+			}
+		case "{":
+			if m.canNavigateHunks() {
+				return m.navigateHunk(-1)
 			}
 		}
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
-	return m, cmd
+	// Any scroll — a key, a wheel, a jump — can carry the reader into another
+	// hunk, so the cursor is re-synced here rather than only where it's stepped.
+	return m.refreshHunkCursor(), cmd
+}
+
+// canNavigateHunks reports whether {/} should step hunks: only while reading
+// (the preview is where they'd land) and only once its hunks are resolved.
+// Otherwise the keys fall through to the list, which steps file sections —
+// hunks when rift knows them, files when it doesn't.
+func (m Model) canNavigateHunks() bool {
+	return m.list.Reading() && len(m.hunk.spots) > 0
+}
+
+// navigateHunk steps the cursor to the next (dir > 0) or previous hunk and
+// scrolls it to the top of the preview. The scroll is best-effort: at the end of
+// a short diff the viewport clamps, so the last hunks share a screen. That's why
+// the cursor is state rather than a function of the scroll position — several
+// hunks can occupy the same position, and stepping has to keep moving anyway.
+func (m Model) navigateHunk(dir int) (tea.Model, tea.Cmd) {
+	next := m.hunk.at + dir
+	if next < 1 || next > len(m.hunk.spots) {
+		return m, nil // already at the first/last hunk
+	}
+	m.hunk.at = next
+	m.list = m.list.ScrollPreviewTo(m.hunk.spots[next-1].line)
+	return m.refreshHunkCursor(), nil
+}
+
+// syncHunkCursor re-derives the cursor from the scroll position after a free
+// scroll — but only once the cursor's own hunk has left the screen. Near the end
+// of a short diff several hunks are visible at once and the position alone can't
+// say which one the reader means, so an explicit {/} step holds until it
+// actually scrolls out of view.
+func (m *Model) syncHunkCursor() {
+	if len(m.hunk.spots) == 0 {
+		m.hunk.at = 0
+		return
+	}
+	y := m.list.PreviewOffset()
+	if m.hunk.at > 0 && m.hunk.at <= len(m.hunk.spots) {
+		if off := m.hunk.spots[m.hunk.at-1].line; off >= y && off < y+m.list.PreviewHeight() {
+			return
+		}
+	}
+	m.hunk.at = hunkAt(m.hunk.spots, y)
+}
+
+// refreshHunkCursor re-syncs the cursor to where the reader actually is and
+// writes the "hunk N/M" readout into the preview legend, ticked when the hunk
+// under the cursor is marked reviewed. The readout is empty — restoring the file
+// position the legend otherwise shows — while a preview streams, when its
+// content has no hunks, or above the first one.
+func (m Model) refreshHunkCursor() Model {
+	m.syncHunkCursor()
+	m.list = m.list.SetPreviewStatus(m.hunkStatus())
+	return m
+}
+
+// hunkStatus is the cursor's readout, ticked when the hunk under it is marked
+// reviewed; empty when the cursor is on no hunk.
+func (m Model) hunkStatus() string {
+	if m.hunk.at < 1 || m.hunk.at > len(m.hunk.spots) {
+		return ""
+	}
+	status := fmt.Sprintf("hunk %d/%d", m.hunk.at, len(m.hunk.spots))
+	if m.hunkReviewed(m.hunk.spots[m.hunk.at-1]) {
+		status += " ✓"
+	}
+	return status
+}
+
+// hunkReviewed reports whether a spot's hunk is marked. False whenever review
+// state is off (a commit diff) or the hunk couldn't be identified.
+func (m Model) hunkReviewed(s hunkSpot) bool {
+	return m.marks != nil && m.marks.hunks.IsReviewed(s.path, s.key)
+}
+
+// hunkAt is the hunk the reader is inside — the last one beginning at or above
+// the top row, numbered from 1 — or 0 when there are none, or the reader is
+// above the first (a preview can open on a file header).
+func hunkAt(spots []hunkSpot, y int) int {
+	at := 0
+	for i, s := range spots {
+		if s.line > y {
+			break
+		}
+		at = i + 1
+	}
+	return at
+}
+
+// loadHunksIfNeeded reads the scope's hunk index off the event loop, once per
+// file set. Both triggers are needed and can coincide — a refresh resets the
+// cursor, and the reselect it may cause asks again — so an in-flight read is
+// tracked to keep them from spending two subprocesses on the same answer. It's
+// an enhancement over the rendered preview — the diff shows either way — so a
+// failure degrades to an unavailable cursor, never an error.
+func (m *Model) loadHunksIfNeeded() tea.Cmd {
+	if m.hunk.loaded || m.hunk.loading {
+		return nil
+	}
+	m.hunk.loading = true
+	root := m.repo.Root()
+	opts := diff.DiffOpts{Staged: m.staged, Base: m.base, Target: m.target}
+	// git diff omits untracked files, so they each need their own no-index diff.
+	var untracked []string
+	for _, f := range m.files {
+		if f.Status == "Untracked" {
+			untracked = append(untracked, f.Path)
+		}
+	}
+	return func() tea.Msg {
+		byPath := diff.ScopeHunks(root, opts)
+		for _, path := range untracked {
+			raw, err := diff.RawNewFileDiff(root, path)
+			if err != nil {
+				continue
+			}
+			var hunks []diff.Hunk
+			for _, fd := range diff.ParseUnifiedDiff(raw) {
+				hunks = append(hunks, fd.Hunks...)
+			}
+			if len(hunks) > 0 {
+				byPath[path] = hunks // key by the path asked for, not the --no-index header
+			}
+		}
+		keys := make(map[string][]string, len(byPath))
+		for path, hunks := range byPath {
+			ks := make([]string, len(hunks))
+			for i, h := range hunks {
+				ks[i] = review.HunkKey(h)
+			}
+			keys[path] = ks
+		}
+		return hunksLoadedMsg{staged: opts.Staged, base: opts.Base, target: opts.Target, hunks: byPath, keys: keys}
+	}
+}
+
+// indexHunks resolves where each of the current preview's hunks begins in the
+// rendered content, file by file — new-side line numbers restart per file, so
+// each file's hunks are resolved within its own section. It runs only on
+// finished content: rows in a half-streamed preview are still moving.
+func (m *Model) indexHunks() {
+	m.hunk.spots, m.hunk.at = nil, 0
+	sel, ok := m.list.Selected()
+	if !m.hunk.loaded || !ok {
+		return
+	}
+	lines, sections := m.list.PreviewIndex()
+	if len(lines) == 0 {
+		return // nothing rendered yet; positions would be invented, not resolved
+	}
+	for _, f := range previewFiles(sel, m.list.VisibleItems()) {
+		hunks := m.hunk.byPath[f.Path]
+		if len(hunks) == 0 {
+			continue
+		}
+		var keys []string
+		if m.marks != nil {
+			keys = m.marks.keys[f.Path] // absent for a commit diff: spots stay unmarkable
+		}
+		start, end := tui.SectionRange(sections, f.DisplayPath(), len(lines))
+		for i, off := range tui.HunkOffsets(lines[start:end], hunks) {
+			spot := hunkSpot{line: start + off, path: f.Path}
+			if i < len(keys) {
+				spot.key = keys[i]
+			}
+			m.hunk.spots = append(m.hunk.spots, spot)
+		}
+	}
 }
 
 // toggleReviewed flips the selected file's reviewed mark. Marking a file
@@ -342,9 +614,22 @@ func (m Model) toggleReviewed() (tea.Model, tea.Cmd) {
 	if m.marks == nil || !ok || sel.Path == "" {
 		return m, nil
 	}
-	marked := m.marks.state.Toggle(sel.Path, m.marks.hashes[sel.Path])
+	if m.marks.state.Toggle(sel.Path, m.marks.hashes[sel.Path]) {
+		return m.afterFileMarked(sel.Path)
+	}
+	// Un-marking: stay on the file the reviewer came back to. The unreviewed-only
+	// view needs no rebuild — everything it shows is already unreviewed, so the
+	// file is where it was.
 	m.list = m.list.SetListTitle(m.listTitle())
-	next := nextUnreviewed(m.list.VisibleItems(), sel.Path, m.marks.reviewed)
+	return m, nil
+}
+
+// afterFileMarked settles the list once path's file mark has gone on, whether
+// that came from `r` or from `R` completing the file's last hunk: retitle, then
+// move to the next file still needing eyes.
+func (m Model) afterFileMarked(path string) (tea.Model, tea.Cmd) {
+	m.list = m.list.SetListTitle(m.listTitle())
+	next := nextUnreviewed(m.list.VisibleItems(), path, m.marks.reviewed)
 
 	var cmd tea.Cmd
 	if m.unreviewedOnly {
@@ -353,17 +638,85 @@ func (m Model) toggleReviewed() (tea.Model, tea.Cmd) {
 		// list must not yank the reviewer back to row one). An empty next just
 		// resets to the top, which is right once the view empties out.
 		m.list, cmd = m.list.SetItemsSelecting(m.displayFiles(), next)
-		return m, cmd
-	}
-	if !marked {
-		return m, nil // un-marking: stay on the file the reviewer came back to
+		return m.reselected(), cmd
 	}
 	if next == "" {
 		m.list = m.list.SetFlash("all changes reviewed")
-		return m, nil
+		return m, nil // the reader stays on this preview, so its cursor still holds
 	}
 	m.list, cmd = m.list.SelectKey(next)
-	return m, cmd
+	return m.reselected(), cmd
+}
+
+// reselected drops the hunk cursor after a reselect has swapped the preview out
+// from under it. The incoming SelectionChangedMsg re-resolves it against the new
+// content — but that is a message away, and a *cached* preview paints
+// immediately, so without this the finished file's "hunk 2/2 ✓" would sit over
+// the next file's diff for a frame.
+func (m Model) reselected() Model {
+	m.hunk.spots, m.hunk.at = nil, 0
+	return m.refreshHunkCursor()
+}
+
+// toggleHunkReviewed flips the reviewed mark on the hunk under the cursor and
+// keeps the file's own mark in step with it: marking a file's last open hunk
+// marks the file, so a hunk-by-hunk pass ticks files off the list exactly as `r`
+// does, and reopening any hunk reopens its file, so a ✓ never sits over code the
+// reviewer just put back on the pile. Marking a file with `r` deliberately does
+// not mark its hunks — reviewing a file whole is a claim about the file, not a
+// claim about each hunk in it.
+func (m Model) toggleHunkReviewed() (tea.Model, tea.Cmd) {
+	if m.marks == nil {
+		return m, nil
+	}
+	if m.hunk.at < 1 || m.hunk.at > len(m.hunk.spots) {
+		// A preview opens on the file header, above the first hunk, so there is
+		// nothing under the cursor yet. Start the pass instead of doing nothing:
+		// land on the first hunk that still needs eyes.
+		return m.advanceHunk()
+	}
+	spot := m.hunk.spots[m.hunk.at-1]
+	if spot.key == "" {
+		return m, nil // a hunk rift couldn't identify; navigable, but not markable
+	}
+	marked := m.marks.hunks.Toggle(spot.path, spot.key)
+	hash := m.marks.hashes[spot.path]
+	switch {
+	case marked:
+		if _, all := m.marks.hunks.Reviewed(spot.path, m.marks.keys[spot.path]); all {
+			m.marks.state.Set(spot.path, hash, true)
+		}
+	case m.marks.reviewed(spot.path):
+		m.marks.state.Set(spot.path, hash, false)
+	}
+	// A whole-file preview that just filled up settles like `r` does: on to the
+	// next file needing eyes. In the "All changes" preview the reader isn't on any
+	// one file, so the cursor stays and steps to the next open hunk — which walks
+	// into the following file by itself. (afterFileMarked retitles for itself.)
+	sel, ok := m.list.Selected()
+	if marked && ok && sel.Path == spot.path && m.marks.reviewed(spot.path) {
+		return m.afterFileMarked(spot.path)
+	}
+	m.list = m.list.SetListTitle(m.listTitle())
+	if !marked {
+		return m.refreshHunkCursor(), nil
+	}
+	return m.advanceHunk()
+}
+
+// advanceHunk steps the cursor to the next hunk in this preview that still needs
+// eyes, so a pass reads R-R-R rather than R-}-R-}. It only looks forward:
+// wrapping would march the reviewer back over hunks they deliberately left open.
+func (m Model) advanceHunk() (tea.Model, tea.Cmd) {
+	for i := m.hunk.at; i < len(m.hunk.spots); i++ { // at is 1-based, so this starts past it
+		if s := m.hunk.spots[i]; !m.hunkReviewed(s) {
+			m.hunk.at = i + 1
+			m.list = m.list.ScrollPreviewTo(s.line)
+			return m.refreshHunkCursor(), nil
+		}
+	}
+	m.list = m.list.SetFlash("no unreviewed hunks below")
+	return m.refreshHunkCursor(), nil
 }
 
 // nextUnreviewed returns the path of the first file after cur (wrapping) that
@@ -437,11 +790,19 @@ func (m Model) applyFiles(files []git.ChangedFile, hashes map[string]string) (te
 	if m.marks != nil {
 		m.marks.hashes = hashes
 	}
+	// The changed content re-cuts the hunks. Re-read them explicitly rather than
+	// waiting for a selection change: an in-place refresh that keeps the reader
+	// on an untouched file deliberately doesn't re-request its preview, and the
+	// cursor must not go stale (or dead) just because nothing was re-selected.
+	m.hunk = hunkCursor{}
+	if m.marks != nil {
+		m.marks.keys = nil // re-cut hunks mean re-hashed keys; the old ones name nothing
+	}
 	prevKey := m.list.SelectedKey()
 	m.list = m.list.SetListTitle(m.listTitle())
 	var cmd tea.Cmd
 	m.list, cmd = m.list.SetItemsSelectingStale(m.displayFiles(), prevKey, stale)
-	return m, cmd
+	return m, tea.Batch(cmd, m.loadHunksIfNeeded())
 }
 
 // hashes is the current content-hash map (empty when reviewing is off).
@@ -479,9 +840,11 @@ func staleKeys(old, new []git.ChangedFile, oldHashes, newHashes map[string]strin
 
 func (m Model) View() tea.View { return m.list.TeaView() }
 
-// Filtering and ShowingHelp expose the embedded list's modal state, so a parent
-// embedding this model (e.g. the log drilldown) knows when not to intercept esc.
-func (m Model) Filtering() bool   { return m.list.Filtering() }
+// Capturing, ShowingHelp, and InMode expose the embedded list's modal state to
+// a parent hosting this model (the log drilldown, the files↔tests lens): when
+// not to run its own key handlers, and when not to take esc for itself.
+func (m Model) Capturing() bool   { return m.list.Capturing() }
+func (m Model) InMode() bool      { return m.list.InMode() }
 func (m Model) ShowingHelp() bool { return m.list.ShowingHelp() }
 
 // CancelPreview stops this model's in-flight diff stream — used by the lens

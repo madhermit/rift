@@ -1,16 +1,6 @@
 package review
 
-import (
-	"encoding/json"
-	"os"
-	"path/filepath"
-
-	"github.com/madhermit/rift/internal/git"
-)
-
-// reviewedFile is where the marks live inside the git dir — per worktree, not
-// committed (it's under .git, which git itself never tracks).
-const reviewedFile = "rift/reviewed.json"
+import "github.com/madhermit/rift/internal/git"
 
 // deletedHash is the stable content identity for a deleted file: it has no blob
 // to hash, but should still be reviewable (and tick out of the list), so it gets
@@ -40,23 +30,12 @@ type Reviewed struct {
 }
 
 // LoadReviewed reads the persisted marks for the repo, or an empty set if there
-// are none / the file is unreadable. A corrupt (unparseable) file is moved aside
-// to <file>.corrupt before starting empty, so a truncated write preserves the
-// user's marks for recovery rather than silently dropping them.
+// are none / the file is unreadable.
 func LoadReviewed(repo *git.Repo) *Reviewed {
 	r := &Reviewed{marks: map[string]string{}}
-	p, err := repo.GitPath(reviewedFile)
-	if err != nil {
-		return r
-	}
-	r.path = p
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return r // no marks yet
-	}
-	if err := json.Unmarshal(data, &r.marks); err != nil {
-		r.marks = map[string]string{}
-		_ = os.Rename(p, p+".corrupt")
+	r.path = statePath(repo, reviewedFile)
+	if marks, ok := readMarks[map[string]string](r.path); ok && marks != nil {
+		r.marks = marks
 	}
 	return r
 }
@@ -67,37 +46,40 @@ func (r *Reviewed) IsReviewed(path, currentHash string) bool {
 }
 
 // Toggle flips path's reviewed mark at the given hash and persists, returning the
-// new state. A file with no content hash (e.g. a deletion) can't be marked. It
-// re-reads the on-disk marks first so a concurrent rift pane's marks are merged
-// in rather than clobbered by this write.
+// new state.
 func (r *Reviewed) Toggle(path, currentHash string) bool {
 	r.reload()
-	if r.IsReviewed(path, currentHash) {
-		delete(r.marks, path)
-	} else if currentHash != "" {
+	return r.write(path, currentHash, !r.IsReviewed(path, currentHash))
+}
+
+// Set drives path's mark to a known state rather than flipping it, for a caller
+// that has already decided — the diff screen keeps a file's mark in step with its
+// hunks this way, where a Toggle would invert the very state it just computed.
+func (r *Reviewed) Set(path, currentHash string, on bool) bool {
+	r.reload()
+	return r.write(path, currentHash, on)
+}
+
+// write applies the mark to the already-reloaded marks and persists. A file with
+// no content hash (e.g. a deletion outside the changed set) can't be marked.
+func (r *Reviewed) write(path, currentHash string, on bool) bool {
+	if on && currentHash != "" {
 		r.marks[path] = currentHash
+	} else {
+		delete(r.marks, path)
 	}
 	r.save()
 	return r.IsReviewed(path, currentHash)
 }
 
 // reload merges the current on-disk marks into memory before a mutation, so a
-// concurrent pane's additions survive this instance's next save. A missing or
-// unparseable file leaves the in-memory marks untouched (a save will overwrite it
+// concurrent pane's additions survive this instance's next save. Nothing usable
+// on disk leaves the in-memory marks untouched (a save will overwrite it
 // atomically anyway).
 func (r *Reviewed) reload() {
-	if r.path == "" {
-		return
+	if marks, ok := readMarks[map[string]string](r.path); ok && marks != nil {
+		r.marks = marks
 	}
-	data, err := os.ReadFile(r.path)
-	if err != nil {
-		return
-	}
-	var disk map[string]string
-	if err := json.Unmarshal(data, &disk); err != nil {
-		return
-	}
-	r.marks = disk
 }
 
 // Unreviewed returns the files whose current content isn't marked reviewed,
@@ -123,34 +105,4 @@ func (r *Reviewed) Count(hashes map[string]string) int {
 	return n
 }
 
-// save persists the marks via a temp file + atomic rename, so an interrupted
-// write or a racing pane never leaves a half-written (corrupt) marks file at the
-// destination. Best-effort: a persistence failure leaves the in-memory marks
-// intact for this session.
-func (r *Reviewed) save() {
-	if r.path == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(r.path), 0o755); err != nil {
-		return
-	}
-	data, err := json.MarshalIndent(r.marks, "", "  ")
-	if err != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(r.path), ".reviewed-*")
-	if err != nil {
-		return
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once renamed away
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		return
-	}
-	_ = os.Chmod(tmpName, 0o644)
-	_ = os.Rename(tmpName, r.path)
-}
+func (r *Reviewed) save() { saveMarks(r.path, r.marks) }

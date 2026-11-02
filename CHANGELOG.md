@@ -9,10 +9,44 @@ pre-1.0).
 
 ### Added
 
+- A hunk cursor in the diff preview: `{` / `}` step to the previous / next
+  hunk instead of the previous / next file, and the pane's legend reads
+  `hunk N/M` as you move (free scrolling updates it too). It works with both
+  diff engines and across a whole multi-file "All changes" preview, and falls
+  back to stepping file sections where hunks can't be resolved. This is also
+  the foundation for marking a hunk of concern for an agent — see the design
+  doc's Future Considerations.
+
+- Hunk-level review marks. With the preview focused, `R` marks the hunk under
+  the cursor reviewed and steps to the next one that still needs eyes, so a
+  large file can be walked hunk by hunk; `r` still marks whole files from the
+  list. Marking a file's last open hunk marks the file, so it ticks out of the
+  `U` unreviewed view like any other, and reopening a hunk reopens its file. A
+  file part-way through keeps its status letter but wears the reviewed color, so
+  a started file reads differently from an untouched one. A mark is keyed to the
+  hunk's *body* rather than its `@@` header, so it survives line drift elsewhere
+  in the file and resets only when that hunk itself is rewritten. Marks persist
+  per worktree in `.git/rift/hunks.json`, alongside the file marks.
+
+- Search inside the diff. `/` with the preview focused searches the rendered
+  diff instead of filtering the list; `n` / `N` step through matches (wrapping),
+  and the pane legend reads `match 3/12`. Matching is case-insensitive unless
+  the query carries an uppercase letter. `esc` clears the search — cancelling
+  while still typing puts you back where you started. It keeps finding hits in a
+  diff that is still streaming in.
+
 - Exclusions in the fuzzy filter. A `!`-prefixed term drops anything matching
   it, so `/ model !test` finds the model files without their tests and `/ !lock`
   hides the lockfile. Works on every filterable list — `diff`, `log`, `stash`,
   `stage`, the tests lens, and the menu.
+
+### Fixed
+
+- The diff preview's scroll-to-line anchor (used by the tests lens) skipped
+  rows whose line number had a different digit width from the file's most
+  common one — difftastic's inline layout left-aligns line numbers while
+  side-by-side right-aligns them, and only the latter was read correctly. Any
+  diff spanning a 9→10 or 99→100 boundary could anchor a few rows off.
 
 ## [0.7.0] - 2026-07-16
 
