@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/madhermit/rift/internal/diff"
 )
 
 // cellPos is a position in the preview's display lines: a line index and a
@@ -19,14 +20,39 @@ func (p cellPos) before(q cellPos) bool {
 // dragSelect is a mouse text selection over display lines, running from the cell
 // pressed to the cell under the pointer, both inclusive. Columns are cells of the
 // rendered (hardwrapped) row, so what is highlighted is exactly what gets copied.
+// Where the diff's layout is known the selection keeps to source text: it skips line
+// numbers and stays on the side of a split it was pressed on.
 type dragSelect struct {
 	anchor, end cellPos
-	pressed     bool // the button went down on selectable content
-	dragging    bool // the pointer has left the pressed cell at least once
+	pressed     bool       // the button went down on selectable content
+	dragging    bool       // the pointer has left the pressed cell at least once
+	layout      []diff.Row // parallel to the display lines
+	side        int        // which of a split row's columns the press landed in
 }
 
-func (d *dragSelect) press(p cellPos) {
-	*d = dragSelect{anchor: p, end: p, pressed: true}
+func (d *dragSelect) press(p cellPos, layout []diff.Row) {
+	*d = dragSelect{anchor: p, end: p, pressed: true, layout: layout}
+	if p.Line < len(layout) {
+		for i, c := range layout[p.Line].Columns {
+			if p.Col < c.End {
+				d.side = i
+				break
+			}
+			d.side = i
+		}
+	}
+}
+
+// column is the selectable span of a line of the given width: its text on the
+// selection's side, or the whole line when its layout isn't known. A one-column row
+// inside a selection begun on a split's right side still has its one column.
+func (d dragSelect) column(line, width int) diff.Column {
+	if line < len(d.layout) {
+		if cols := d.layout[line].Columns; len(cols) > 0 {
+			return cols[min(d.side, len(cols)-1)]
+		}
+	}
+	return diff.Column{End: width}
 }
 
 func (d *dragSelect) extend(p cellPos) {
@@ -46,21 +72,23 @@ func (d dragSelect) ordered() (from, to cellPos) {
 }
 
 // span is the half-open cell range the selection covers on a line of the given
-// width: the partial ends on its first and last lines, whole lines between.
+// width: the partial ends on its first and last lines, the whole column between.
 func (d dragSelect) span(line, width int) (left, right int) {
 	from, to := d.ordered()
-	left, right = 0, width
+	c := d.column(line, width)
+	left, right = c.Start, c.End
 	if line == from.Line {
-		left = from.Col
+		left = max(left, from.Col)
 	}
 	if line == to.Line {
-		right = to.Col + 1
+		right = min(right, to.Col+1)
 	}
 	return left, right
 }
 
 // text is the selection as plain text: ANSI-stripped with each row's trailing
-// padding trimmed. Empty for a selection of nothing but blanks.
+// padding trimmed, a wrapped source line back in one piece, and rows where this side
+// of a split has nothing left out. Empty for a selection of nothing but blanks.
 func (d dragSelect) text(lines []string) string {
 	if len(lines) == 0 {
 		return ""
@@ -70,10 +98,23 @@ func (d dragSelect) text(lines []string) string {
 	rows := make([]string, 0, last-first+1)
 	for i := first; i <= last; i++ {
 		row := ansi.Strip(lines[i])
-		left, right := d.span(i, ansi.StringWidth(row)+strings.Count(row, "\t")*viewportTabCells)
-		rows = append(rows, strings.TrimRight(cutCells(row, left, right), " "))
+		width := ansi.StringWidth(row) + strings.Count(row, "\t")*viewportTabCells
+		c := d.column(i, width)
+		if c.Missing {
+			continue
+		}
+		left, right := d.span(i, width)
+		text := cutCells(row, left, right)
+		if c.Continues && len(rows) > 0 {
+			rows[len(rows)-1] += text
+		} else {
+			rows = append(rows, text)
+		}
 	}
-	text := strings.Join(rows, "\n")
+	for i := range rows {
+		rows[i] = strings.TrimRight(rows[i], " ")
+	}
+	text := strings.Trim(strings.Join(rows, "\n"), "\n") // an end in a gutter adds nothing
 	if strings.TrimSpace(text) == "" {
 		return ""
 	}
@@ -112,8 +153,14 @@ func (d dragSelect) highlight(body string, yOffset, xOffset int) string {
 		if line < from.Line || line > to.Line {
 			continue
 		}
-		left, right := d.span(line, ansi.StringWidth(row)+xOffset)
-		rows[i] = reverseSpan(row, left-xOffset, right-xOffset)
+		width := ansi.StringWidth(row) + xOffset
+		if d.column(line, width).Missing {
+			continue
+		}
+		left, right := d.span(line, width)
+		if left < right {
+			rows[i] = reverseSpan(row, left-xOffset, right-xOffset)
+		}
 	}
 	return strings.Join(rows, "\n")
 }

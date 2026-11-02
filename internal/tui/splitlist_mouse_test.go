@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/madhermit/rift/internal/diff"
 )
 
 func testList(items []string) SplitList[string] {
@@ -280,5 +281,60 @@ func TestWheelExtendsDrag(t *testing.T) {
 	}
 	if !m.drag.dragging || m.drag.end.Line != m.viewport.YOffset() {
 		t.Errorf("the selection should follow the scroll: end line %d, offset %d", m.drag.end.Line, m.viewport.YOffset())
+	}
+}
+
+func TestDragSelectKeepsToSourceText(t *testing.T) {
+	const width = 40
+	split := func(left, right string) string { return left + strings.Repeat(" ", 20-len(left)) + right }
+	lines := []string{
+		"a.go --- Go",
+		split("10 func old() {", "10 func new() {"),
+		split("11     long left xx", " . "),
+		split("..", "11     added"),
+		split(" . wrapped tail", ".. "),
+		split("12 }", "12 }"),
+	}
+	layout := diff.Layout(lines, width)
+	const rightText = 23 // the first cell after the right side's number
+	tests := []struct {
+		name       string
+		anchor, to cellPos
+		want       string
+	}{
+		{"pressed in a gutter starts at the text", cellPos{1, 0}, cellPos{1, 6}, "func"},
+		{"many rows, left side only", cellPos{1, 3}, cellPos{5, 3}, "func old() {\n    long left xxwrapped tail\n}"},
+		{"many rows, right side only", cellPos{1, rightText}, cellPos{5, rightText}, "func new() {\n    added\n}"},
+		{"a drag across the split stops at it", cellPos{1, 3}, cellPos{1, 35}, "func old() {"},
+		{"ending in the gutter takes nothing from that row", cellPos{1, 3}, cellPos{5, 1}, "func old() {\n    long left xxwrapped tail"},
+		{"only a gutter copies nothing", cellPos{1, 0}, cellPos{1, 2}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var d dragSelect
+			d.press(tt.anchor, layout)
+			d.extend(tt.to)
+			if got := d.text(lines); got != tt.want {
+				t.Errorf("text = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	// The highlight covers what would be copied: nothing of the other side.
+	var d dragSelect
+	d.press(cellPos{1, rightText}, layout)
+	d.extend(cellPos{5, rightText})
+	rows := strings.Split(d.highlight(strings.Join(lines, "\n"), 0, 0), "\n")
+	if strings.Contains(rows[0], "\x1b[7m") {
+		t.Errorf("a row above the selection is highlighted: %q", rows[0])
+	}
+	if !strings.Contains(rows[1], "\x1b[7mfunc new") || strings.Contains(rows[1], "\x1b[7m10") {
+		t.Errorf("the highlight should start at the text, not its number: %q", rows[1])
+	}
+	if !strings.HasPrefix(rows[1], "10 func old") {
+		t.Errorf("the other side should be left alone: %q", rows[1])
+	}
+	if strings.Contains(rows[4], "\x1b[7m") {
+		t.Errorf("a row with nothing on this side should not highlight: %q", rows[4])
 	}
 }

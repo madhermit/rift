@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/madhermit/rift/internal/diff"
 )
 
 // SelectionChangedMsg is emitted by a SplitList on every selection change so the
@@ -779,7 +780,7 @@ func (m SplitList[T]) handleMouse(msg tea.MouseMsg) (SplitList[T], tea.Cmd) {
 			m.flash = "" // a new gesture retires the last "copied …"
 			if len(m.vim.Lines()) > 0 {
 				p, _ := m.previewCellAt(pos.X, pos.Y)
-				m.drag.press(p)
+				m.drag.press(p, m.previewLayout())
 			}
 			return m, nil
 		}
@@ -839,10 +840,23 @@ func (m SplitList[T]) previewCellAt(x, y int) (p cellPos, dir int) {
 	}, dir
 }
 
+// previewLayout locates the source text in the preview's rows for a selection.
+func (m SplitList[T]) previewLayout() []diff.Row {
+	lines := m.vim.Lines()
+	stripped := make([]string, len(lines))
+	for i, l := range lines {
+		stripped[i] = ansi.Strip(l)
+	}
+	return diff.Layout(stripped, m.viewport.Width())
+}
+
 // extendDrag moves the selection's end to the cell at a screen position, starting
 // the edge-scroll tick if the pointer is past the pane.
 func (m *SplitList[T]) extendDrag(x, y int) tea.Cmd {
 	p, dir := m.previewCellAt(x, y)
+	if len(m.drag.layout) != len(m.vim.Lines()) {
+		m.drag.layout = m.previewLayout() // the preview streamed more in mid-drag
+	}
 	m.drag.extend(p)
 	m.edgeDrag.x, m.edgeDrag.y, m.edgeDrag.dir = x, y, dir
 	if dir == 0 || m.edgeDrag.ticking {
