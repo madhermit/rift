@@ -243,7 +243,7 @@ Tell your agent: _"Run `rift skill path` and follow that skill to review this ch
 
 ## Status
 
-The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.7.0**; anything under `[Unreleased]` in the changelog arrives in the next release), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, and hunk notes — marking a hunk of concern for an agent to flesh out, and an agent annotating its own changes for you, file-based in the same store as reviewed marks (no daemon). The diff preview's hunk cursor (`{` / `}`) is the first piece of that.
+The core consumption commands — `diff`, `log`, `stash`, `stage` — are implemented and meant to be a daily driver (latest tag **v0.8.0**; anything under `[Unreleased]` in the changelog arrives in the next release), with ongoing work on the diff/log reading experience: colored file icons, scrollbars, sticky file headers, and a structural fallback when difftastic is absent. Planned next: config, local code review, and hunk notes — marking a hunk of concern for an agent to flesh out, and an agent annotating its own changes for you, file-based in the same store as reviewed marks (no daemon). The diff preview's hunk cursor (`{` / `}`) is the first piece of that.
 
 Worktree and branch _management_ are intentionally out of scope — rift stays worktree-aware and pairs with [worktrunk](https://github.com/max-sixty/worktrunk).
 
