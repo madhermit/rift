@@ -2,24 +2,18 @@ package tui
 
 import "github.com/madhermit/rift/internal/diff"
 
-// EngineToggle pairs the primary diff engine (difftastic when available) with
-// git's own diff as the alternate, cycled with `e`. When the primary already
-// is the git engine (difftastic unavailable) there is nothing to toggle.
+// EngineToggle rings the primary diff engine (auto when difftastic is available)
+// with its alternates, cycled with `e`: difftastic and git each forced for every
+// file. When the primary already is the git engine (difftastic unavailable) there
+// is nothing to toggle.
 type EngineToggle struct {
 	engines []diff.Engine
 	idx     int
 }
 
-// NewEngineToggle builds the engine ring starting from the given primary
-// engine. An alternate matching the primary isn't added twice, so a ring
-// seeded with an already-cycled engine (a log drilldown passes the active
-// engine) stays duplicate-free.
+// NewEngineToggle builds the engine ring starting from the given primary engine.
 func NewEngineToggle(engine diff.Engine) EngineToggle {
-	engines := []diff.Engine{engine}
-	if alt := diff.NewPlainEngine(); alt.Name() != engine.Name() {
-		engines = append(engines, alt)
-	}
-	return EngineToggle{engines: engines}
+	return EngineToggle{engines: append([]diff.Engine{engine}, diff.Alternates(engine)...)}
 }
 
 // Engine is the active engine — what previews are rendered with.

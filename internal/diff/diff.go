@@ -119,7 +119,7 @@ type Engine interface {
 func NewEngine() Engine {
 	path, err := tooling.FindOrInstallDifft()
 	if err == nil && path != "" {
-		return &difftasticEngine{path: path}
+		return &autoEngine{structural: &difftasticEngine{path: path}, plain: &fallbackEngine{}}
 	}
 	return &fallbackEngine{}
 }

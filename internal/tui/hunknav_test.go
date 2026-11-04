@@ -187,3 +187,13 @@ func TestSectionRange(t *testing.T) {
 		})
 	}
 }
+
+// The auto engine puts a note above a file it gave to git: the hunk is still found
+// by its own header, not pushed off by the extra row.
+func TestHunkOffsetsPastEngineNote(t *testing.T) {
+	lines := []string{"git-diff: difftastic has no parser for this file", "diff --git a/b.md b/b.md", "@@ -1 +1 @@", "-a", "+b"}
+	got := HunkOffsets(lines, []diff.Hunk{{Header: "@@ -1 +1 @@", NewStart: 1}})
+	if len(got) != 1 || got[0] != 2 {
+		t.Errorf("HunkOffsets = %v, want [2]", got)
+	}
+}

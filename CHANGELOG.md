@@ -7,6 +7,13 @@ pre-1.0).
 
 ## [Unreleased]
 
+### Added
+
+- An `auto` diff engine, now the default: each file uses difftastic unless it has
+  nothing structural to offer — no parser for the file, a file too large, complex
+  or broken to parse, or a formatting-only change — where it uses git's diff, with
+  a note above the file saying why. `e` cycles `auto` → `difftastic` → `git-diff`.
+
 ## [0.8.0] - 2026-11-02
 
 ### Added

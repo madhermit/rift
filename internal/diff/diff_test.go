@@ -124,8 +124,8 @@ func TestBuildGitDiffArgs(t *testing.T) {
 func TestNewEngine(t *testing.T) {
 	engine := NewEngine()
 	name := engine.Name()
-	if name != "difftastic" && name != "git-diff" {
-		t.Errorf("NewEngine().Name() = %q, want \"difftastic\" or \"git-diff\"", name)
+	if name != "auto" && name != "git-diff" {
+		t.Errorf("NewEngine().Name() = %q, want \"auto\" or \"git-diff\"", name)
 	}
 }
 

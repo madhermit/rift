@@ -169,7 +169,7 @@ Every work screen (`diff`, `log`, `stash`, `stage`, and the tests lens) shares t
 | `stage`    | `s` stage · `u` unstage · `a` stage all · `o` open in `$EDITOR` · `e` engine (fixed layout, no `\`)                                                         |
 | tests lens | `t` back to files · `s` toggle staged · `w` toggle watch · `\` layout · `e` engine · `o` open the test                                                      |
 
-The engine and layout you pick carry across `t` and in and out of an opened commit or stash.
+The engine starts on `auto`: difftastic per file, switching to git's diff (with a note saying why) where difftastic has nothing structural to offer — no parser, a file too large or too broken to parse, or a formatting-only change. `e` cycles `auto` → `difftastic` → `git-diff`. The engine and layout you pick carry across `t` and in and out of an opened commit or stash.
 
 The `menu` launchpad is a plain list: `⏎` selects, `/` filters, and `esc`/`q` quit. Destructive actions (`stash` pop/drop, `log` cherry-pick/revert) confirm inline with `y`/`n`.
 
