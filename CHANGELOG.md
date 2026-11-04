@@ -7,6 +7,8 @@ pre-1.0).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-04
+
 ### Added
 
 - An `auto` diff engine, now the default: each file uses difftastic unless it has
@@ -445,7 +447,8 @@ tightened around what it does best.
 
 - The `branch` command. rift no longer manages branches or worktrees.
 
-[Unreleased]: https://github.com/madhermit/rift/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/madhermit/rift/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/madhermit/rift/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/madhermit/rift/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/madhermit/rift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/madhermit/rift/compare/v0.5.0...v0.6.0
